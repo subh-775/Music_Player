@@ -132,6 +132,73 @@ export async function getStreamInfo(
   );
 }
 
+// ─── Collections (album / playlist) ─────────────────────────────────────────
+
+export type Collection = {name: string; tracks: Track[]; error?: string};
+
+/** Open an album or playlist by its source page URL. */
+export async function getCollection(url: string): Promise<Collection> {
+  const data = await apiGet<Collection>(
+    `/playlist?url=${encodeURIComponent(url)}`,
+  );
+  return {
+    name: data.name || '',
+    tracks: Array.isArray(data.tracks) ? data.tracks : [],
+    error: data.error,
+  };
+}
+
+// ─── Library (downloaded / offline) ─────────────────────────────────────────
+
+export type LocalLibrary = {tracks: Track[]; download_dir: string};
+
+/** Offline library, rebuilt from the tags on disk — disk is the source of
+ *  truth, so files added or removed outside the app are picked up. */
+export async function getLocalLibrary(): Promise<LocalLibrary> {
+  const data = await apiGet<Partial<LocalLibrary>>('/downloads/local');
+  return {
+    tracks: Array.isArray(data.tracks) ? data.tracks : [],
+    download_dir: data.download_dir || '',
+  };
+}
+
+// ─── Settings ───────────────────────────────────────────────────────────────
+
+export type DownloadsInfo = {
+  download_dir?: string;
+  path?: string;
+  using_fallback?: boolean;
+  custom?: boolean;
+};
+
+export const getDownloadsInfo = () => apiGet<DownloadsInfo>('/downloads/info');
+
+export type SourceStatus = {
+  status: string;
+  type: string;
+  quality: string;
+  error?: string;
+};
+
+export const getSourcesStatus = () =>
+  apiGet<Record<string, SourceStatus>>('/sources/status');
+
+export type YouTubeExperimental = {supported: boolean; enabled: boolean};
+
+export const getYouTubeExperimental = () =>
+  apiGet<YouTubeExperimental>('/youtube/experimental');
+
+export async function setYouTubeExperimental(
+  enabled: boolean,
+): Promise<{ok: boolean; enabled: boolean; error?: string}> {
+  const res = await fetch(apiUrl('/youtube/experimental'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled}),
+  });
+  return (await res.json()) as {ok: boolean; enabled: boolean; error?: string};
+}
+
 /** mm:ss for a duration in milliseconds. */
 export function formatDuration(ms?: number): string {
   if (!ms || ms <= 0) {
