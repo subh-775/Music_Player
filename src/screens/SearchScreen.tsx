@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Keyboard,
   StyleSheet,
   Text,
@@ -11,17 +10,11 @@ import {
   View,
 } from 'react-native';
 import {C, S, T} from '../theme';
-import {formatDuration, search, type Track} from '../backend';
+import {search, type Track} from '../backend';
+import {TrackRow} from '../components/TrackRow';
 
-type Props = {onPickTrack: (t: Track) => void};
+type Props = {onPickTrack: (t: Track, context: Track[]) => void};
 
-/** Brand tint per source, so where a result came from reads at a glance. */
-const SOURCE_TINT: Record<string, string> = {
-  jiosaavn: '#2bd17e',
-  soundcloud: '#ff7733',
-  youtube: '#ff4444',
-  youtube_music: '#ff4444',
-};
 
 export function SearchScreen({onPickTrack}: Props) {
   const [query, setQuery] = useState('');
@@ -108,39 +101,13 @@ export function SearchScreen({onPickTrack}: Props) {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
         renderItem={({item}) => (
-          <TrackRow track={item} onPress={() => onPickTrack(item)} />
+          <TrackRow track={item} onPress={() => onPickTrack(item, results)} />
         )}
       />
     </View>
   );
 }
 
-function TrackRow({track, onPress}: {track: Track; onPress: () => void}) {
-  const source = track.playable_source || track.primary_source || '';
-  const tint = SOURCE_TINT[source] || C.faint;
-  const dur = formatDuration(track.duration_ms);
-  return (
-    <TouchableOpacity style={styles.row} activeOpacity={0.65} onPress={onPress}>
-      {track.artwork_url ? (
-        <Image source={{uri: track.artwork_url}} style={styles.thumb} />
-      ) : (
-        <View style={[styles.thumb, styles.thumbFallback]} />
-      )}
-      <View style={styles.rowText}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {track.title}
-        </Text>
-        <View style={styles.metaLine}>
-          {!!source && <View style={[styles.dot, {backgroundColor: tint}]} />}
-          <Text style={styles.rowSub} numberOfLines={1}>
-            {track.artist}
-            {dur ? `  ·  ${dur}` : ''}
-          </Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
 
 const styles = StyleSheet.create({
   wrap: {flex: 1},
@@ -183,18 +150,4 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
   list: {paddingTop: 10, paddingBottom: 24},
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: S.gutter,
-    paddingVertical: 8,
-    gap: 12,
-  },
-  thumb: {width: 52, height: 52, borderRadius: 6, backgroundColor: C.surface},
-  thumbFallback: {backgroundColor: C.surfaceHi},
-  rowText: {flex: 1, minWidth: 0},
-  rowTitle: {...T.body, color: C.text},
-  metaLine: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
-  dot: {width: 6, height: 6, borderRadius: 3},
-  rowSub: {...T.sub, color: C.sub, flex: 1},
 });

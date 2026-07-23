@@ -11,7 +11,11 @@ import {C, S, T} from '../theme';
 import {getLocalLibrary, type Track} from '../backend';
 import {TrackRow} from '../components/TrackRow';
 
-export function LibraryScreen({onPickTrack}: {onPickTrack: (t: Track) => void}) {
+export function LibraryScreen({
+  onPickTrack,
+}: {
+  onPickTrack: (t: Track, context: Track[]) => void;
+}) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [dir, setDir] = useState('');
   const [busy, setBusy] = useState(true);
@@ -78,7 +82,7 @@ export function LibraryScreen({onPickTrack}: {onPickTrack: (t: Track) => void}) 
             />
           }
           renderItem={({item}) => (
-            <TrackRow track={item} onPress={() => onPickTrack(item)} />
+            <TrackRow track={item} onPress={() => onPickTrack(item, tracks)} />
           )}
         />
       )}

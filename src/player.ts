@@ -48,13 +48,21 @@ export async function setupPlayer(): Promise<boolean> {
     return false;
   }
   try {
-    await TrackPlayer.setupPlayer({autoHandleInterruptions: true});
+    await TrackPlayer.setupPlayer({
+      // Android handles audio focus for us: a call or another app ducks/pauses
+      // us and we resume after. Doing this natively is what keeps Bluetooth
+      // hand-offs in sync instead of the app and the headset disagreeing.
+      autoHandleInterruptions: true,
+    });
     await TrackPlayer.updateOptions({
       android: {
-        // Keep playing when the app is swiped away — a music app that dies with
-        // the task switcher is the thing everyone complains about.
+        // Swiping the app away STOPS playback and clears the notification.
+        // ContinuePlayback left an orphan notification behind when Android
+        // killed the process, with no way to dismiss it. Backgrounding the app
+        // (the normal case) still keeps playing — only an explicit swipe-away
+        // stops it, which is what people actually expect that gesture to mean.
         appKilledPlaybackBehavior:
-          AppKilledPlaybackBehavior.ContinuePlayback,
+          AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
       },
       capabilities: [
         Capability.Play,
@@ -69,6 +77,12 @@ export async function setupPlayer(): Promise<boolean> {
         Capability.Play,
         Capability.Pause,
         Capability.SkipToNext,
+      ],
+      notificationCapabilities: [
+        Capability.Play,
+        Capability.Pause,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
       ],
       progressUpdateEventInterval: 1,
     });
@@ -91,32 +105,127 @@ export function engineAvailable(): boolean | null {
   return available;
 }
 
-/** Replace the queue with this track and play it. */
-export async function playTrack(track: Track, bitrate = 320): Promise<void> {
+/** Shape a backend Track for the audio engine. Returns null if unplayable. */
+function toQueueItem(track: Track, bitrate: number) {
   const url = streamUrlFor(track, bitrate);
   if (!url) {
-    throw new Error('This track has no playable source.');
+    return null;
   }
-  if (!(await setupPlayer())) {
-    throw new Error(
-      'The audio engine is missing from this build — install the newest APK.',
-    );
-  }
-  await TrackPlayer.reset();
-  await TrackPlayer.add({
+  return {
     id: `${track.title}-${track.artist}`,
     url,
     title: track.title,
     artist: track.artist,
     artwork: track.artwork_url,
     duration: track.duration_ms ? track.duration_ms / 1000 : undefined,
-  });
+  };
+}
+
+async function requireEngine(): Promise<void> {
+  if (!(await setupPlayer())) {
+    throw new Error(
+      'The audio engine is missing from this build — install the newest APK.',
+    );
+  }
+}
+
+/**
+ * Play `track`, queueing the list it came from so next/previous work.
+ *
+ * Everything playable in `context` is queued (not just the one track), because
+ * a music app where "next" does nothing is the thing that feels broken. Tracks
+ * with no resolvable source are dropped rather than left as dead queue entries.
+ */
+export async function playTrack(
+  track: Track,
+  context?: Track[],
+  bitrate = 320,
+): Promise<void> {
+  await requireEngine();
+
+  const list = context?.length ? context : [track];
+  const items = list
+    .map(t => ({t, q: toQueueItem(t, bitrate)}))
+    .filter((x): x is {t: Track; q: NonNullable<typeof x.q>} => x.q !== null);
+
+  if (!items.length) {
+    throw new Error('This track has no playable source.');
+  }
+
+  // Find where the tapped track landed after unplayables were dropped.
+  let startAt = items.findIndex(
+    x => x.t.title === track.title && x.t.artist === track.artist,
+  );
+  if (startAt < 0) {
+    startAt = 0;
+  }
+
+  await TrackPlayer.reset();
+  await TrackPlayer.add(items.map(x => x.q));
+  if (startAt > 0) {
+    await TrackPlayer.skip(startAt);
+  }
   await TrackPlayer.play();
 }
 
+export async function skipNext(): Promise<void> {
+  try {
+    await TrackPlayer.skipToNext();
+  } catch {
+    /* end of queue */
+  }
+}
+
+/** Restart the track first; only jump back when already near the start — the
+ *  behaviour every other player has, so one stray tap can't lose your place. */
+export async function skipPrevious(): Promise<void> {
+  try {
+    const pos = await TrackPlayer.getPosition();
+    if (pos > 3) {
+      await TrackPlayer.seekTo(0);
+      return;
+    }
+    await TrackPlayer.skipToPrevious();
+  } catch {
+    await TrackPlayer.seekTo(0);
+  }
+}
+
+/** Shuffle everything after the current track, leaving what's playing alone. */
+export async function shuffleQueue(): Promise<void> {
+  const queue = await TrackPlayer.getQueue();
+  const index = await TrackPlayer.getActiveTrackIndex();
+  if (queue.length < 3 || index == null) {
+    return;
+  }
+  const rest = queue.slice(index + 1);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  await TrackPlayer.removeUpcomingTracks();
+  await TrackPlayer.add(rest);
+}
+
+export async function setRepeat(mode: RepeatMode): Promise<void> {
+  await TrackPlayer.setRepeatMode(mode);
+}
+
+/**
+ * Pause/resume from the engine's own state, so the UI, the notification and a
+ * headset button can never disagree about what a press should do.
+ *
+ * Buffering/Loading count as "already going" — otherwise tapping during the
+ * spin-up between tracks would start a SECOND play and leave the button
+ * showing the opposite of reality.
+ */
 export async function togglePlay(): Promise<void> {
-  const state = (await TrackPlayer.getPlaybackState()).state;
-  if (state === State.Playing) {
+  const {state} = await TrackPlayer.getPlaybackState();
+  const active =
+    state === State.Playing ||
+    state === State.Buffering ||
+    state === State.Loading;
+  if (active) {
     await TrackPlayer.pause();
   } else {
     await TrackPlayer.play();
@@ -135,4 +244,4 @@ export async function seekTo(seconds: number): Promise<void> {
   await TrackPlayer.seekTo(seconds);
 }
 
-export {TrackPlayer, State, Event};
+export {TrackPlayer, State, Event, RepeatMode};

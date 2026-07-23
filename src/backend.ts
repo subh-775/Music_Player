@@ -132,6 +132,29 @@ export async function getStreamInfo(
   );
 }
 
+// ─── Lyrics ─────────────────────────────────────────────────────────────────
+
+export type SyncedLine = {time: number; text: string};
+export type Lyrics = {
+  plain?: string;
+  synced?: SyncedLine[];
+  source?: string;
+};
+
+/** Synced lyrics (lrclib) with a plain-text fallback. The backend gates matches
+ *  on artist + duration, so passing duration materially improves accuracy. */
+export async function getLyrics(
+  title: string,
+  artist: string,
+  durationMs?: number,
+): Promise<Lyrics> {
+  const q = new URLSearchParams({title, artist});
+  if (durationMs) {
+    q.set('duration', String(Math.round(durationMs / 1000)));
+  }
+  return apiGet<Lyrics>(`/lyrics?${q.toString()}`);
+}
+
 // ─── Collections (album / playlist) ─────────────────────────────────────────
 
 export type Collection = {name: string; tracks: Track[]; error?: string};

@@ -24,7 +24,7 @@ export function CollectionScreen({
 }: {
   item: HomeItem | null;
   onClose: () => void;
-  onPickTrack: (t: Track) => void;
+  onPickTrack: (t: Track, context: Track[]) => void;
 }) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [busy, setBusy] = useState(false);
@@ -97,7 +97,7 @@ export function CollectionScreen({
             </View>
           }
           renderItem={({item: t, index}) => (
-            <TrackRow track={t} index={index} onPress={() => onPickTrack(t)} />
+            <TrackRow track={t} index={index} onPress={() => onPickTrack(t, tracks)} />
           )}
           ListEmptyComponent={
             busy ? (
