@@ -73,18 +73,10 @@ import {
 import {useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
 import {QualityBadge, SourceBadge} from '../components/Badges';
+import {Seekbar} from '../components/Seekbar';
+import {SeekPeek} from '../components/SeekPeek';
 import {QueuePane} from './QueueScreen';
 import {toast} from '../toast';
-
-function clock(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) {
-    return '0:00';
-  }
-  const total = Math.floor(sec);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s < 10 ? '0' : ''}${s}`;
-}
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
 
@@ -100,10 +92,12 @@ export function PlayerScreen({
   visible,
   onClose,
   onAddToPlaylist,
+  onOpenArtist,
 }: {
   visible: boolean;
   onClose: () => void;
   onAddToPlaylist: (track: Track) => void;
+  onOpenArtist: (credit: string) => void;
 }) {
   const active = useActiveTrack();
   const {state} = usePlaybackState() as {state?: State};
@@ -122,9 +116,11 @@ export function PlayerScreen({
 
   // Double-tap seek: consecutive taps on the same side stack (10s, 20s, 30s…),
   // the way YouTube does, so a quick triple-tap jumps further.
-  const [seekFlash, setSeekFlash] = useState<{side: 1 | -1; secs: number} | null>(
-    null,
-  );
+  const [seekFlash, setSeekFlash] = useState<{
+    side: 1 | -1;
+    secs: number;
+    nonce: number;
+  } | null>(null);
   const tapRef = useRef<{t: number; side: 1 | -1; secs: number} | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -137,11 +133,13 @@ export function PlayerScreen({
       tapRef.current = {t: now, side, secs: stacked};
 
       seekTo(Math.max(0, position + side * stacked));
-      setSeekFlash({side, secs: stacked});
+      // nonce changes every tap, which is what replays the animation when the
+      // side and the total happen to be unchanged.
+      setSeekFlash({side, secs: stacked, nonce: now});
       if (flashTimer.current) {
         clearTimeout(flashTimer.current);
       }
-      flashTimer.current = setTimeout(() => setSeekFlash(null), 650);
+      flashTimer.current = setTimeout(() => setSeekFlash(null), 800);
     },
     [position],
   );
@@ -244,7 +242,6 @@ export function PlayerScreen({
 
   const playing = state === State.Playing;
   const busy = state === State.Buffering || state === State.Loading;
-  const pct = duration > 0 ? Math.min(1, position / duration) : 0;
   const artwork = track ? getBestArtworkUrl(track) : String(active.artwork ?? '');
   const title = cleanText(String(active.title ?? ''));
   const artists = splitArtists(String(active.artist ?? '')).join(', ');
@@ -301,20 +298,11 @@ export function PlayerScreen({
               </View>
 
               {!!seekFlash && (
-                <View
-                  style={[
-                    styles.flash,
-                    seekFlash.side === 1 ? styles.flashRight : styles.flashLeft,
-                  ]}
-                  pointerEvents="none">
-                  <Text style={styles.flashText}>
-                    {seekFlash.side === 1 ? '▶▶' : '◀◀'}
-                  </Text>
-                  <Text style={styles.flashSecs}>
-                    {seekFlash.side === 1 ? '+' : '−'}
-                    {seekFlash.secs} seconds
-                  </Text>
-                </View>
+                <SeekPeek
+                  side={seekFlash.side}
+                  seconds={seekFlash.secs}
+                  nonce={seekFlash.nonce}
+                />
               )}
             </View>
           )}
@@ -328,9 +316,16 @@ export function PlayerScreen({
                 {title}
               </Text>
               <View style={styles.creditRow}>
-                <Text style={styles.artist} numberOfLines={1}>
-                  {artists}
-                </Text>
+                {/* The WHOLE credit is one target. A single name opens that
+                    profile directly; several open the picker. */}
+                <TouchableOpacity
+                  onPress={() => onOpenArtist(String(active.artist ?? ''))}
+                  activeOpacity={0.6}
+                  style={styles.artistTap}>
+                  <Text style={styles.artist} numberOfLines={1}>
+                    {artists}
+                  </Text>
+                </TouchableOpacity>
                 <SourceBadge track={track} />
                 <QualityBadge track={track} />
               </View>
@@ -373,16 +368,7 @@ export function PlayerScreen({
             </View>
           </View>
 
-          {/* Seek */}
-          <View style={styles.seek}>
-            <View style={styles.seekTrack}>
-              <View style={[styles.seekFill, {width: `${pct * 100}%`}]} />
-            </View>
-            <View style={styles.times}>
-              <Text style={styles.time}>{clock(position)}</Text>
-              <Text style={styles.time}>{clock(duration)}</Text>
-            </View>
-          </View>
+          <Seekbar position={position} duration={duration} onSeek={seekTo} />
 
           {/* Pane toggles left, audio output right — above the transport so
               the play controls never shift. */}
@@ -615,26 +601,14 @@ const styles = StyleSheet.create({
   artFallback: {backgroundColor: C.surfaceHi},
   tapZones: {...StyleSheet.absoluteFillObject, flexDirection: 'row'},
   tapZone: {flex: 1},
-  flash: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: '46%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  flashLeft: {left: 0, borderTopRightRadius: 999, borderBottomRightRadius: 999},
-  flashRight: {right: 0, borderTopLeftRadius: 999, borderBottomLeftRadius: 999},
-  flashText: {color: C.text, fontSize: 18, letterSpacing: 2},
-  flashSecs: {color: C.text, fontSize: 13, fontWeight: '600', marginTop: 4},
 
   controls: {paddingHorizontal: 24, paddingTop: 12, paddingBottom: 34},
   metaRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
   meta: {flex: 1, minWidth: 0},
   title: {fontSize: 20, fontWeight: '800', color: C.text, letterSpacing: -0.3},
   creditRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3},
-  artist: {...T.sub, color: C.sub, flexShrink: 1, fontSize: 13},
+  artistTap: {flexShrink: 1, minWidth: 0},
+  artist: {...T.sub, color: C.sub, fontSize: 13},
   actions: {flexDirection: 'row', alignItems: 'center', gap: 2, paddingTop: 2},
   actionBtn: {padding: 7},
   plusRing: {
@@ -647,16 +621,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  seek: {marginTop: 16},
-  seekTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    overflow: 'hidden',
-  },
-  seekFill: {height: '100%', backgroundColor: C.text, borderRadius: 2},
-  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
-  time: {color: C.sub, fontSize: 11, fontVariant: ['tabular-nums']},
 
   paneRow: {
     flexDirection: 'row',

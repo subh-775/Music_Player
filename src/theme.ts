@@ -9,7 +9,10 @@ export const C = {
   text: '#f4f5f7',
   sub: '#9096a2',
   faint: '#5c626e',
-  accent: '#f5a623', // ember
+  /** Brand green. `accent` is the interactive/active colour; `accentBright` is
+   *  for a filled glyph that needs to read against a dark surface. */
+  accent: '#1db954',
+  accentBright: '#1ed760',
   danger: '#ff6b6b',
   border: 'rgba(255,255,255,0.08)',
 };

@@ -40,11 +40,13 @@ export function CollectionScreen({
   collection,
   onClose,
   onPlay,
+  onMenu,
   onChanged,
 }: {
   collection: Collection;
   onClose: () => void;
   onPlay: (track: Track, context: Track[]) => void;
+  onMenu?: (track: Track, from?: {playlistId?: string; playlistName?: string}) => void;
   /** Downloads were deleted — the owner should rescan disk. */
   onChanged?: () => void;
 }) {
@@ -55,6 +57,11 @@ export function CollectionScreen({
   const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
   const selecting = selected !== null;
   const canSelect = collection.kind === 'downloads';
+  // Only a playlist of the user's can offer "remove from this playlist".
+  const playlistFrom =
+    collection.kind === 'userPlaylist'
+      ? {playlistId: collection.id.replace(/^pl:/, ''), playlistName: collection.name}
+      : undefined;
 
   const toggleOne = useCallback((t: Track) => {
     setSelected(prev => {
@@ -165,22 +172,23 @@ export function CollectionScreen({
               {runtime ? ` · ${runtime}` : ''}
             </Text>
 
+            {/* Shuffle hard left, play hard right — the two ends of the row,
+                so neither reads as the other's neighbour. */}
             {!selecting && (
               <View style={styles.actions}>
                 <TouchableOpacity
-                  style={styles.shuffleBtn}
-                  activeOpacity={0.75}
+                  activeOpacity={0.7}
                   onPress={shuffle}
+                  hitSlop={12}
                   disabled={!tracks.length}>
-                  <Shuffle size={19} color={C.text} />
-                  <Text style={styles.shuffleText}>Shuffle</Text>
+                  <Shuffle size={24} color={tracks.length ? C.text : C.faint} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.playBtn}
                   activeOpacity={0.85}
                   onPress={() => tracks.length && play(tracks[0])}
                   disabled={!tracks.length}>
-                  <Play size={26} color={C.bg} fill={C.bg} />
+                  <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
                 </TouchableOpacity>
               </View>
             )}
@@ -221,8 +229,16 @@ export function CollectionScreen({
                   onLongPress={
                     canSelect && !selecting
                       ? () => setSelected(new Set([id]))
+                      : onMenu
+                      ? () => onMenu(item, playlistFrom)
                       : undefined
                   }
+                  onMenu={
+                    onMenu && !selecting
+                      ? () => onMenu(item, playlistFrom)
+                      : undefined
+                  }
+                  showActions={!selecting}
                 />
               </View>
             </View>
@@ -260,21 +276,13 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    paddingHorizontal: S.gutter,
     marginTop: 18,
     marginBottom: 6,
   },
-  shuffleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  shuffleText: {...T.body, color: C.text},
+  playNudge: {marginLeft: 3},
   playBtn: {
     width: 54,
     height: 54,

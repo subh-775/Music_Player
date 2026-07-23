@@ -2,12 +2,14 @@
  * One track line. Shared by Search, Library, albums and playlists so a track
  * looks and behaves the same everywhere in the app.
  */
-import React from 'react';
+import React, {useCallback, useState} from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {MoreVertical} from 'lucide-react-native';
+import {ArrowDownToLine, Check, Heart, MoreVertical} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {formatDuration, type Track} from '../backend';
+import {formatDuration, startDownload, type Track} from '../backend';
 import {cleanText, getBestArtworkUrl} from '../tracks';
+import {useLike} from '../store';
+import {toast} from '../toast';
 import {SourceBadge} from './Badges';
 
 export function TrackRow({
@@ -17,6 +19,9 @@ export function TrackRow({
   onMenu,
   index,
   active,
+  /** Show the inline heart and download buttons. On by default; the queue and
+   *  other tight lists turn them off to keep the row from getting crowded. */
+  showActions = true,
 }: {
   track: Track;
   onPress: () => void;
@@ -25,9 +30,27 @@ export function TrackRow({
   index?: number;
   /** True for the track that's currently playing. */
   active?: boolean;
+  showActions?: boolean;
 }) {
   const dur = formatDuration(track.duration_ms);
   const artwork = getBestArtworkUrl(track);
+  const {liked, toggle} = useLike(track);
+  const [downloading, setDownloading] = useState(false);
+  const downloaded = !!track.file_path;
+
+  const download = useCallback(async () => {
+    if (downloading || downloaded) {
+      return;
+    }
+    setDownloading(true);
+    try {
+      await startDownload(track);
+      toast(`Downloading "${cleanText(track.title)}"`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start that download');
+      setDownloading(false);
+    }
+  }, [track, downloading, downloaded]);
 
   return (
     <TouchableOpacity
@@ -59,8 +82,31 @@ export function TrackRow({
         </View>
       </View>
 
+      {showActions && (
+        <>
+          <TouchableOpacity onPress={toggle} hitSlop={6} style={styles.act}>
+            <Heart
+              size={18}
+              color={liked ? C.accent : C.faint}
+              fill={liked ? C.accent : 'transparent'}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={download}
+            hitSlop={6}
+            style={styles.act}
+            disabled={downloaded || downloading}>
+            {downloaded || downloading ? (
+              <Check size={18} color={C.accent} />
+            ) : (
+              <ArrowDownToLine size={18} color={C.faint} />
+            )}
+          </TouchableOpacity>
+        </>
+      )}
+
       {!!onMenu && (
-        <TouchableOpacity onPress={onMenu} hitSlop={10} style={styles.menu}>
+        <TouchableOpacity onPress={onMenu} hitSlop={8} style={styles.menu}>
           <MoreVertical size={19} color={C.faint} />
         </TouchableOpacity>
       )}
@@ -90,5 +136,6 @@ const styles = StyleSheet.create({
   titleActive: {color: C.accent},
   metaLine: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
   sub: {...T.sub, color: C.sub, flex: 1},
-  menu: {padding: 4},
+  act: {paddingHorizontal: 5, paddingVertical: 6},
+  menu: {paddingLeft: 3, paddingVertical: 6},
 });

@@ -65,7 +65,12 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const pan = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) =>
+        // CAPTURE, not the plain variant. The bar's contents are Touchables,
+        // and a child that has already claimed the touch never hands it back —
+        // which is why the swipe silently did nothing. Capturing lets the bar
+        // take over the moment the movement is clearly horizontal, while a
+        // straight tap still falls through to the child.
+        onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
         onPanResponderMove: (_e, g) => slide.setValue(g.dx * 0.4),
         onPanResponderRelease: (_e, g) => {

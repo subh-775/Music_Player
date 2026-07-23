@@ -21,6 +21,7 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 import {apiUrl, type Track} from './backend';
 import {currentQuality} from './store';
+import {applyAudioEffects} from './audioEffects';
 
 let ready = false;
 let available: boolean | null = null;
@@ -200,6 +201,28 @@ export async function playTrack(
     await TrackPlayer.skip(startAt);
   }
   await TrackPlayer.play();
+
+  // Android destroys audio effects along with the audio session, so the EQ has
+  // to be re-attached each time playback starts — otherwise the setting works
+  // for exactly one song and then silently stops.
+  applyAudioEffects();
+}
+
+/**
+ * Queue a track to play after everything already lined up.
+ *
+ * Also records it in queueSource so the player screen can still resolve its
+ * badges and download when it comes around — without this, a song added to the
+ * queue loses its sources the moment it starts playing.
+ */
+export async function addToQueue(track: Track): Promise<void> {
+  await requireEngine();
+  const item = toQueueItem(track, currentQuality());
+  if (!item) {
+    throw new Error('This track has no playable source.');
+  }
+  await TrackPlayer.add([item]);
+  queueSource = [...queueSource, track];
 }
 
 export async function skipNext(): Promise<void> {

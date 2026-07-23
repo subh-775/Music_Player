@@ -8,3 +8,17 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# Audio effects reach the playback session by reflection, because RNTP keeps
+# `MusicService.player` private and KotlinAudio keeps `exoPlayer` protected.
+# Without these, R8 renames the very fields PlaybackSession looks up by name
+# and the equalizer silently stops working in release builds only.
+-keepclassmembers class com.doublesymmetry.trackplayer.service.MusicService {
+    private *** player;
+}
+-keepclassmembers class com.doublesymmetry.trackplayer.service.MusicService$MusicBinder {
+    *** service;
+}
+-keepclassmembers class com.doublesymmetry.kotlinaudio.players.** {
+    protected *** exoPlayer;
+}

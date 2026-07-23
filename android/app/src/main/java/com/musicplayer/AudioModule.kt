@@ -1,0 +1,227 @@
+package com.musicplayer
+
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
+import android.util.Log
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableArray
+
+/**
+ * Audio effects and output routing.
+ *
+ * The WebView build shaped sound with eight Web Audio BiquadFilters. There is
+ * no <audio> element here — ExoPlayer owns the stream — so the equivalent is
+ * Android's own [Equalizer], and volume normalization becomes
+ * [LoudnessEnhancer] rather than a DynamicsCompressor.
+ *
+ * ## Bands are the DEVICE's, not ours
+ *
+ * Android does not let an app choose band frequencies. Most phones expose five
+ * bands at their own centre frequencies; some expose ten, and the valid gain
+ * range differs too. So the 8-band curve the UI shows is INTERPOLATED onto
+ * whatever this device actually has, at runtime, and clamped to its real range.
+ * Nothing here is tuned for one handset.
+ */
+class AudioModule(private val ctx: ReactApplicationContext) :
+    ReactContextBaseJavaModule(ctx) {
+
+    override fun getName() = "Audio"
+
+    private var equalizer: Equalizer? = null
+    private var loudness: LoudnessEnhancer? = null
+    private var attachedSession = -1
+
+    /** Our 8 reference frequencies, in Hz. Must match src/eq.ts EQ_BANDS. */
+    private val refFreqs = intArrayOf(60, 150, 400, 1000, 2400, 6000, 12000, 16000)
+
+    /**
+     * Attach (or re-attach) the effects to the audio session actually playing.
+     *
+     * Returns false when there is no session yet — nothing has played, so there
+     * is nothing to attach to. The caller retries on the next playback start
+     * rather than treating it as an error.
+     */
+    private fun ensureAttached(): Boolean {
+        // Cheap and idempotent; the service may not have existed the first
+        // time this ran, so it's retried rather than bound once at startup.
+        MusicServiceRef.ensureBound(ctx)
+        val session = PlaybackSession.currentId()
+        if (session <= 0) return false
+        if (equalizer != null && attachedSession == session) return true
+
+        release()
+        return try {
+            // Priority 0: we are not a system effects app, and a higher number
+            // would let us stomp on one the user actually installed.
+            equalizer = Equalizer(0, session).apply { enabled = false }
+            loudness = LoudnessEnhancer(session).apply { enabled = false }
+            attachedSession = session
+            true
+        } catch (e: Exception) {
+            // Some devices refuse effects on a fast-path/offloaded session.
+            Log.w(TAG, "could not attach audio effects: ${e.message}")
+            release()
+            false
+        }
+    }
+
+    private fun release() {
+        try { equalizer?.release() } catch (_: Exception) {}
+        try { loudness?.release() } catch (_: Exception) {}
+        equalizer = null
+        loudness = null
+        attachedSession = -1
+    }
+
+    /**
+     * Linear interpolation of our 8-point curve at an arbitrary frequency.
+     *
+     * Interpolating in LOG frequency, not linear: 60Hz->150Hz and 12k->16k are
+     * comparable musical distances but wildly different in Hz, and a linear
+     * blend would make every device band land far too close to the top octave.
+     */
+    private fun gainAt(hz: Double, curve: DoubleArray): Double {
+        if (hz <= refFreqs[0]) return curve[0]
+        if (hz >= refFreqs[refFreqs.size - 1]) return curve[curve.size - 1]
+        for (i in 0 until refFreqs.size - 1) {
+            val lo = refFreqs[i].toDouble()
+            val hi = refFreqs[i + 1].toDouble()
+            if (hz in lo..hi) {
+                val t = (Math.log(hz) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))
+                return curve[i] + (curve[i + 1] - curve[i]) * t
+            }
+        }
+        return 0.0
+    }
+
+    /** Report what this device can actually do, so the UI can say so honestly. */
+    @ReactMethod
+    fun getCapabilities(promise: Promise) {
+        if (!ensureAttached()) {
+            promise.resolve(com.facebook.react.bridge.Arguments.createMap().apply {
+                putBoolean("available", false)
+                putInt("bands", 0)
+            })
+            return
+        }
+        val eq = equalizer!!
+        val range = eq.bandLevelRange // millibels, [min, max]
+        promise.resolve(com.facebook.react.bridge.Arguments.createMap().apply {
+            putBoolean("available", true)
+            putInt("bands", eq.numberOfBands.toInt())
+            putDouble("minDb", range[0] / 100.0)
+            putDouble("maxDb", range[1] / 100.0)
+        })
+    }
+
+    /**
+     * Apply an 8-value dB curve. `enabled=false` turns the effect off outright
+     * rather than flattening it, so a disabled EQ costs nothing in the chain.
+     */
+    @ReactMethod
+    fun setEqualizer(enabled: Boolean, gainsDb: ReadableArray, promise: Promise) {
+        if (!ensureAttached()) {
+            promise.resolve(false)
+            return
+        }
+        val eq = equalizer!!
+        try {
+            if (!enabled) {
+                eq.enabled = false
+                promise.resolve(true)
+                return
+            }
+
+            val curve = DoubleArray(refFreqs.size) { i ->
+                if (i < gainsDb.size()) gainsDb.getDouble(i) else 0.0
+            }
+            val range = eq.bandLevelRange
+            val minMb = range[0].toInt()
+            val maxMb = range[1].toInt()
+
+            for (b in 0 until eq.numberOfBands.toInt()) {
+                val band = b.toShort()
+                // getCenterFreq is in milliHertz.
+                val hz = eq.getCenterFreq(band) / 1000.0
+                val mb = Math.round(gainAt(hz, curve) * 100.0).toInt()
+                eq.setBandLevel(band, mb.coerceIn(minMb, maxMb).toShort())
+            }
+            eq.enabled = true
+            promise.resolve(true)
+        } catch (e: Exception) {
+            Log.w(TAG, "setEqualizer failed: ${e.message}")
+            promise.resolve(false)
+        }
+    }
+
+    /**
+     * Volume normalization. The WebView used a compressor with makeup gain;
+     * LoudnessEnhancer is the native equivalent and is measured in millibels of
+     * target gain.
+     */
+    @ReactMethod
+    fun setNormalize(enabled: Boolean, promise: Promise) {
+        if (!ensureAttached()) {
+            promise.resolve(false)
+            return
+        }
+        try {
+            loudness?.apply {
+                setTargetGain(if (enabled) 600 else 0) // +6dB, matching the web build
+                this.enabled = enabled
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
+    /**
+     * The name of the current output device, or null when it's the phone's own
+     * speaker/earpiece — the UI shows this line only when sound is going
+     * somewhere else, so "speaker" is deliberately reported as nothing.
+     */
+    @ReactMethod
+    fun getAudioOutput(promise: Promise) {
+        try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            for (d in devices) {
+                when (d.type) {
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
+                        val name = d.productName?.toString()?.trim()
+                        promise.resolve(if (name.isNullOrEmpty()) "Bluetooth" else name)
+                        return
+                    }
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> {
+                        promise.resolve("Wired headphones")
+                        return
+                    }
+                    AudioDeviceInfo.TYPE_USB_HEADSET -> {
+                        promise.resolve("USB headphones")
+                        return
+                    }
+                }
+            }
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.resolve(null)
+        }
+    }
+
+    override fun onCatalystInstanceDestroy() {
+        release()
+    }
+
+    companion object {
+        private const val TAG = "AudioModule"
+    }
+}

@@ -314,6 +314,48 @@ export type ImportSnapshot = {
 export const importSpotify = (url: string) =>
   apiGet<ImportSnapshot>(`/spotify/import?url=${encodeURIComponent(url)}`);
 
+// ─── Artists ────────────────────────────────────────────────────────────────
+
+export type ArtistCard = {name: string; image?: string; listeners?: number};
+
+export type ArtistProfile = {
+  name: string;
+  image?: string;
+  bio?: string;
+  followers?: number | null;
+  listeners?: number | null;
+  top_songs: Track[];
+  albums: Array<{name: string; image?: string; year?: string | number}>;
+  error?: string;
+};
+
+/** Photos for a set of credited names, used by the multi-artist picker. */
+export async function searchArtists(
+  q: string,
+  limit = 10,
+): Promise<ArtistCard[]> {
+  const data = await apiGet<{artists?: ArtistCard[]}>(
+    `/search/artists?q=${encodeURIComponent(q)}&limit=${limit}`,
+  );
+  return Array.isArray(data.artists) ? data.artists : [];
+}
+
+export async function getArtist(name: string): Promise<ArtistProfile> {
+  const data = await apiGet<Partial<ArtistProfile>>(
+    `/artist?name=${encodeURIComponent(name)}`,
+  );
+  return {
+    name: data.name || name,
+    image: data.image,
+    bio: data.bio,
+    followers: data.followers ?? null,
+    listeners: data.listeners ?? null,
+    top_songs: Array.isArray(data.top_songs) ? data.top_songs : [],
+    albums: Array.isArray(data.albums) ? data.albums : [],
+    error: data.error,
+  };
+}
+
 // ─── Downloads ──────────────────────────────────────────────────────────────
 
 export type DownloadTask = {

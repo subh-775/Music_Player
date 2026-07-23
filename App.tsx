@@ -15,35 +15,51 @@ import {LibraryScreen} from './src/screens/LibraryScreen';
 import {SettingsScreen} from './src/screens/SettingsScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
 import {SpotifyImportScreen} from './src/screens/SpotifyImportScreen';
+import {ArtistScreen} from './src/screens/ArtistScreen';
 import {PlayerScreen} from './src/screens/PlayerScreen';
 import {PlayerBar} from './src/components/PlayerBar';
 import {BottomNav, type Tab} from './src/components/BottomNav';
 import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
+import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
+import {
+  TrackActionSheet,
+  type SheetContext,
+} from './src/components/TrackActionSheet';
 import {C, S} from './src/theme';
 import {getCollection, type HomeItem, type Track} from './src/backend';
 import {playTrack, setupPlayer} from './src/player';
 import {hydrate} from './src/store';
-import {normalizeTracks} from './src/tracks';
+import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
+import {applyAudioEffects} from './src/audioEffects';
 import {toast} from './src/toast';
 
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
-  // One stack slot: whatever collection is open, wherever it came from.
-  const [open, setOpen] = useState<Collection | null>(null);
+  // A small navigation stack of overlays. These are plain absolutely-positioned
+  // views rather than <Modal>s ON PURPOSE: a Modal renders in its own window
+  // above everything, which is what hid the mini player and the bottom nav the
+  // moment you opened a playlist. As overlays they sit inside the app's own
+  // layout, so playback controls stay put while you browse.
+  const [collection, setCollection] = useState<Collection | null>(null);
   const [importUrl, setImportUrl] = useState<string | null>(null);
+  const [artist, setArtist] = useState<string | null>(null);
+
+  const [sheetTrack, setSheetTrack] = useState<Track | null>(null);
+  const [sheetFrom, setSheetFrom] = useState<SheetContext>(null);
   const [addTo, setAddTo] = useState<Track | null>(null);
+  const [artistChoices, setArtistChoices] = useState<string[]>([]);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [notice, setNotice] = useState('');
-  // Bumped after downloads are deleted, so the library rescans disk.
-  const [, setRefresh] = useState(0);
+  const [libraryNonce, setLibraryNonce] = useState(0);
 
   useEffect(() => {
-    hydrate();
+    hydrate().then(applyAudioEffects);
     setupPlayer().then(setEngine);
   }, []);
 
@@ -58,8 +74,34 @@ function Shell() {
     }
   }, []);
 
+  /** A single credited artist opens directly; several ask which one first. */
+  const openArtistCredit = useCallback((credit: string) => {
+    const names = splitArtists(credit);
+    if (names.length > 1) {
+      setArtistChoices(names);
+    } else if (names.length === 1) {
+      setArtist(names[0]);
+    }
+  }, []);
+
+  const openAlbumOf = useCallback((track: Track) => {
+    if (!track.album) {
+      return;
+    }
+    // Album pages are keyed by name+artist; the collection screen renders
+    // whatever tracks we already hold until a fuller fetch exists.
+    setCollection({
+      id: `album:${track.album}`,
+      kind: 'album',
+      name: track.album,
+      artist: track.artist,
+      image: track.artwork_url,
+      tracks: [track],
+    });
+  }, []);
+
   /** A Home card is a track, album or playlist. Tracks play; the rest open —
-   *  and they open as a Collection, the same as anything in the library. */
+   *  as a Collection, the same as anything in the library. */
   const pickHomeItem = useCallback(
     async (item: HomeItem) => {
       if (item.type === 'track' && item.track) {
@@ -71,7 +113,7 @@ function Shell() {
       }
       try {
         const data = await getCollection(item.perma_url);
-        setOpen({
+        setCollection({
           id: item.perma_url,
           kind: item.type === 'album' ? 'album' : 'sourcePlaylist',
           name: data.name || item.title || item.name || '',
@@ -86,6 +128,11 @@ function Shell() {
     [play],
   );
 
+  const openSheet = useCallback((track: Track, from?: SheetContext) => {
+    setSheetTrack(track);
+    setSheetFrom(from ?? null);
+  }, []);
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
@@ -93,13 +140,55 @@ function Shell() {
       <View style={styles.body}>
         {tab === 'home' && <HomeScreen onPickTrack={pickHomeItem} />}
         {tab === 'search' && (
-          <SearchScreen onPickTrack={play} onImportSpotify={setImportUrl} />
+          <SearchScreen
+            onPickTrack={play}
+            onImportSpotify={setImportUrl}
+            onMenu={openSheet}
+          />
         )}
         {tab === 'library' && (
           <LibraryScreen
-            onOpen={setOpen}
+            key={libraryNonce}
+            onOpen={setCollection}
             onOpenSettings={() => setSettingsOpen(true)}
           />
+        )}
+
+        {/* Overlays, innermost last. */}
+        {!!collection && (
+          <View style={StyleSheet.absoluteFill}>
+            <CollectionScreen
+              collection={collection}
+              onClose={() => setCollection(null)}
+              onPlay={play}
+              onMenu={openSheet}
+              onChanged={() => {
+                setCollection(null);
+                setLibraryNonce(n => n + 1);
+              }}
+            />
+          </View>
+        )}
+
+        {!!importUrl && (
+          <View style={StyleSheet.absoluteFill}>
+            <SpotifyImportScreen
+              url={importUrl}
+              onClose={() => setImportUrl(null)}
+              onPlay={play}
+            />
+          </View>
+        )}
+
+        {!!artist && (
+          <View style={StyleSheet.absoluteFill}>
+            <ArtistScreen
+              name={artist}
+              onClose={() => setArtist(null)}
+              onPlay={play}
+              onMenu={openSheet}
+            />
+          </View>
         )}
       </View>
 
@@ -117,49 +206,38 @@ function Shell() {
       <BottomNav active={tab} onChange={setTab} />
 
       <Modal
-        visible={!!open}
-        animationType="slide"
-        onRequestClose={() => setOpen(null)}>
-        {!!open && (
-          <CollectionScreen
-            collection={open}
-            onClose={() => setOpen(null)}
-            onPlay={play}
-            onChanged={() => {
-              setOpen(null);
-              setRefresh(n => n + 1);
-            }}
-          />
-        )}
-      </Modal>
-
-      <Modal
-        visible={!!importUrl}
-        animationType="slide"
-        onRequestClose={() => setImportUrl(null)}>
-        {!!importUrl && (
-          <SpotifyImportScreen
-            url={importUrl}
-            onClose={() => setImportUrl(null)}
-            onPlay={play}
-          />
-        )}
-      </Modal>
-
-      <Modal
         visible={settingsOpen}
         animationType="slide"
         onRequestClose={() => setSettingsOpen(false)}>
         <SettingsScreen onClose={() => setSettingsOpen(false)} />
       </Modal>
 
+      <TrackActionSheet
+        track={sheetTrack}
+        from={sheetFrom}
+        onClose={() => setSheetTrack(null)}
+        onAddToPlaylist={setAddTo}
+        onOpenArtist={t => openArtistCredit(t.artist)}
+        onOpenAlbum={openAlbumOf}
+      />
+
       <AddToPlaylistSheet track={addTo} onClose={() => setAddTo(null)} />
+
+      <ArtistPickerSheet
+        names={artistChoices}
+        onClose={() => setArtistChoices([])}
+        onPick={name => {
+          setArtistChoices([]);
+          setArtist(name);
+        }}
+      />
 
       {engine && (
         <PlayerScreen
           visible={playerOpen}
           onClose={() => setPlayerOpen(false)}
           onAddToPlaylist={setAddTo}
+          onOpenArtist={openArtistCredit}
         />
       )}
     </SafeAreaView>

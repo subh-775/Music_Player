@@ -52,9 +52,11 @@ const DEBOUNCE_MS = 180;
 export function SearchScreen({
   onPickTrack,
   onImportSpotify,
+  onMenu,
 }: {
   onPickTrack: (track: Track, context: Track[]) => void;
   onImportSpotify: (url: string) => void;
+  onMenu: (track: Track) => void;
 }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -268,7 +270,11 @@ export function SearchScreen({
             ) : null
           }
           renderItem={({item}) => (
-            <TrackRow track={item} onPress={() => onPickTrack(item, results)} />
+            <TrackRow
+              track={item}
+              onPress={() => onPickTrack(item, results)}
+              onMenu={() => onMenu(item)}
+            />
           )}
         />
       )}

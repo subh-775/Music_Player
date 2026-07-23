@@ -4,12 +4,11 @@ import {
   Linking,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Check, ChevronLeft} from 'lucide-react-native';
+import {Check, ChevronLeft, ChevronRight} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
   appVersion,
@@ -22,6 +21,10 @@ import {
   type SourceStatus,
 } from '../backend';
 import {resetSettings, useStore, writeSetting} from '../store';
+import {Toggle} from '../components/Toggle';
+import {EqualizerScreen} from './EqualizerScreen';
+import {applyAudioEffects} from '../audioEffects';
+import {EQ_PRESETS} from '../eq';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
@@ -90,18 +93,31 @@ function ToggleRow({
         <Text style={styles.rowLabel}>{label}</Text>
         {!!hint && <Text style={styles.rowHint}>{hint}</Text>}
       </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        disabled={disabled}
-        trackColor={{false: C.border, true: C.accent}}
-        thumbColor={C.text}
-      />
+      <Toggle value={value} onChange={onChange} disabled={disabled} />
     </View>
   );
 }
 
+function NavRow({
+  label,
+  value,
+  onPress,
+}: {
+  label: string;
+  value?: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
+      <Text style={[styles.rowLabel, styles.rowText]}>{label}</Text>
+      {!!value && <Text style={styles.rowValue}>{value}</Text>}
+      <ChevronRight size={18} color={C.faint} />
+    </TouchableOpacity>
+  );
+}
+
 export function SettingsScreen({onClose}: {onClose: () => void}) {
+  const [panel, setPanel] = useState<'equalizer' | null>(null);
   const {settings} = useStore();
   const [sources, setSources] = useState<Record<string, SourceStatus>>({});
   const [downloads, setDownloads] = useState<DownloadsInfo | null>(null);
@@ -149,6 +165,12 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   const qualityLabel =
     QUALITIES.find(q => q.value === settings.audioQuality)?.label ?? 'Very High';
   const folder = downloads?.path || downloads?.download_dir || '';
+
+  // Anything with more than a switch's worth of choice gets its OWN screen,
+  // not an inline expander — the list stays scannable.
+  if (panel === 'equalizer') {
+    return <EqualizerScreen onClose={() => setPanel(null)} />;
+  }
 
   return (
     <View style={styles.wrap}>
@@ -219,6 +241,28 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
               hint="Keep playing similar songs when the queue ends"
               value={settings.autoplay}
               onChange={v => writeSetting('autoplay', v)}
+            />
+          </Section>
+
+          <Section title="Sound">
+            <NavRow
+              label="Equalizer"
+              value={
+                settings.eqEnabled
+                  ? EQ_PRESETS.find(p => p.id === settings.eqPreset)?.label ||
+                    'Custom'
+                  : 'Off'
+              }
+              onPress={() => setPanel('equalizer')}
+            />
+            <ToggleRow
+              label="Normalize volume"
+              hint="Even out loudness between songs"
+              value={settings.normalizeVolume}
+              onChange={v => {
+                writeSetting('normalizeVolume', v);
+                applyAudioEffects();
+              }}
             />
           </Section>
 
