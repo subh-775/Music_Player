@@ -59,19 +59,86 @@ export const backendPort = PORT;
 
 // ─── Domain types + calls ────────────────────────────────────────────────────
 
+/** A Home card: a track, album or playlist, already shaped for display. */
 export type HomeItem = {
-  type: string;
+  type: 'track' | 'album' | 'playlist' | string;
   title?: string;
   name?: string;
-  artist?: string;
+  subtitle?: string;
+  image?: string;
+  perma_url?: string;
+  track?: Track;
 };
 export type HomeRow = {title: string; items: HomeItem[]};
 
-export async function getHome(
-  language = 'hindi,english',
-): Promise<HomeRow[]> {
+/** A playable search result. */
+export type Track = {
+  title: string;
+  artist: string;
+  album?: string;
+  duration_ms?: number;
+  artwork_url?: string;
+  playable_source?: string;
+  primary_source?: string;
+  sources?: Record<string, {url?: string}>;
+};
+
+export async function getHome(language = 'hindi,english'): Promise<HomeRow[]> {
   const data = await apiGet<{rows?: HomeRow[]}>(
     `/home?language=${encodeURIComponent(language)}`,
   );
   return Array.isArray(data.rows) ? data.rows : [];
+}
+
+/** POST a search. Returns playable tracks across all enabled sources. */
+export async function search(query: string, limit = 25): Promise<Track[]> {
+  const res = await fetch(apiUrl('/search'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query, limit}),
+  });
+  if (!res.ok) {
+    throw new Error(`search -> HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as {results?: Track[]};
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+export type StreamInfo = {
+  url?: string;
+  bitrate_kbps?: number;
+  source?: string;
+  error?: string;
+};
+
+/**
+ * Resolve a track to a real, playable stream URL. This is the same call the
+ * player makes a beat before audio starts, so a success here means the whole
+ * chain (source lookup -> signed CDN URL) is working for this track.
+ */
+export async function getStreamInfo(
+  track: Track,
+  bitrate = 320,
+): Promise<StreamInfo> {
+  const source = track.playable_source || track.primary_source || '';
+  const url = source ? track.sources?.[source]?.url : undefined;
+  if (!url) {
+    throw new Error('This track has no playable source.');
+  }
+  return apiGet<StreamInfo>(
+    `/stream_info?url=${encodeURIComponent(url)}&source=${encodeURIComponent(
+      source,
+    )}&bitrate=${bitrate}`,
+  );
+}
+
+/** mm:ss for a duration in milliseconds. */
+export function formatDuration(ms?: number): string {
+  if (!ms || ms <= 0) {
+    return '';
+  }
+  const total = Math.round(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
