@@ -230,9 +230,12 @@ export async function addToQueue(track: Track): Promise<void> {
   queueSource = [...queueSource, track];
 }
 
+/** Skips always resume playback: changing song while paused and getting
+ *  silence reads as the skip having failed. */
 export async function skipNext(): Promise<void> {
   try {
     await TrackPlayer.skipToNext();
+    await TrackPlayer.play();
   } catch {
     /* end of queue */
   }
@@ -248,6 +251,7 @@ export async function skipPrevious(): Promise<void> {
       return;
     }
     await TrackPlayer.skipToPrevious();
+    await TrackPlayer.play();
   } catch {
     await TrackPlayer.seekTo(0);
   }

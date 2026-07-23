@@ -84,7 +84,11 @@ export function SearchScreen({
         return;
       }
       setResults(found);
-      rememberSearch(text);
+      // A pasted playlist/album URL is a destination, not a query — putting it
+      // in Recent searches leaves an unreadable link in the list.
+      if (!isSpotifyUrl(text)) {
+        rememberSearch(text);
+      }
 
       // Enrich AFTER render, once, so results appear instantly and clean
       // metadata fills in a moment later. applyEnrichment only fills blanks —

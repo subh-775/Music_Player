@@ -16,6 +16,7 @@ import './playlists';
 import './pins';
 import './searchHistory';
 import './collections';
+import './artists';
 
 export type Settings = {
   audioQuality: number; // 0 = auto, else kbps

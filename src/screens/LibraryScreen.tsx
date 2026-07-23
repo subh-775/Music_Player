@@ -23,6 +23,7 @@ import {Pin, Plus} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getLocalLibrary, type Track} from '../backend';
 import {useLikes} from '../store';
+import {useFollowedArtists} from '../artists';
 import {
   collectionSubtitle,
   useLibrary,
@@ -61,7 +62,23 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
 
   const likes = useLikes();
   const pins = usePins();
+  const artists = useFollowedArtists();
   const library = useLibrary(likes, downloads);
+
+  // Followed artists render as rows too, so one list handles everything.
+  const withArtists = useMemo(
+    () => [
+      ...library,
+      ...artists.map(a => ({
+        id: `artist:${a.name}`,
+        kind: 'artist' as const,
+        name: a.name,
+        image: a.image,
+        tracks: [],
+      })),
+    ],
+    [library, artists],
+  );
 
   const loadDownloads = useCallback(async () => {
     try {
@@ -86,13 +103,13 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
         case 'albums':
           return c.kind === 'album';
         case 'artists':
-          return false; // saved artists land here once artist pages exist
+          return c.kind === 'artist';
         default:
           return true;
       }
     };
-    return sortPinned(library.filter(matches), pins, idOf);
-  }, [library, pins, filter]);
+    return sortPinned(withArtists.filter(matches), pins, idOf);
+  }, [withArtists, pins, filter]);
 
   const onLongPress = useCallback((c: Collection) => {
     // Liked Songs and Downloads are already pinned to the top by construction —

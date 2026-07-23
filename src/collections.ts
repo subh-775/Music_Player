@@ -21,7 +21,8 @@ export type CollectionKind =
   | 'sourcePlaylist' // an album/playlist from JioSaavn et al, saved to library
   | 'userPlaylist' // one the user made — or imported from Spotify
   | 'liked'
-  | 'downloads';
+  | 'downloads'
+  | 'artist';
 
 export type Collection = {
   id: string;
@@ -43,6 +44,8 @@ export function collectionSubtitle(c: Collection): string {
       return `Offline · ${count}`;
     case 'album':
       return c.artist ? `Album · ${c.artist}` : `Album · ${count}`;
+    case 'artist':
+      return 'Artist';
     default:
       return `Playlist · ${count}`;
   }

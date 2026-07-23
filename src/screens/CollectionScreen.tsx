@@ -17,19 +17,22 @@ import {
   View,
 } from 'react-native';
 import {
+  ArrowDownToLine,
   CheckSquare,
   ChevronLeft,
+  Heart,
   Play,
   Shuffle,
   Square,
   Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {deleteDownload, type Track} from '../backend';
+import {deleteDownload, startDownload, type Track} from '../backend';
 import {formatTotalDuration, getTrackId} from '../tracks';
 import {
   collectionSubtitle,
-
+  isSaved,
+  toggleSaved,
   type Collection,
 } from '../collections';
 import {CollectionArt} from '../components/CollectionArt';
@@ -52,6 +55,7 @@ export function CollectionScreen({
 }) {
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(() => isSaved(collection));
 
   const tracks = collection.tracks;
   const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
@@ -111,6 +115,22 @@ export function CollectionScreen({
     (t: Track) => onPlay(t, tracks),
     [onPlay, tracks],
   );
+
+  /** Queue every track for download. Sequential so the backend isn't handed
+   *  fifty simultaneous fetches. */
+  const downloadAll = useCallback(async () => {
+    if (!tracks.length) {
+      return;
+    }
+    toast(`Downloading ${tracks.length} songs…`);
+    for (const t of tracks) {
+      try {
+        await startDownload(t);
+      } catch {
+        /* skip the ones with no downloadable source */
+      }
+    }
+  }, [tracks]);
 
   const shuffle = useCallback(() => {
     if (!tracks.length) {
@@ -172,17 +192,50 @@ export function CollectionScreen({
               {runtime ? ` · ${runtime}` : ''}
             </Text>
 
-            {/* Shuffle hard left, play hard right — the two ends of the row,
-                so neither reads as the other's neighbour. */}
+            {/* Left group, play hard right — the two ends of the row, so
+                neither reads as the other's neighbour. An album gets save +
+                download-all instead of shuffle; shuffling a fixed running
+                order is not what you want from a record. */}
             {!selecting && (
               <View style={styles.actions}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={shuffle}
-                  hitSlop={12}
-                  disabled={!tracks.length}>
-                  <Shuffle size={24} color={tracks.length ? C.text : C.faint} />
-                </TouchableOpacity>
+                <View style={styles.leftGroup}>
+                  {collection.kind === 'album' ? (
+                    <>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        hitSlop={10}
+                        onPress={() => {
+                          const now = toggleSaved(collection);
+                          setSaved(now);
+                          toast(now ? `Saved ${collection.name}` : `Removed ${collection.name}`);
+                        }}>
+                        <Heart
+                          size={24}
+                          color={saved ? C.accent : C.text}
+                          fill={saved ? C.accent : 'transparent'}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        hitSlop={10}
+                        onPress={downloadAll}
+                        disabled={!tracks.length}>
+                        <ArrowDownToLine
+                          size={24}
+                          color={tracks.length ? C.text : C.faint}
+                        />
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={shuffle}
+                      hitSlop={12}
+                      disabled={!tracks.length}>
+                      <Shuffle size={24} color={tracks.length ? C.text : C.faint} />
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <TouchableOpacity
                   style={styles.playBtn}
                   activeOpacity={0.85}
@@ -282,6 +335,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
+  leftGroup: {flexDirection: 'row', alignItems: 'center', gap: 22},
   playNudge: {marginLeft: 3},
   playBtn: {
     width: 54,

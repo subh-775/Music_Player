@@ -40,11 +40,17 @@ export function ArtistScreen({
   onClose,
   onPlay,
   onMenu,
+  onOpenAlbum,
+  onToggleFollow,
+  following,
 }: {
   name: string;
   onClose: () => void;
   onPlay: (track: Track, context: Track[]) => void;
   onMenu: (track: Track) => void;
+  onOpenAlbum: (albumName: string, artistName: string) => void;
+  onToggleFollow: (name: string, image?: string) => void;
+  following: boolean;
 }) {
   const [profile, setProfile] = useState<ArtistProfile | null>(null);
   const [busy, setBusy] = useState(true);
@@ -96,6 +102,15 @@ export function ArtistScreen({
               <Text style={styles.listeners}>{listeners} listeners</Text>
             )}
 
+            <View style={styles.headActions}>
+            <TouchableOpacity
+              onPress={() => onToggleFollow(profile?.name || name, profile?.image)}
+              activeOpacity={0.7}
+              style={[styles.follow, following && styles.followOn]}>
+              <Text style={[styles.followText, following && styles.followTextOn]}>
+                {following ? 'Following' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
             {songs.length > 0 && (
               <TouchableOpacity
                 style={styles.playBtn}
@@ -104,6 +119,7 @@ export function ArtistScreen({
                 <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
               </TouchableOpacity>
             )}
+            </View>
           </View>
 
           {songs.length > 0 && (
@@ -113,7 +129,6 @@ export function ArtistScreen({
                 <TrackRow
                   key={`${t.title}-${i}`}
                   track={t}
-                  index={i}
                   onPress={() => onPlay(t, songs)}
                   onMenu={() => onMenu(t)}
                 />
@@ -131,7 +146,10 @@ export function ArtistScreen({
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.albums}
                 renderItem={({item}) => (
-                  <View style={styles.album}>
+                  <TouchableOpacity
+                    style={styles.album}
+                    activeOpacity={0.75}
+                    onPress={() => onOpenAlbum(item.name, profile?.name || name)}>
                     {item.image ? (
                       <Image source={{uri: item.image}} style={styles.albumArt} />
                     ) : (
@@ -143,7 +161,7 @@ export function ArtistScreen({
                     {!!item.year && (
                       <Text style={styles.albumYear}>{item.year}</Text>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 )}
               />
             </>
@@ -189,6 +207,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: S.gutter,
   },
   listeners: {...T.sub, color: C.sub, marginTop: 5},
+  headActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 16,
+  },
+  follow: {
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.sub,
+  },
+  followOn: {borderColor: C.accent},
+  followText: {...T.sub, color: C.text, fontWeight: '700'},
+  followTextOn: {color: C.accent},
   playBtn: {
     width: 54,
     height: 54,
@@ -196,7 +230,6 @@ const styles = StyleSheet.create({
     backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
   },
   playNudge: {marginLeft: 3},
   section: {

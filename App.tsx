@@ -33,6 +33,7 @@ import {hydrate, readSettings} from './src/store';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
 import {applyAudioEffects} from './src/audioEffects';
+import {isFollowing, toggleFollow} from './src/artists';
 import {toast} from './src/toast';
 
 function Shell() {
@@ -199,6 +200,23 @@ function Shell() {
               onClose={() => setArtist(null)}
               onPlay={play}
               onMenu={openSheet}
+              following={isFollowing(artist)}
+              onToggleFollow={(n, img) =>
+                toast(
+                  toggleFollow(n, img)
+                    ? `Following ${n}`
+                    : `Unfollowed ${n}`,
+                )
+              }
+              onOpenAlbum={(albumName, artistName) =>
+                setCollection({
+                  id: `album:${albumName}`,
+                  kind: 'album',
+                  name: albumName,
+                  artist: artistName,
+                  tracks: [],
+                })
+              }
             />
           </View>
         )}
