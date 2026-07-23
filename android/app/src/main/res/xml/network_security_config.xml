@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- The Python backend is a plain-HTTP server on loopback. Cleartext is
+         allowed ONLY for 127.0.0.1 / localhost — every real source (JioSaavn,
+         SoundCloud, iTunes, lrclib) stays TLS-only. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

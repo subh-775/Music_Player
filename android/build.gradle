@@ -1,0 +1,38 @@
+buildscript {
+    ext {
+        buildToolsVersion = "34.0.0"
+        // 26 = notification channels + foreground services (needed for background
+        // playback later), and comfortably above Chaquopy's floor. Matches the
+        // existing Fix-Spotify app.
+        minSdkVersion = 26
+        compileSdkVersion = 34
+        targetSdkVersion = 34
+        ndkVersion = "26.1.10909125"
+        kotlinVersion = "1.9.24"
+    }
+    repositories {
+        google()
+        mavenCentral()
+        // Chaquopy's Gradle plugin lives in its own Maven repo, not on Central.
+        maven { url = uri("https://chaquo.com/maven") }
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // Pinned to match the working Fix-Spotify build (Kotlin 1.9.24 / AGP 8.5).
+        classpath("com.chaquo.python:gradle:15.0.1")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+
+// Chaquopy's Python runtime is delivered as AARs from the same repo; the app
+// module resolves them at dependency time, so the repo has to be visible here
+// too (RN leaves resolution in PREFER_PROJECT mode, so this is additive and
+// doesn't fight the React Native Gradle Plugin's own repositories).
+allprojects {
+    repositories {
+        maven { url = uri("https://chaquo.com/maven") }
+    }
+}
