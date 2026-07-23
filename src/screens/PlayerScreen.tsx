@@ -53,7 +53,8 @@ import {
   Type,
 } from 'lucide-react-native';
 import {C, T} from '../theme';
-import {getLyrics, startDownload, type Lyrics, type Track} from '../backend';
+import {getLyrics, type Lyrics, type Track} from '../backend';
+import {enqueueDownload} from '../downloads';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
@@ -228,7 +229,7 @@ export function PlayerScreen({
     }
     setDownloading(true);
     try {
-      await startDownload(track);
+      await enqueueDownload(track);
       toast(`Downloading "${cleanText(track.title)}"`);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not start that download');

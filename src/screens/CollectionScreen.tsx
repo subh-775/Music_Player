@@ -27,7 +27,7 @@ import {
   Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {deleteDownload, startDownload, type Track} from '../backend';
+import {deleteDownload, type Track} from '../backend';
 import {formatTotalDuration, getTrackId} from '../tracks';
 import {
   collectionSubtitle,
@@ -38,6 +38,8 @@ import {
 import {CollectionArt} from '../components/CollectionArt';
 import {TrackRow} from '../components/TrackRow';
 import {toast} from '../toast';
+import {enqueueDownload, useDownloadJobs} from '../downloads';
+import {DownloadRow} from '../components/DownloadRow';
 
 export function CollectionScreen({
   collection,
@@ -56,6 +58,7 @@ export function CollectionScreen({
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(() => isSaved(collection));
+  const jobs = useDownloadJobs();
 
   const tracks = collection.tracks;
   const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
@@ -125,7 +128,7 @@ export function CollectionScreen({
     toast(`Downloading ${tracks.length} songs…`);
     for (const t of tracks) {
       try {
-        await startDownload(t);
+        await enqueueDownload(t);
       } catch {
         /* skip the ones with no downloadable source */
       }
@@ -191,6 +194,14 @@ export function CollectionScreen({
               {collectionSubtitle(collection)}
               {runtime ? ` · ${runtime}` : ''}
             </Text>
+
+            {collection.kind === 'downloads' && jobs.length > 0 && (
+              <View style={styles.jobs}>
+                {jobs.map(j => (
+                  <DownloadRow key={j.taskId} job={j} />
+                ))}
+              </View>
+            )}
 
             {/* Left group, play hard right — the two ends of the row, so
                 neither reads as the other's neighbour. An album gets save +
@@ -335,6 +346,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
+  jobs: {alignSelf: 'stretch', paddingTop: 14},
   leftGroup: {flexDirection: 'row', alignItems: 'center', gap: 22},
   playNudge: {marginLeft: 3},
   playBtn: {

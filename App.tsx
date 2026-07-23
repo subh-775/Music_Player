@@ -27,7 +27,7 @@ import {
   type SheetContext,
 } from './src/components/TrackActionSheet';
 import {C, S} from './src/theme';
-import {getCollection, type HomeItem, type Track} from './src/backend';
+import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
 import {playTrack, setupPlayer, startCrossfadeWatcher} from './src/player';
 import {hydrate, readSettings} from './src/store';
 import {normalizeTracks, splitArtists} from './src/tracks';
@@ -116,7 +116,16 @@ function Shell() {
         return;
       }
       try {
-        const data = await getCollection(item.perma_url);
+        let data = await getCollection(item.perma_url);
+        // Not every album URL resolves through /api/playlist; fall back to the
+        // album endpoint before reporting failure, rather than opening empty.
+        if (!data.tracks.length && item.type === 'album') {
+          data = await getAlbum(item.name || item.title || '', item.subtitle);
+        }
+        if (!data.tracks.length) {
+          toast('That one has no playable songs right now.');
+          return;
+        }
         setCollection({
           id: item.perma_url,
           kind: item.type === 'album' ? 'album' : 'sourcePlaylist',

@@ -184,6 +184,28 @@ export async function getCollection(url: string): Promise<Collection> {
   };
 }
 
+/**
+ * Open an album by name+artist. Some album perma_urls do not resolve through
+ * /api/playlist, so this is the second attempt before giving up - which is
+ * what left a few Home cards opening empty.
+ */
+export async function getAlbum(
+  name: string,
+  artist = '',
+  songUrl = '',
+): Promise<Collection> {
+  const q = new URLSearchParams({name, artist});
+  if (songUrl) {
+    q.set('song_url', songUrl);
+  }
+  const data = await apiGet<Partial<Collection>>(`/album?${q.toString()}`);
+  return {
+    name: data.name || name,
+    tracks: Array.isArray(data.tracks) ? data.tracks : [],
+    error: data.error,
+  };
+}
+
 // ─── Library (downloaded / offline) ─────────────────────────────────────────
 
 export type LocalLibrary = {tracks: Track[]; download_dir: string};

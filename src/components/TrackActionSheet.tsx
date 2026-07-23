@@ -31,11 +31,8 @@ import {
   User,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {
-  deleteDownload,
-  startDownload,
-  type Track,
-} from '../backend';
+import {deleteDownload, type Track} from '../backend';
+import {enqueueDownload} from '../downloads';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {isLiked, toggleLike} from '../store';
 import {removeTrackFromPlaylist} from '../playlists';
@@ -85,7 +82,7 @@ export function TrackActionSheet({
     }
     setBusy(true);
     try {
-      await startDownload(track);
+      await enqueueDownload(track);
       toast(`Downloading "${cleanText(track.title)}"`);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not start that download');

@@ -14,7 +14,7 @@ import {C, S, T} from '../theme';
 import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
 import {Greeting} from '../components/Greeting';
 import {useRecentlyPlayed} from '../recentlyPlayed';
-import {getBestArtworkUrl, cleanText} from '../tracks';
+import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
 
 type Props = {
   onPickTrack: (item: HomeItem) => void;
@@ -152,7 +152,7 @@ function Card({item, onPick}: {item: HomeItem; onPick: (i: HomeItem) => void}) {
       onPress={() => onPick(item)}>
       <View style={styles.artWrap}>
         {item.image ? (
-          <Image source={{uri: item.image}} style={styles.art} />
+          <Image source={{uri: upgradeArtwork(item.image)}} style={styles.art} />
         ) : (
           <View style={[styles.art, styles.artFallback]} />
         )}

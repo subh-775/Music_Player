@@ -168,6 +168,26 @@ export function sameTrack(
   );
 }
 
+/**
+ * Raise a cover URL to a usable resolution where the URL pattern allows it.
+ *
+ * JioSaavn and iTunes both encode the size in the path, so a 150x150 thumbnail
+ * can simply be asked for larger. Home cards were rendering those thumbnails
+ * at full card width, which is why some of them looked soft or half-loaded.
+ */
+export function upgradeArtwork(url?: string): string {
+  if (!url) {
+    return '';
+  }
+  return url
+    .replace(/(\d+)x(\d+)/g, (m, w, h) =>
+      parseInt(w, 10) < 500 || parseInt(h, 10) < 500 ? '500x500' : m,
+    )
+    .replace(/(\d+)x(\d+)bb/g, (m, w) =>
+      parseInt(w, 10) < 600 ? '600x600bb' : m,
+    );
+}
+
 /** Best available cover, upgraded to a usable resolution where the URL allows. */
 export function getBestArtworkUrl(track: Track | null | undefined): string {
   const urls = track?.artwork_urls || {};
