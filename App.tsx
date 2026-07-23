@@ -2,14 +2,13 @@
  * Walking-skeleton screen.
  *
  * Its only job is to prove the architecture end to end on a real device:
- *   RN UI  ->  fetch  ->  embedded Chaquopy/Flask backend  ->  real JioSaavn data
+ *   RN UI  ->  authenticated fetch  ->  embedded Chaquopy/Flask backend  ->  real data
  * plus Metro hot-reload over USB. It is NOT the final UI — Home/Search/Settings/
  * player get rebuilt as native screens once this pipe is green.
  */
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
-  NativeModules,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -17,51 +16,32 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {ErrorBoundary} from './src/ErrorBoundary';
+import {
+  backendPort,
+  getHome,
+  waitForBackend,
+  type HomeRow,
+} from './src/backend';
 
-const PORT: number = NativeModules.Backend?.port ?? 8771;
-const BASE = `http://127.0.0.1:${PORT}`;
+type Phase = 'booting' | 'loading' | 'ready' | 'error';
 
-type Item = {type: string; title?: string; name?: string; artist?: string};
-type Row = {title: string; items: Item[]};
-
-// Poll /health until the backend has finished booting (Chaquopy start + warm-up
-// takes a few seconds on a cold launch), giving up after ~30s.
-async function waitForBackend(): Promise<boolean> {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const r = await fetch(`${BASE}/health`);
-      if (r.ok) {
-        return true;
-      }
-    } catch {
-      // not up yet
-    }
-    await new Promise(res => setTimeout(res, 500));
-  }
-  return false;
-}
-
-export default function App(): React.JSX.Element {
-  const [phase, setPhase] = useState<'booting' | 'loading' | 'ready' | 'error'>(
-    'booting',
-  );
-  const [rows, setRows] = useState<Row[]>([]);
+function Home(): React.JSX.Element {
+  const [phase, setPhase] = useState<Phase>('booting');
+  const [rows, setRows] = useState<HomeRow[]>([]);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setPhase('booting');
     setError('');
-    const up = await waitForBackend();
-    if (!up) {
-      setError('Backend did not answer on ' + BASE);
+    if (!(await waitForBackend())) {
+      setError(`Backend did not answer on 127.0.0.1:${backendPort}`);
       setPhase('error');
       return;
     }
     setPhase('loading');
     try {
-      const r = await fetch(`${BASE}/api/home?language=hindi,english`);
-      const data = await r.json();
-      setRows(Array.isArray(data?.rows) ? data.rows : []);
+      setRows(await getHome());
       setPhase('ready');
     } catch (e) {
       setError(String(e));
@@ -79,13 +59,13 @@ export default function App(): React.JSX.Element {
       <View style={styles.header}>
         <Text style={styles.wordmark}>Music_Player</Text>
         <Text style={styles.sub}>
-          native shell · backend :{PORT}
+          native shell · backend :{backendPort}
           {phase === 'ready' ? ' · live' : ''}
         </Text>
       </View>
 
-      {phase === 'booting' && <Status label="Starting the music engine…" spin />}
-      {phase === 'loading' && <Status label="Loading your feed…" spin />}
+      {phase === 'booting' && <Status label="Starting the music engine…" />}
+      {phase === 'loading' && <Status label="Loading your feed…" />}
       {phase === 'error' && (
         <View style={styles.center}>
           <Text style={styles.errText}>{error}</Text>
@@ -117,18 +97,25 @@ export default function App(): React.JSX.Element {
   );
 }
 
-function Status({label, spin}: {label: string; spin?: boolean}) {
+function Status({label}: {label: string}) {
   return (
     <View style={styles.center}>
-      {spin && <ActivityIndicator color={COLORS.accent} size="large" />}
+      <ActivityIndicator color={COLORS.accent} size="large" />
       <Text style={styles.statusText}>{label}</Text>
     </View>
   );
 }
 
+export default function App(): React.JSX.Element {
+  return (
+    <ErrorBoundary>
+      <Home />
+    </ErrorBoundary>
+  );
+}
+
 const COLORS = {
   bg: '#0e0f13',
-  card: '#16181f',
   text: '#f2f3f5',
   sub: '#8b8f9a',
   accent: '#f5a623', // ember amber — distinct from Fix-Spotify's green

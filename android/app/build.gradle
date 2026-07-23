@@ -170,4 +170,10 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // YouTube resolution. Android has no JS runtime to solve YouTube's signature
+    // challenge, so yt-dlp can't do YouTube here; NewPipeExtractor does it
+    // natively (bundled Rhino). Called from Python via YouTubeNP.kt. GPLv3, same
+    // as this project. Pinned to the version Fix-Spotify runs in production.
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.3'
 }

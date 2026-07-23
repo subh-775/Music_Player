@@ -34,5 +34,7 @@ apply plugin: "com.facebook.react.rootproject"
 allprojects {
     repositories {
         maven { url = uri("https://chaquo.com/maven") }
+        // NewPipeExtractor (YouTube resolution) is published on JitPack.
+        maven { url = uri("https://jitpack.io") }
     }
 }

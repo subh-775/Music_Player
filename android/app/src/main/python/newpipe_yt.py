@@ -27,7 +27,7 @@ def _bridge():
     try:
         from java import jclass  # Chaquopy — only importable inside the APK
 
-        return jclass("com.xmrnoobx.fixspotify.YouTubeNP")
+        return jclass("com.musicplayer.YouTubeNP")
     except Exception as e:  # pragma: no cover - desktop/test path
         log.debug("NewPipe bridge unavailable: %s", e)
         return None

@@ -6,6 +6,7 @@ import android.util.Log
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import java.io.File
+import java.util.UUID
 import kotlin.concurrent.thread
 
 /**
@@ -14,14 +15,18 @@ import kotlin.concurrent.thread
  * This is the same Flask server the Fix-Spotify app runs; the React Native UI
  * talks to it over http://127.0.0.1:<port>, exactly as the old WebView did.
  * start_server() blocks in serve_forever(), so it runs on its own daemon thread.
- *
- * Skeleton note: the API token is left empty, which DISABLES the loopback auth
- * gate (see _require_token in mobile_server.py). That is fine for a debug build
- * on your own phone over USB; the token + a native accessor get added before any
- * release, so another app on the device can't drive the backend.
  */
 object PythonBackend {
     private const val TAG = "MPBackend"
+
+    /**
+     * Per-launch secret guarding /api/*. Loopback is NOT private on Android —
+     * every installed app can reach 127.0.0.1 — so without this any app could
+     * drive our backend. Generated once at class load (so it is available to
+     * BackendModule whenever the RN bridge asks, regardless of start() timing),
+     * handed to the JS side over the bridge, and required on every API call.
+     */
+    val apiToken: String = UUID.randomUUID().toString()
 
     @Volatile private var started = false
 
@@ -53,7 +58,7 @@ object PythonBackend {
                     .callAttr(
                         "start_server",
                         filesDir, downloadsDir, webDir, cacheDir,
-                        port, publicDir, ""
+                        port, publicDir, apiToken
                     )
                 Log.i(TAG, "Python backend stopped")
             } catch (e: Exception) {
