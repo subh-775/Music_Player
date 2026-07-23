@@ -20,7 +20,7 @@ object PythonBackend {
     private const val TAG = "MPBackend"
 
     /**
-     * Per-launch secret guarding /api/*. Loopback is NOT private on Android —
+     * Per-launch secret guarding the API routes. Loopback is NOT private on Android —
      * every installed app can reach 127.0.0.1 — so without this any app could
      * drive our backend. Generated once at class load (so it is available to
      * BackendModule whenever the RN bridge asks, regardless of start() timing),
