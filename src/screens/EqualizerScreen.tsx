@@ -18,6 +18,7 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
+import * as Lucide from 'lucide-react-native';
 import {ChevronLeft} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
@@ -38,6 +39,13 @@ import {
   type EqCapabilities,
 } from '../audioEffects';
 import {Toggle} from '../components/Toggle';
+
+/** Renders a preset's glyph by name — the preset list owns which icon it uses,
+ *  so adding a preset never means editing this screen too. */
+function PresetIcon({name, color}: {name: string; color: string}) {
+  const Icon = (Lucide as unknown as Record<string, typeof ChevronLeft>)[name];
+  return Icon ? <Icon size={19} color={color} /> : null;
+}
 
 const SLIDER_H = 150;
 
@@ -60,11 +68,9 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
     (i: number, db: number) => {
       const next = normalizeGains(gains);
       next[i] = Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, db));
-      writeSettings({
-        eqEnabled: true,
-        eqPreset: 'custom',
-        eqGains: next,
-      });
+      // Dragging a band IS an explicit intent to shape the sound, so this one
+      // does turn the equalizer on.
+      writeSettings({eqEnabled: true, eqPreset: 'custom', eqGains: next});
     },
     [gains],
   );
@@ -73,7 +79,9 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
     (id: string) => {
       const curve = presetGains(id);
       writeSettings({
-        eqEnabled: true,
+        // Deliberately NOT flipping eqEnabled here. Choosing a preset is
+        // picking a shape, not switching the effect on — auto-enabling meant
+        // browsing the list silently changed how the music sounded.
         eqPreset: id,
         // Carry the current curve into Custom so the sliders keep their shape.
         eqGains: curve ? normalizeGains(curve) : normalizeGains(gains),
@@ -137,6 +145,10 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
                 activeOpacity={0.75}
                 onPress={() => pickPreset(p.id)}
                 style={[styles.preset, on && styles.presetOn]}>
+                <PresetIcon
+                  name={p.icon}
+                  color={on ? C.bg : C.sub}
+                />
                 <Text style={[styles.presetText, on && styles.presetTextOn]}>
                   {p.label}
                 </Text>
@@ -308,13 +320,16 @@ const styles = StyleSheet.create({
   presets: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
     paddingHorizontal: S.gutter,
   },
   preset: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    // Three per row: (100% - two 10px gaps) / 3.
+    width: '31.5%',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: C.border,
   },

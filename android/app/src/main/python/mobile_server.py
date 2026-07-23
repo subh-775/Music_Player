@@ -1546,13 +1546,24 @@ def sources_status():
         "soundcloud": {"status": "ready", "type": "audio", "quality": "128kbps MP3"},
         "itunes": {"status": "ready", "type": "metadata", "quality": "artwork/tags"},
         "musicbrainz": {"status": "ready", "type": "metadata", "quality": "ISRC/lookup"},
-        "youtube": {
-            "status": "unavailable",
-            "type": "audio",
-            "quality": "n/a",
-            "error": "YouTube needs a JavaScript runtime (Deno) to solve its "
-                     "signature challenge; none exists for Android.",
-        },
+    }
+
+    # YouTube is real on THIS build: NewPipeExtractor bundles Rhino and solves
+    # the signature challenge on-device, so the old "needs Deno" copy was a
+    # leftover from the desktop build and simply untrue here. Report what the
+    # extractor actually says, and whether the user has switched it on.
+    try:
+        import newpipe_yt
+        yt_ok = newpipe_yt.is_supported()
+    except Exception:
+        yt_ok = False
+
+    sources["youtube"] = {
+        "status": "ready" if (yt_ok and _youtube_enabled) else
+                  "off" if yt_ok else "unavailable",
+        "type": "audio",
+        "quality": "up to 160kbps Opus" if yt_ok else "n/a",
+        "error": None if yt_ok else "Not supported on this device.",
     }
     return jsonify({"sources": sources})
 

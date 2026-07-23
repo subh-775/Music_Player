@@ -13,14 +13,13 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
-  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Pin, Plus, Settings as SettingsIcon} from 'lucide-react-native';
+import {Pin, Plus} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getLocalLibrary, type Track} from '../backend';
 import {useLikes} from '../store';
@@ -53,13 +52,7 @@ function idOf(c: Collection): string {
   });
 }
 
-export function LibraryScreen({
-  onOpen,
-  onOpenSettings,
-}: {
-  onOpen: (c: Collection) => void;
-  onOpenSettings: () => void;
-}) {
+export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
   const [filter, setFilter] = useState<Filter>('all');
   const [downloads, setDownloads] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,9 +121,6 @@ export function LibraryScreen({
     <View style={styles.wrap}>
       <View style={styles.bar}>
         <Text style={styles.title}>Your Library</Text>
-        <TouchableOpacity onPress={onOpenSettings} hitSlop={12} style={styles.barBtn}>
-          <SettingsIcon size={22} color={C.sub} />
-        </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setCreating(true)}
           hitSlop={12}
@@ -166,13 +156,7 @@ export function LibraryScreen({
           keyExtractor={c => c.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={false}
-              onRefresh={loadDownloads}
-              tintColor={C.sub}
-            />
-          }
+
           ListEmptyComponent={
             <Text style={styles.empty}>Nothing here yet.</Text>
           }

@@ -2,14 +2,13 @@
  * One track line. Shared by Search, Library, albums and playlists so a track
  * looks and behaves the same everywhere in the app.
  */
-import React, {useCallback, useState} from 'react';
+import React from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {ArrowDownToLine, Check, Heart, MoreVertical} from 'lucide-react-native';
+import {Heart, MoreVertical} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {formatDuration, startDownload, type Track} from '../backend';
+import {formatDuration, type Track} from '../backend';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {useLike} from '../store';
-import {toast} from '../toast';
 import {SourceBadge} from './Badges';
 
 export function TrackRow({
@@ -35,22 +34,6 @@ export function TrackRow({
   const dur = formatDuration(track.duration_ms);
   const artwork = getBestArtworkUrl(track);
   const {liked, toggle} = useLike(track);
-  const [downloading, setDownloading] = useState(false);
-  const downloaded = !!track.file_path;
-
-  const download = useCallback(async () => {
-    if (downloading || downloaded) {
-      return;
-    }
-    setDownloading(true);
-    try {
-      await startDownload(track);
-      toast(`Downloading "${cleanText(track.title)}"`);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start that download');
-      setDownloading(false);
-    }
-  }, [track, downloading, downloaded]);
 
   return (
     <TouchableOpacity
@@ -83,26 +66,13 @@ export function TrackRow({
       </View>
 
       {showActions && (
-        <>
-          <TouchableOpacity onPress={toggle} hitSlop={6} style={styles.act}>
-            <Heart
-              size={18}
-              color={liked ? C.accent : C.faint}
-              fill={liked ? C.accent : 'transparent'}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={download}
-            hitSlop={6}
-            style={styles.act}
-            disabled={downloaded || downloading}>
-            {downloaded || downloading ? (
-              <Check size={18} color={C.accent} />
-            ) : (
-              <ArrowDownToLine size={18} color={C.faint} />
-            )}
-          </TouchableOpacity>
-        </>
+        <TouchableOpacity onPress={toggle} hitSlop={6} style={styles.act}>
+          <Heart
+            size={18}
+            color={liked ? C.accent : C.faint}
+            fill={liked ? C.accent : 'transparent'}
+          />
+        </TouchableOpacity>
       )}
 
       {!!onMenu && (

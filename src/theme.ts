@@ -3,9 +3,9 @@
  * the app stays visually consistent as it grows — no per-file magic values.
  */
 export const C = {
-  bg: '#0b0c10',
-  surface: '#15171d',
-  surfaceHi: '#1c1f27',
+  bg: '#000000',   // true black: AMOLED pixels off, not near-black
+  surface: '#121212',
+  surfaceHi: '#1c1c1c',
   text: '#f4f5f7',
   sub: '#9096a2',
   faint: '#5c626e',

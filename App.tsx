@@ -131,6 +131,13 @@ function Shell() {
     [play],
   );
 
+  const switchTab = useCallback((next: Tab) => {
+    setTab(next);
+    setCollection(null);
+    setArtist(null);
+    setImportUrl(null);
+  }, []);
+
   const openSheet = useCallback((track: Track, from?: SheetContext) => {
     setSheetTrack(track);
     setSheetFrom(from ?? null);
@@ -156,11 +163,7 @@ function Shell() {
           />
         )}
         {tab === 'library' && (
-          <LibraryScreen
-            key={libraryNonce}
-            onOpen={setCollection}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
+          <LibraryScreen key={libraryNonce} onOpen={setCollection} />
         )}
 
         {/* Overlays, innermost last. */}
@@ -212,7 +215,7 @@ function Shell() {
 
       {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
 
-      <BottomNav active={tab} onChange={setTab} />
+      <BottomNav active={tab} onChange={switchTab} />
 
       <Modal
         visible={settingsOpen}

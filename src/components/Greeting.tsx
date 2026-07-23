@@ -71,6 +71,6 @@ export function Greeting() {
 const styles = StyleSheet.create({
   wrap: {flex: 1, minWidth: 0},
   line: {flexDirection: 'row', alignItems: 'baseline'},
-  good: {fontSize: 27, fontWeight: '800', color: C.text, letterSpacing: -0.6},
-  word: {fontSize: 27, fontWeight: '800', letterSpacing: -0.6},
+  good: {fontSize: 33, fontWeight: '900', color: C.text, letterSpacing: -1.1},
+  word: {fontSize: 33, fontWeight: '900', letterSpacing: -1.1},
 });

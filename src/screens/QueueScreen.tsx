@@ -23,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {GripVertical} from 'lucide-react-native';
+import {Menu} from 'lucide-react-native';
 import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
 import {TrackPlayer} from '../player';
@@ -205,7 +205,7 @@ export function QueuePane() {
             </TouchableOpacity>
 
             <View style={styles.grip} {...makeDragResponder(i).panHandlers}>
-              <GripVertical size={19} color={C.faint} />
+              <Menu size={19} color={C.faint} />
             </View>
           </Animated.View>
         );
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   title: {...T.body, color: C.text},
   titleActive: {color: C.accent},
   artist: {...T.sub, color: C.sub, marginTop: 2},
-  grip: {padding: 10},
+  grip: {paddingHorizontal: 14, paddingVertical: 18},
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40},
   emptyText: {color: C.faint, fontSize: 13, textAlign: 'center', lineHeight: 19},
 });

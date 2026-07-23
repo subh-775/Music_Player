@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +27,6 @@ export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
   const [rows, setRows] = useState<HomeRow[]>([]);
   const [phase, setPhase] = useState<'boot' | 'ready' | 'error'>('boot');
   const [error, setError] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async (isRefresh = false) => {
     if (!isRefresh) {
@@ -49,12 +47,6 @@ export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
 
   useEffect(() => {
     load();
-  }, [load]);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    await load(true);
-    setRefreshing(false);
   }, [load]);
 
   if (phase === 'boot') {
@@ -81,18 +73,11 @@ export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
     <ScrollView
       contentContainerStyle={styles.scroll}
       showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={refresh}
-          tintColor={C.accent}
-          colors={[C.accent]}
-        />
-      }>
+>
       <View style={styles.header}>
         <Greeting />
         <TouchableOpacity onPress={onOpenSettings} hitSlop={14} style={styles.gear}>
-          <SettingsIcon size={23} color={C.sub} />
+          <SettingsIcon size={24} color={C.text} strokeWidth={2.4} />
         </TouchableOpacity>
       </View>
 

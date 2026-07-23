@@ -8,9 +8,8 @@
  * Swiping it left or right skips, matching the gesture on the full player's
  * artwork, so the same motion means the same thing in both places.
  */
-import React, {useCallback, useMemo, useRef} from 'react';
+import React, {useMemo} from 'react';
 import {
-  Animated,
   Image,
   PanResponder,
   StyleSheet,
@@ -24,7 +23,6 @@ import {
   Heart,
   Pause,
   Play,
-  SkipForward,
 } from 'lucide-react-native';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
@@ -53,16 +51,6 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const track = useMemo(() => sourceTrackFor(active), [active]);
   const {liked, toggle} = useLike(track);
 
-  const slide = useRef(new Animated.Value(0)).current;
-
-  const settle = useCallback(() => {
-    Animated.spring(slide, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 6,
-    }).start();
-  }, [slide]);
-
   const pan = useMemo(
     () =>
       PanResponder.create({
@@ -73,18 +61,18 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
         // straight tap still falls through to the child.
         onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderMove: (_e, g) => slide.setValue(g.dx * 0.4),
+        // No follow-the-finger travel. The bar is small and permanently on
+        // screen, so any movement here reads as the UI coming loose rather
+        // than as a gesture — the song simply changes.
         onPanResponderRelease: (_e, g) => {
           if (g.dx <= -SWIPE_COMMIT) {
-            skipNext().finally(settle);
+            skipNext();
           } else if (g.dx >= SWIPE_COMMIT) {
-            skipPrevious().finally(settle);
-          } else {
-            settle();
+            skipPrevious();
           }
         },
       }),
-    [slide, settle],
+    [],
   );
 
   if (!active) {
@@ -99,7 +87,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
     <View style={styles.wrap} {...pan.panHandlers}>
       {/* The BAR stays put; only its contents travel. Sliding the whole bar
           made the chrome look like it was falling off the screen every skip. */}
-      <Animated.View style={[styles.slider, {transform: [{translateX: slide}]}]}>
+      <View style={styles.slider}>
       <TouchableOpacity
         style={styles.main}
         activeOpacity={0.85}
@@ -129,7 +117,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           )}
         </View>
       </TouchableOpacity>
-      </Animated.View>
+      </View>
 
       <View style={styles.controls}>
         {!!output && <Headphones size={20} color={C.accent} />}
@@ -153,12 +141,6 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => skipNext()}
-          hitSlop={8}
-          style={styles.ctl}>
-          <SkipForward size={21} color={C.text} fill={C.text} />
-        </TouchableOpacity>
       </View>
 
       <View style={styles.progressTrack}>

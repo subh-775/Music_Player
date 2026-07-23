@@ -47,7 +47,6 @@ import {
   Play,
   Plus,
   Repeat,
-  Repeat1,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -201,13 +200,15 @@ export function PlayerScreen({
     [slide, commit],
   );
 
-  const cycleRepeat = useCallback(() => {
-    const next =
-      repeat === RepeatMode.Off
-        ? RepeatMode.Queue
-        : repeat === RepeatMode.Queue
-        ? RepeatMode.Track
-        : RepeatMode.Off;
+  /**
+   * Repeat is a two-state switch, not a three-state cycle.
+   *
+   * RepeatMode.Track would make "next" replay the same song, which contradicts
+   * the skip button. Queue repeat keeps skip meaning skip and simply wraps at
+   * the end — that is what people mean by "repeat" here.
+   */
+  const toggleRepeat = useCallback(() => {
+    const next = repeat === RepeatMode.Off ? RepeatMode.Queue : RepeatMode.Off;
     setRepeatState(next);
     setRepeat(next).catch(() => {});
   }, [repeat]);
@@ -241,7 +242,6 @@ export function PlayerScreen({
   }
 
   const playing = state === State.Playing;
-  const busy = state === State.Buffering || state === State.Loading;
   const artwork = track ? getBestArtworkUrl(track) : String(active.artwork ?? '');
   const title = cleanText(String(active.title ?? ''));
   const artists = splitArtists(String(active.artist ?? '')).join(', ');
@@ -419,9 +419,7 @@ export function PlayerScreen({
               onPress={() => togglePlay()}
               activeOpacity={0.85}
               style={styles.playBtn}>
-              {busy ? (
-                <ActivityIndicator color={C.bg} />
-              ) : playing ? (
+              {playing ? (
                 <Pause size={30} color={C.bg} fill={C.bg} />
               ) : (
                 <Play size={30} color={C.bg} fill={C.bg} style={styles.playNudge} />
@@ -435,15 +433,12 @@ export function PlayerScreen({
               <SkipForward size={34} color={C.text} fill={C.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={cycleRepeat} hitSlop={10} style={styles.tBtn}>
-              {repeat === RepeatMode.Track ? (
-                <Repeat1 size={24} color={C.accent} />
-              ) : (
-                <Repeat
-                  size={24}
-                  color={repeat === RepeatMode.Queue ? C.accent : C.sub}
-                />
-              )}
+            <TouchableOpacity onPress={toggleRepeat} hitSlop={10} style={styles.tBtn}>
+              <Repeat
+                size={24}
+                color={repeat === RepeatMode.Off ? C.sub : C.accent}
+                strokeWidth={repeat === RepeatMode.Off ? 2 : 2.6}
+              />
             </TouchableOpacity>
           </View>
         </View>
