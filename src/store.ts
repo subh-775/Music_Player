@@ -22,6 +22,7 @@ export type Settings = {
   showSourceBadge: boolean;
   showQualityBadge: boolean;
   autoplay: boolean;
+  crossfadeDuration: number; // seconds; 0 = off
   normalizeVolume: boolean;
   eqEnabled: boolean;
   eqPreset: string;
@@ -33,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showSourceBadge: true,
   showQualityBadge: true,
   autoplay: true,
+  crossfadeDuration: 0,
   normalizeVolume: false,
   // Off by default: an untouched signal path is the one guaranteed to play
   // everywhere, and an effect the user didn't ask for is a bug report.

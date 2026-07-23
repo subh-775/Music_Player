@@ -10,12 +10,21 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {Settings as SettingsIcon} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {getHome, waitForBackend, type HomeItem, type HomeRow} from '../backend';
+import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
+import {Greeting} from '../components/Greeting';
+import {useRecentlyPlayed} from '../recentlyPlayed';
+import {getBestArtworkUrl, cleanText} from '../tracks';
 
-type Props = {onPickTrack: (item: HomeItem) => void};
+type Props = {
+  onPickTrack: (item: HomeItem) => void;
+  onPlayTrack: (track: Track, context: Track[]) => void;
+  onOpenSettings: () => void;
+};
 
-export function HomeScreen({onPickTrack}: Props) {
+export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
+  const recent = useRecentlyPlayed();
   const [rows, setRows] = useState<HomeRow[]>([]);
   const [phase, setPhase] = useState<'boot' | 'ready' | 'error'>('boot');
   const [error, setError] = useState('');
@@ -80,7 +89,46 @@ export function HomeScreen({onPickTrack}: Props) {
           colors={[C.accent]}
         />
       }>
-      <Text style={styles.title}>Home</Text>
+      <View style={styles.header}>
+        <Greeting />
+        <TouchableOpacity onPress={onOpenSettings} hitSlop={14} style={styles.gear}>
+          <SettingsIcon size={23} color={C.sub} />
+        </TouchableOpacity>
+      </View>
+
+      {recent.length > 0 && (
+        <View style={styles.row}>
+          <Text style={styles.rowTitle}>Recently played</Text>
+          <FlatList
+            horizontal
+            data={recent}
+            keyExtractor={(t, i) => `${t.title}-${i}`}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rowList}
+            renderItem={({item}) => (
+              <TouchableOpacity
+                style={styles.card}
+                activeOpacity={0.7}
+                onPress={() => onPlayTrack(item, recent)}>
+                <View style={styles.artWrap}>
+                  {getBestArtworkUrl(item) ? (
+                    <Image
+                      source={{uri: getBestArtworkUrl(item)}}
+                      style={styles.art}
+                    />
+                  ) : (
+                    <View style={[styles.art, styles.artFallback]} />
+                  )}
+                </View>
+                <Text style={styles.cardTitle} numberOfLines={2}>
+                  {cleanText(item.title)}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+
       {rows.map(row => (
         <Row key={row.title} row={row} onPick={onPickTrack} />
       ))}
@@ -140,6 +188,15 @@ const CARD = 138;
 
 const styles = StyleSheet.create({
   scroll: {paddingBottom: 24},
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: S.gutter,
+    paddingTop: 16,
+    paddingBottom: 6,
+    gap: 12,
+  },
+  gear: {padding: 2},
   title: {
     ...T.screenTitle,
     color: C.text,

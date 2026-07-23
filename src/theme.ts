@@ -23,9 +23,20 @@ export const S = {
   radius: 10,
 };
 
+/**
+ * Type scale. Sizes are the base values put through [fs], which lifts
+ * everything a couple of percent — enough to read easier on a phone without
+ * reflowing any layout.
+ */
+export const TYPE_SCALE = 1.02;
+
+/** Scale a font size by TYPE_SCALE, rounded to the nearest half point. */
+export const fs = (size: number): number =>
+  Math.round(size * TYPE_SCALE * 2) / 2;
+
 export const T = {
-  screenTitle: {fontSize: 26, fontWeight: '800' as const, letterSpacing: -0.5},
-  rowTitle: {fontSize: 17, fontWeight: '700' as const, letterSpacing: -0.2},
-  body: {fontSize: 14.5, fontWeight: '600' as const},
-  sub: {fontSize: 12.5, fontWeight: '500' as const},
+  screenTitle: {fontSize: fs(26), fontWeight: '800' as const, letterSpacing: -0.5},
+  rowTitle: {fontSize: fs(17), fontWeight: '700' as const, letterSpacing: -0.2},
+  body: {fontSize: fs(14.5), fontWeight: '600' as const},
+  sub: {fontSize: fs(12.5), fontWeight: '500' as const},
 };

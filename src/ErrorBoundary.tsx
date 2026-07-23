@@ -3,6 +3,7 @@
  * instead of a dead app. Without this, one thrown error in any screen unmounts
  * the whole UI to a blank (release) or red (debug) screen with no way back.
  */
+import {C} from './theme';
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
@@ -52,7 +53,7 @@ const styles = StyleSheet.create({
   title: {color: '#f2f3f5', fontSize: 18, fontWeight: '700'},
   msg: {color: '#8b8f9a', fontSize: 13, textAlign: 'center'},
   btn: {
-    backgroundColor: '#f5a623',
+    backgroundColor: C.accent,
     paddingHorizontal: 22,
     paddingVertical: 10,
     borderRadius: 999,

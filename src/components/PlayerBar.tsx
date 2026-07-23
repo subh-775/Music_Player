@@ -28,6 +28,7 @@ import {
 } from 'lucide-react-native';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
+import {Marquee} from './Marquee';
 import {
   State,
   skipNext,
@@ -95,9 +96,10 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const pct = duration > 0 ? Math.min(1, position / duration) : 0;
 
   return (
-    <Animated.View
-      style={[styles.wrap, {transform: [{translateX: slide}]}]}
-      {...pan.panHandlers}>
+    <View style={styles.wrap} {...pan.panHandlers}>
+      {/* The BAR stays put; only its contents travel. Sliding the whole bar
+          made the chrome look like it was falling off the screen every skip. */}
+      <Animated.View style={[styles.slider, {transform: [{translateX: slide}]}]}>
       <TouchableOpacity
         style={styles.main}
         activeOpacity={0.85}
@@ -109,9 +111,10 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
         )}
 
         <View style={styles.text}>
-          <Text style={styles.title} numberOfLines={1}>
-            {cleanText(String(active.title ?? ''))}
-          </Text>
+          <Marquee
+            text={cleanText(String(active.title ?? ''))}
+            style={styles.title}
+          />
           {output ? (
             <View style={styles.outputRow}>
               <Bluetooth size={11} color={C.accent} />
@@ -126,6 +129,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           )}
         </View>
       </TouchableOpacity>
+      </Animated.View>
 
       <View style={styles.controls}>
         {!!output && <Headphones size={20} color={C.accent} />}
@@ -160,7 +164,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, {width: `${pct * 100}%`}]} />
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -174,6 +178,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.surfaceHi,
     overflow: 'hidden',
   },
+  slider: {flex: 1, minWidth: 0, flexDirection: 'row'},
   main: {
     flex: 1,
     flexDirection: 'row',

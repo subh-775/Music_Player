@@ -28,8 +28,8 @@ import {
 } from './src/components/TrackActionSheet';
 import {C, S} from './src/theme';
 import {getCollection, type HomeItem, type Track} from './src/backend';
-import {playTrack, setupPlayer} from './src/player';
-import {hydrate} from './src/store';
+import {playTrack, setupPlayer, startCrossfadeWatcher} from './src/player';
+import {hydrate, readSettings} from './src/store';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
 import {applyAudioEffects} from './src/audioEffects';
@@ -61,6 +61,9 @@ function Shell() {
   useEffect(() => {
     hydrate().then(applyAudioEffects);
     setupPlayer().then(setEngine);
+    // Reads the setting each tick rather than closing over it, so changing
+    // crossfade takes effect without restarting the watcher.
+    startCrossfadeWatcher(() => readSettings().crossfadeDuration);
   }, []);
 
   const play = useCallback(async (track: Track, context?: Track[]) => {
@@ -138,7 +141,13 @@ function Shell() {
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
       <View style={styles.body}>
-        {tab === 'home' && <HomeScreen onPickTrack={pickHomeItem} />}
+        {tab === 'home' && (
+          <HomeScreen
+            onPickTrack={pickHomeItem}
+            onPlayTrack={play}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
         {tab === 'search' && (
           <SearchScreen
             onPickTrack={play}

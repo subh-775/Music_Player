@@ -22,6 +22,7 @@ import TrackPlayer, {
 import {apiUrl, type Track} from './backend';
 import {currentQuality} from './store';
 import {applyAudioEffects} from './audioEffects';
+import {remember} from './recentlyPlayed';
 
 let ready = false;
 let available: boolean | null = null;
@@ -202,6 +203,10 @@ export async function playTrack(
   }
   await TrackPlayer.play();
 
+  // Recorded at play-START, before enrichment runs. remember() replaces an
+  // existing entry rather than appending, so the cleaned-up version wins later.
+  remember(items[startAt].t);
+
   // Android destroys audio effects along with the audio session, so the EQ has
   // to be re-attached each time playback starts — otherwise the setting works
   // for exactly one song and then silently stops.
@@ -299,6 +304,58 @@ export async function stop(): Promise<void> {
 
 export async function seekTo(seconds: number): Promise<void> {
   await TrackPlayer.seekTo(seconds);
+}
+
+/**
+ * Fade between songs.
+ *
+ * NOT a true crossfade, and the setting's hint says so. A real one overlaps two
+ * streams, which needs two players; ExoPlayer here is a single output, so this
+ * fades the outgoing track down and the next one back up. The gap is what a
+ * second player would have filled.
+ *
+ * Runs off the progress tick rather than a timer so it can't drift from the
+ * audio, and re-arms per track via `fadedFor`.
+ */
+let fadeTimer: ReturnType<typeof setInterval> | null = null;
+let fadedFor = '';
+
+export function startCrossfadeWatcher(getSeconds: () => number): void {
+  if (fadeTimer) {
+    return;
+  }
+  fadeTimer = setInterval(async () => {
+    const span = getSeconds();
+    if (span <= 0) {
+      return;
+    }
+    try {
+      const {position, duration} = await TrackPlayer.getProgress();
+      const active = await TrackPlayer.getActiveTrackIndex();
+      const key = `${active}`;
+      if (duration <= 0 || position <= 0) {
+        return;
+      }
+      const remaining = duration - position;
+
+      if (remaining <= span && fadedFor !== key) {
+        fadedFor = key;
+        // Ramp down over the remaining window, then restore volume so the next
+        // track doesn't start silent.
+        const steps = 8;
+        for (let i = 1; i <= steps; i++) {
+          await TrackPlayer.setVolume(Math.max(0, 1 - i / steps));
+          await new Promise(r => setTimeout(r, (span * 1000) / steps));
+        }
+        await TrackPlayer.setVolume(1);
+      } else if (remaining > span && fadedFor === key) {
+        // Seeked backwards — let it fade again on the next approach.
+        fadedFor = '';
+      }
+    } catch {
+      /* engine not up */
+    }
+  }, 1000);
 }
 
 export {TrackPlayer, State, Event, RepeatMode};

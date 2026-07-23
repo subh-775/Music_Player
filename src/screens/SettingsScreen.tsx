@@ -255,6 +255,24 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
               }
               onPress={() => setPanel('equalizer')}
             />
+            <NavRow
+              label="Crossfade"
+              value={
+                settings.crossfadeDuration > 0
+                  ? `${settings.crossfadeDuration}s`
+                  : 'Off'
+              }
+              onPress={() =>
+                // 0 -> 3 -> 6 -> 9 -> 12 -> off. A stepper rather than its own
+                // screen; there are only five useful values.
+                writeSetting(
+                  'crossfadeDuration',
+                  settings.crossfadeDuration >= 12
+                    ? 0
+                    : settings.crossfadeDuration + 3,
+                )
+              }
+            />
             <ToggleRow
               label="Normalize volume"
               hint="Even out loudness between songs"
