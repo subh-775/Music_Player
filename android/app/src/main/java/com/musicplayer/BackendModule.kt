@@ -20,5 +20,10 @@ class BackendModule(reactContext: ReactApplicationContext) :
         mapOf(
             "port" to BuildConfig.BACKEND_PORT,
             "token" to PythonBackend.apiToken,
+            "version" to (
+                reactApplicationContext.packageManager
+                    .getPackageInfo(reactApplicationContext.packageName, 0)
+                    .versionName ?: ""
+            ),
         )
 }

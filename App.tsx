@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
+  Modal,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -10,39 +11,36 @@ import {
 import {ErrorBoundary} from './src/ErrorBoundary';
 import {HomeScreen} from './src/screens/HomeScreen';
 import {SearchScreen} from './src/screens/SearchScreen';
-import {LibraryScreen} from './src/screens/LibraryScreen';
+import {LibraryScreen, type OpenList} from './src/screens/LibraryScreen';
 import {SettingsScreen} from './src/screens/SettingsScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
+import {TrackListScreen} from './src/screens/TrackListScreen';
 import {PlayerScreen} from './src/screens/PlayerScreen';
 import {PlayerBar} from './src/components/PlayerBar';
-import {C, S, T} from './src/theme';
+import {BottomNav, type Tab} from './src/components/BottomNav';
+import {C, S} from './src/theme';
 import {type HomeItem, type Track} from './src/backend';
 import {playTrack, setupPlayer} from './src/player';
-
-type Tab = 'home' | 'search' | 'library' | 'settings';
-
-const TABS: {key: Tab; label: string}[] = [
-  {key: 'home', label: 'Home'},
-  {key: 'search', label: 'Search'},
-  {key: 'library', label: 'Library'},
-  {key: 'settings', label: 'Settings'},
-];
+import {hydrate} from './src/store';
 
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
   const [collection, setCollection] = useState<HomeItem | null>(null);
+  const [list, setList] = useState<OpenList | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
+    hydrate();
     setupPlayer().then(setEngine);
   }, []);
 
-  const play = useCallback(async (track: Track) => {
+  const play = useCallback(async (track: Track, context?: Track[]) => {
     try {
-      await playTrack(track);
+      await playTrack(track, context);
       setNotice('');
       setEngine(true);
     } catch (e) {
@@ -72,12 +70,15 @@ function Shell() {
       <View style={styles.body}>
         {tab === 'home' && <HomeScreen onPickTrack={pickHomeItem} />}
         {tab === 'search' && <SearchScreen onPickTrack={play} />}
-        {tab === 'library' && <LibraryScreen onPickTrack={play} />}
-        {tab === 'settings' && <SettingsScreen />}
+        {tab === 'library' && (
+          <LibraryScreen
+            onOpenList={setList}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
       </View>
 
-      {/* Shown only when playback genuinely isn't available, so it can't be
-          mistaken for a normal part of the UI. */}
+      {/* Shown only when playback genuinely isn't available. */}
       {!!notice && (
         <TouchableOpacity style={styles.notice} onPress={() => setNotice('')}>
           <Text style={styles.noticeText}>{notice}</Text>
@@ -86,27 +87,34 @@ function Shell() {
 
       {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
 
-      <View style={styles.tabs}>
-        {TABS.map(t => (
-          <TouchableOpacity
-            key={t.key}
-            style={styles.tab}
-            activeOpacity={0.7}
-            onPress={() => setTab(t.key)}>
-            <Text
-              style={[styles.tabText, tab === t.key && styles.tabTextActive]}>
-              {t.label}
-            </Text>
-            {tab === t.key && <View style={styles.tabMark} />}
-          </TouchableOpacity>
-        ))}
-      </View>
+      <BottomNav active={tab} onChange={setTab} />
 
       <CollectionScreen
         item={collection}
         onClose={() => setCollection(null)}
         onPickTrack={play}
       />
+
+      <Modal
+        visible={!!list}
+        animationType="slide"
+        onRequestClose={() => setList(null)}>
+        {!!list && (
+          <TrackListScreen
+            title={list.title}
+            tracks={list.tracks}
+            onClose={() => setList(null)}
+            onPickTrack={play}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        visible={settingsOpen}
+        animationType="slide"
+        onRequestClose={() => setSettingsOpen(false)}>
+        <SettingsScreen onClose={() => setSettingsOpen(false)} />
+      </Modal>
 
       {engine && (
         <PlayerScreen
@@ -137,14 +145,4 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   noticeText: {color: C.sub, fontSize: 12.5, lineHeight: 17},
-  tabs: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-    backgroundColor: C.bg,
-  },
-  tab: {flex: 1, alignItems: 'center', paddingVertical: 11, gap: 5},
-  tabText: {...T.sub, color: C.faint},
-  tabTextActive: {color: C.text},
-  tabMark: {width: 14, height: 2, borderRadius: 2, backgroundColor: C.accent},
 });

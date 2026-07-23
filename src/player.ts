@@ -20,13 +20,17 @@ import TrackPlayer, {
   State,
 } from 'react-native-track-player';
 import {apiUrl, type Track} from './backend';
+import {currentQuality} from './store';
 
 let ready = false;
 let available: boolean | null = null;
 
 /** Build the streaming URL. proxy_stream handles range requests + the bitrate
  *  ladder, and apiUrl attaches the API token the backend requires. */
-export function streamUrlFor(track: Track, bitrate = 320): string | null {
+export function streamUrlFor(
+  track: Track,
+  bitrate = currentQuality(),
+): string | null {
   const source = track.playable_source || track.primary_source || '';
   const url = source ? track.sources?.[source]?.url : undefined;
   if (!url) {
@@ -139,7 +143,7 @@ async function requireEngine(): Promise<void> {
 export async function playTrack(
   track: Track,
   context?: Track[],
-  bitrate = 320,
+  bitrate = currentQuality(),
 ): Promise<void> {
   await requireEngine();
 

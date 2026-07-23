@@ -33,7 +33,19 @@ import {
   skipPrevious,
   togglePlay,
 } from '../player';
+import {
+  ChevronDown,
+  Heart,
+  Pause,
+  Play,
+  Repeat,
+  Repeat1,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+} from 'lucide-react-native';
 import {getLyrics, type Lyrics} from '../backend';
+import {useLike} from '../store';
 import {QueueScreen} from './QueueScreen';
 
 function clock(sec: number): string {
@@ -57,6 +69,15 @@ export function PlayerScreen({
   const track = useActiveTrack();
   const {state} = usePlaybackState() as {state?: State};
   const {position, duration} = useProgress(500);
+
+  const likeTarget = useMemo(
+    () =>
+      track
+        ? {title: String(track.title ?? ''), artist: String(track.artist ?? '')}
+        : null,
+    [track],
+  );
+  const {liked, toggle: toggleLike} = useLike(likeTarget as never);
 
   const [pane, setPane] = useState<'song' | 'lyrics' | 'queue'>('song');
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
@@ -172,7 +193,7 @@ export function PlayerScreen({
       <View style={styles.wrap}>
         <View style={styles.topBar}>
           <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
-            <Text style={styles.chevron}>⌄</Text>
+            <ChevronDown size={26} color={C.sub} />
           </TouchableOpacity>
           <View style={styles.panes}>
             {(['song', 'lyrics', 'queue'] as const).map(p => (
@@ -224,13 +245,23 @@ export function PlayerScreen({
           </View>
         )}
 
-        <View style={styles.meta}>
-          <Text style={styles.title} numberOfLines={2}>
-            {track.title}
-          </Text>
-          <Text style={styles.artist} numberOfLines={1}>
-            {track.artist}
-          </Text>
+        <View style={styles.metaRow}>
+          <View style={styles.meta}>
+            <Text style={styles.title} numberOfLines={2}>
+              {track.title}
+            </Text>
+            <Text style={styles.artist} numberOfLines={1}>
+              {track.artist}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={toggleLike} hitSlop={12}>
+            <Heart
+              size={23}
+              color={liked ? C.accent : C.faint}
+              fill={liked ? C.accent : 'transparent'}
+              strokeWidth={2}
+            />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.seekBlock}>
@@ -260,11 +291,11 @@ export function PlayerScreen({
 
         <View style={styles.controls}>
           <TouchableOpacity onPress={() => shuffleQueue()} hitSlop={12}>
-            <Text style={styles.sideBtn}>⤨</Text>
+            <Shuffle size={20} color={C.faint} strokeWidth={2.2} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={skipPrevious} hitSlop={12}>
-            <Text style={styles.skip}>⏮</Text>
+            <SkipBack size={30} color={C.text} fill={C.text} strokeWidth={1} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -273,23 +304,27 @@ export function PlayerScreen({
             activeOpacity={0.85}>
             {loading ? (
               <ActivityIndicator color={C.bg} />
+            ) : playing ? (
+              <Pause size={26} color={C.bg} fill={C.bg} strokeWidth={1} />
             ) : (
-              <Text style={styles.playIcon}>{playing ? '❚❚' : '▶'}</Text>
+              <Play size={26} color={C.bg} fill={C.bg} strokeWidth={1} />
             )}
           </TouchableOpacity>
 
           <TouchableOpacity onPress={skipNext} hitSlop={12}>
-            <Text style={styles.skip}>⏭</Text>
+            <SkipForward size={30} color={C.text} fill={C.text} strokeWidth={1} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={cycleRepeat} hitSlop={12}>
-            <Text
-              style={[
-                styles.sideBtn,
-                repeat !== RepeatMode.Off && styles.sideBtnOn,
-              ]}>
-              {repeat === RepeatMode.Track ? '🔂' : '🔁'}
-            </Text>
+            {repeat === RepeatMode.Track ? (
+              <Repeat1 size={20} color={C.accent} strokeWidth={2.2} />
+            ) : (
+              <Repeat
+                size={20}
+                color={repeat === RepeatMode.Queue ? C.accent : C.faint}
+                strokeWidth={2.2}
+              />
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -439,7 +474,13 @@ const styles = StyleSheet.create({
   artArea: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   art: {width: 300, maxWidth: '100%', aspectRatio: 1, borderRadius: 14},
   artFallback: {backgroundColor: C.surface},
-  meta: {marginTop: 10, gap: 5},
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 10,
+  },
+  meta: {flex: 1, minWidth: 0, gap: 5},
   title: {color: C.text, fontSize: 21, fontWeight: '800', letterSpacing: -0.4},
   artist: {color: C.sub, fontSize: 14, fontWeight: '500'},
   seekBlock: {marginTop: 18},

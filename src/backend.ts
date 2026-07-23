@@ -9,9 +9,10 @@
  */
 import {NativeModules} from 'react-native';
 
-const {port, token} = (NativeModules.Backend ?? {}) as {
+const {port, token, version} = (NativeModules.Backend ?? {}) as {
   port?: number;
   token?: string;
+  version?: string;
 };
 
 const PORT = port ?? 8771;
@@ -56,6 +57,7 @@ export async function waitForBackend(timeoutMs = 30_000): Promise<boolean> {
 }
 
 export const backendPort = PORT;
+export const appVersion = version ?? '';
 
 // ─── Domain types + calls ────────────────────────────────────────────────────
 

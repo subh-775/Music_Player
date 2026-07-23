@@ -16,13 +16,19 @@ import {
   usePlaybackState,
   useProgress,
 } from 'react-native-track-player';
+import {Heart, Pause, Play, SkipForward} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {State, togglePlay} from '../player';
+import {useLike} from '../store';
+import {State, skipNext, togglePlay} from '../player';
 
 export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const track = useActiveTrack();
   const {state} = usePlaybackState() as {state?: State};
   const {position, duration} = useProgress(500);
+  const likeTarget = track
+    ? {title: String(track.title ?? ''), artist: String(track.artist ?? '')}
+    : null;
+  const {liked, toggle} = useLike(likeTarget as never);
 
   if (!track) {
     return null;
@@ -55,15 +61,25 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
             {track.artist}
           </Text>
         </View>
-        <TouchableOpacity
-          style={styles.btn}
-          onPress={togglePlay}
-          hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+        <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.btn}>
+          <Heart
+            size={19}
+            color={liked ? C.accent : C.faint}
+            fill={liked ? C.accent : 'transparent'}
+            strokeWidth={2}
+          />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={togglePlay} hitSlop={10} style={styles.btn}>
           {loading ? (
             <ActivityIndicator color={C.text} size="small" />
+          ) : playing ? (
+            <Pause size={22} color={C.text} fill={C.text} strokeWidth={1} />
           ) : (
-            <Text style={styles.btnIcon}>{playing ? '❚❚' : '▶'}</Text>
+            <Play size={22} color={C.text} fill={C.text} strokeWidth={1} />
           )}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={skipNext} hitSlop={10} style={styles.btn}>
+          <SkipForward size={21} color={C.text} fill={C.text} strokeWidth={1} />
         </TouchableOpacity>
       </TouchableOpacity>
     </View>
@@ -90,6 +106,5 @@ const styles = StyleSheet.create({
   meta: {flex: 1, minWidth: 0},
   title: {...T.body, color: C.text},
   artist: {...T.sub, color: C.sub, marginTop: 2},
-  btn: {paddingHorizontal: 6, paddingVertical: 4},
-  btnIcon: {color: C.text, fontSize: 17},
+  btn: {paddingHorizontal: 5, paddingVertical: 4},
 });
