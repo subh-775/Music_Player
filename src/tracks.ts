@@ -132,7 +132,8 @@ export function getPlayableSource(
 }
 
 export function isPlayableTrack(track: Track | null | undefined): boolean {
-  return Boolean(getPlayableSource(track));
+  // A file on disk is playable even though it has no streaming source.
+  return Boolean(track?.file_path) || Boolean(getPlayableSource(track));
 }
 
 /** The unique stream URL of a track's chosen source, or ''. */
@@ -241,7 +242,7 @@ export function normalizeTrack(track: Track | null | undefined): Track | null {
     artwork_urls: artworkUrls,
     primary_source: playableSource || track.primary_source || undefined,
     playable_source: playableSource || undefined,
-    is_playable: Boolean(playableSource),
+    is_playable: Boolean(playableSource) || Boolean(track.file_path),
   };
 }
 

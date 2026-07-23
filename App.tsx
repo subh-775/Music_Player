@@ -1,11 +1,10 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
+  BackHandler,
   Modal,
   SafeAreaView,
   StatusBar,
   StyleSheet,
-  Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import {ErrorBoundary} from './src/ErrorBoundary';
@@ -26,7 +25,7 @@ import {
   TrackActionSheet,
   type SheetContext,
 } from './src/components/TrackActionSheet';
-import {C, S} from './src/theme';
+import {C} from './src/theme';
 import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
 import {playTrack, setupPlayer, startCrossfadeWatcher} from './src/player';
 import {hydrate, readSettings} from './src/store';
@@ -56,7 +55,6 @@ function Shell() {
   const [playerOpen, setPlayerOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
-  const [notice, setNotice] = useState('');
   const [libraryNonce, setLibraryNonce] = useState(0);
 
   useEffect(() => {
@@ -70,11 +68,11 @@ function Shell() {
   const play = useCallback(async (track: Track, context?: Track[]) => {
     try {
       await playTrack(track, context);
-      setNotice('');
       setEngine(true);
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : String(e));
-      setEngine(false);
+      // A toast, not a bar in the layout: the old notice sat above the mini
+      // player and covered it, hiding the song that was actually playing.
+      toast(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -147,6 +145,71 @@ function Shell() {
     setArtist(null);
     setImportUrl(null);
   }, []);
+
+  /**
+   * Android's back button must walk the same stack the on-screen back arrow
+   * does. Without this it fell through to the OS and closed the whole app from
+   * inside a playlist, which is the one thing back should never do here.
+   *
+   * Order matters: innermost surface first, so back dismisses what is actually
+   * on top. Returning true says "handled"; returning false on the last screen
+   * lets Android exit, which IS what back means on Home.
+   */
+  useEffect(() => {
+    const onBack = () => {
+      if (playerOpen) {
+        setPlayerOpen(false);
+        return true;
+      }
+      if (addTo) {
+        setAddTo(null);
+        return true;
+      }
+      if (artistChoices.length) {
+        setArtistChoices([]);
+        return true;
+      }
+      if (sheetTrack) {
+        setSheetTrack(null);
+        return true;
+      }
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        return true;
+      }
+      if (artist) {
+        setArtist(null);
+        return true;
+      }
+      if (importUrl) {
+        setImportUrl(null);
+        return true;
+      }
+      if (collection) {
+        setCollection(null);
+        return true;
+      }
+      // Any tab other than Home goes to Home before the app will exit.
+      if (tab !== 'home') {
+        setTab('home');
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [
+    playerOpen,
+    addTo,
+    artistChoices,
+    sheetTrack,
+    settingsOpen,
+    artist,
+    importUrl,
+    collection,
+    tab,
+  ]);
 
   const openSheet = useCallback((track: Track, from?: SheetContext) => {
     setSheetTrack(track);
@@ -231,13 +294,6 @@ function Shell() {
         )}
       </View>
 
-      {/* Shown only when playback genuinely isn't available. */}
-      {!!notice && (
-        <TouchableOpacity style={styles.notice} onPress={() => setNotice('')}>
-          <Text style={styles.noticeText}>{notice}</Text>
-        </TouchableOpacity>
-      )}
-
       <Toaster bottom={engine ? 132 : 78} />
 
       {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
@@ -294,12 +350,4 @@ export default function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   body: {flex: 1},
-  notice: {
-    backgroundColor: C.surfaceHi,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-    paddingHorizontal: S.gutter,
-    paddingVertical: 11,
-  },
-  noticeText: {color: C.sub, fontSize: 12.5, lineHeight: 17},
 });

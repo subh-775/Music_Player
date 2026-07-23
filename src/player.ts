@@ -61,6 +61,13 @@ export function streamUrlFor(
   track: Track,
   bitrate = currentQuality(),
 ): string | null {
+  // A downloaded track has no `sources` at all — it was scanned off disk — so
+  // it is served straight from the file. Without this branch, playing anything
+  // from the Downloads folder failed with "no playable source", which is
+  // exactly backwards: it is the one track guaranteed to be available.
+  if (track.file_path) {
+    return apiUrl(`/local?path=${encodeURIComponent(track.file_path)}`);
+  }
   const source = track.playable_source || track.primary_source || '';
   const url = source ? track.sources?.[source]?.url : undefined;
   if (!url) {
