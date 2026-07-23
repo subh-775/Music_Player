@@ -1,201 +1,330 @@
 /**
- * Your Library — the same shape as the Fix-Spotify app: Liked Songs and
- * Downloaded are real, openable lists pinned at the top, with filter chips
- * above them, and Settings reachable from the header.
+ * Your Library.
+ *
+ * Every row here is a Collection (see collections.ts) — Liked Songs, your
+ * Downloads, saved albums and your own playlists are the same object rendered
+ * by the same row, so tapping any of them opens the same screen and plays the
+ * same way.
+ *
+ * Long-press pins a row to the top, up to five.
  */
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  ArrowDownToLine,
-  Heart,
-  Settings as SettingsIcon,
-} from 'lucide-react-native';
+import {Pin, Plus, Settings as SettingsIcon} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getLocalLibrary, type Track} from '../backend';
-import {useStore} from '../store';
+import {useLikes} from '../store';
+import {
+  collectionSubtitle,
+  useLibrary,
+  type Collection,
+} from '../collections';
+import {createPlaylist} from '../playlists';
+import {MAX_PINS, isPinned, rowId, sortPinned, togglePin, usePins} from '../pins';
+import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
+import {toast} from '../toast';
 
-export type OpenList = {title: string; tracks: Track[]};
+type Filter = 'all' | 'playlists' | 'albums' | 'artists';
 
-const FILTERS = [
+const FILTERS: Array<{id: Filter; label: string}> = [
   {id: 'all', label: 'All'},
-  {id: 'liked', label: 'Liked'},
-  {id: 'offline', label: 'Downloaded'},
-] as const;
-type Filter = (typeof FILTERS)[number]['id'];
+  {id: 'playlists', label: 'Playlists'},
+  {id: 'albums', label: 'Albums'},
+  {id: 'artists', label: 'Artists'},
+];
+
+/** Pins key off the row's kind, so a playlist and an album that happen to share
+ *  a name can be pinned independently. */
+function idOf(c: Collection): string {
+  return rowId(c.kind === 'album' ? 'album' : 'playlist', {
+    id: c.id,
+    name: c.name,
+    artist: c.artist,
+  });
+}
 
 export function LibraryScreen({
-  onOpenList,
+  onOpen,
   onOpenSettings,
 }: {
-  onOpenList: (list: OpenList) => void;
+  onOpen: (c: Collection) => void;
   onOpenSettings: () => void;
 }) {
-  const {likes} = useStore();
-  const [offline, setOffline] = useState<Track[]>([]);
-  const [dir, setDir] = useState('');
-  const [busy, setBusy] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
+  const [downloads, setDownloads] = useState<Track[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
 
-  const load = useCallback(async () => {
+  const likes = useLikes();
+  const pins = usePins();
+  const library = useLibrary(likes, downloads);
+
+  const loadDownloads = useCallback(async () => {
     try {
-      const lib = await getLocalLibrary();
-      setOffline(lib.tracks);
-      setDir(lib.download_dir);
+      const {tracks} = await getLocalLibrary();
+      setDownloads(tracks);
     } catch {
-      setOffline([]);
+      // Offline library unavailable — the rest of the library still works.
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadDownloads();
+  }, [loadDownloads]);
 
-  const rows = [
-    {
-      id: 'liked' as const,
-      title: 'Liked Songs',
-      subtitle: `Playlist · ${likes.length} ${
-        likes.length === 1 ? 'song' : 'songs'
-      }`,
-      Icon: Heart,
-      tint: '#5b3df5',
-      tracks: likes,
-    },
-    {
-      id: 'offline' as const,
-      title: 'Downloaded',
-      subtitle: `Offline · ${offline.length} ${
-        offline.length === 1 ? 'song' : 'songs'
-      }`,
-      Icon: ArrowDownToLine,
-      tint: '#1db954',
-      tracks: offline,
-    },
-  ].filter(r => filter === 'all' || filter === r.id);
+  const rows = useMemo(() => {
+    const matches = (c: Collection) => {
+      switch (filter) {
+        case 'playlists':
+          return c.kind === 'userPlaylist' || c.kind === 'sourcePlaylist' || c.kind === 'liked';
+        case 'albums':
+          return c.kind === 'album';
+        case 'artists':
+          return false; // saved artists land here once artist pages exist
+        default:
+          return true;
+      }
+    };
+    return sortPinned(library.filter(matches), pins, idOf);
+  }, [library, pins, filter]);
+
+  const onLongPress = useCallback((c: Collection) => {
+    // Liked Songs and Downloads are already pinned to the top by construction —
+    // pinning them would be a no-op the user couldn't see.
+    if (c.kind === 'liked' || c.kind === 'downloads') {
+      return;
+    }
+    const result = togglePin(idOf(c));
+    if (result === 'full') {
+      toast(`You can pin up to ${MAX_PINS}. Unpin one first.`);
+    } else {
+      toast(result === 'pinned' ? `Pinned ${c.name}` : `Unpinned ${c.name}`);
+    }
+  }, []);
+
+  const submitNew = useCallback(() => {
+    const pl = createPlaylist(newName);
+    setCreating(false);
+    setNewName('');
+    if (pl) {
+      toast(`Created "${pl.name}"`);
+    }
+  }, [newName]);
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
+      <View style={styles.bar}>
         <Text style={styles.title}>Your Library</Text>
-        <TouchableOpacity onPress={onOpenSettings} hitSlop={12}>
-          <SettingsIcon size={22} color={C.sub} strokeWidth={2} />
+        <TouchableOpacity onPress={onOpenSettings} hitSlop={12} style={styles.barBtn}>
+          <SettingsIcon size={22} color={C.sub} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setCreating(true)}
+          hitSlop={12}
+          style={styles.barBtn}>
+          <Plus size={26} color={C.text} strokeWidth={2.2} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.chips}>
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.id}
-            onPress={() => setFilter(f.id)}
-            activeOpacity={0.75}
-            style={[styles.chip, filter === f.id && styles.chipOn]}>
-            <Text
-              style={[styles.chipText, filter === f.id && styles.chipTextOn]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {FILTERS.map(f => {
+          const on = filter === f.id;
+          return (
+            <TouchableOpacity
+              key={f.id}
+              activeOpacity={0.75}
+              onPress={() => setFilter(f.id)}
+              style={[styles.chip, on && styles.chipOn]}>
+              <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {busy ? (
+      {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={C.accent} />
         </View>
       ) : (
         <FlatList
           data={rows}
-          keyExtractor={r => r.id}
+          keyExtractor={c => c.id}
           contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={false}
-              onRefresh={load}
-              tintColor={C.accent}
-              colors={[C.accent]}
+              onRefresh={loadDownloads}
+              tintColor={C.sub}
             />
+          }
+          ListEmptyComponent={
+            <Text style={styles.empty}>Nothing here yet.</Text>
           }
           renderItem={({item}) => (
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.7}
-              onPress={() =>
-                onOpenList({title: item.title, tracks: item.tracks})
-              }>
-              <View style={[styles.tile, {backgroundColor: item.tint}]}>
-                <item.Icon size={24} color="#fff" fill="#fff" strokeWidth={1} />
-              </View>
+              onPress={() => onOpen(item)}
+              onLongPress={() => onLongPress(item)}
+              delayLongPress={350}>
+              <CollectionArt collection={item} size={56} />
               <View style={styles.rowText}>
-                <Text style={styles.rowTitle}>{item.title}</Text>
-                <Text style={styles.rowSub}>{item.subtitle}</Text>
+                <Text style={styles.rowTitle} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <View style={styles.metaLine}>
+                  {isPinned(idOf(item)) && (
+                    <Pin
+                      size={12}
+                      color={DOWNLOAD_TINT}
+                      fill={DOWNLOAD_TINT}
+                      style={styles.pin}
+                    />
+                  )}
+                  <Text style={styles.rowSub} numberOfLines={1}>
+                    {collectionSubtitle(item)}
+                  </Text>
+                </View>
               </View>
             </TouchableOpacity>
           )}
-          ListFooterComponent={
-            !!dir && filter !== 'liked' ? (
-              <Text style={styles.dir}>Downloads folder: {dir}</Text>
-            ) : null
-          }
         />
       )}
+
+      <Modal
+        visible={creating}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCreating(false)}>
+        <View style={styles.scrim}>
+          <View style={styles.dialog}>
+            <Text style={styles.dialogTitle}>New playlist</Text>
+            <TextInput
+              value={newName}
+              onChangeText={setNewName}
+              placeholder="Give it a name"
+              placeholderTextColor={C.faint}
+              style={styles.input}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={submitNew}
+            />
+            <View style={styles.dialogRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  setCreating(false);
+                  setNewName('');
+                }}
+                style={styles.dialogBtn}>
+                <Text style={styles.dialogCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={submitNew}
+                disabled={!newName.trim()}
+                style={styles.dialogBtn}>
+                <Text
+                  style={[
+                    styles.dialogOk,
+                    !newName.trim() && styles.dialogDisabled,
+                  ]}>
+                  Create
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {flex: 1},
-  header: {
+  wrap: {flex: 1, backgroundColor: C.bg},
+  bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: S.gutter,
-    paddingTop: 8,
+    paddingTop: 14,
+    paddingBottom: 10,
+    gap: 14,
   },
-  title: {...T.screenTitle, color: C.text},
-  chips: {flexDirection: 'row', gap: 8, paddingHorizontal: S.gutter, marginTop: 14},
+  title: {...T.screenTitle, color: C.text, flex: 1},
+  barBtn: {padding: 2},
+  chips: {
+    flexDirection: 'row',
+    gap: 9,
+    paddingHorizontal: S.gutter,
+    paddingBottom: 12,
+  },
   chip: {
-    paddingHorizontal: 13,
-    paddingVertical: 6,
+    paddingHorizontal: 15,
+    paddingVertical: 7,
     borderRadius: 999,
-    backgroundColor: C.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
+    backgroundColor: C.surfaceHi,
   },
-  chipOn: {backgroundColor: C.accent, borderColor: C.accent},
-  chipText: {...T.sub, color: C.sub},
+  chipOn: {backgroundColor: C.text},
+  chipText: {...T.sub, color: C.text, fontSize: 13},
   chipTextOn: {color: C.bg, fontWeight: '700'},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  list: {paddingTop: 14, paddingBottom: 24},
+  list: {paddingBottom: 12},
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: S.gutter,
-    paddingVertical: 8,
+    paddingVertical: 7,
     gap: 13,
   },
-  tile: {
-    width: 54,
-    height: 54,
-    borderRadius: 5,
+  rowText: {flex: 1, minWidth: 0},
+  rowTitle: {...T.rowTitle, color: C.text, fontSize: 16},
+  metaLine: {flexDirection: 'row', alignItems: 'center', marginTop: 3},
+  pin: {marginRight: 5, transform: [{rotate: '45deg'}]},
+  rowSub: {...T.sub, color: C.sub, flex: 1},
+  empty: {
+    color: C.faint,
+    textAlign: 'center',
+    paddingVertical: 40,
+    fontSize: 13,
+  },
+  scrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 28,
   },
-  rowText: {flex: 1, minWidth: 0},
-  rowTitle: {...T.body, color: C.text, fontSize: 15.5},
-  rowSub: {...T.sub, color: C.sub, marginTop: 3},
-  dir: {
-    color: C.faint,
-    fontSize: 11,
-    paddingHorizontal: S.gutter,
-    paddingTop: 18,
+  dialog: {
+    width: '100%',
+    borderRadius: 14,
+    backgroundColor: C.surfaceHi,
+    padding: 20,
   },
+  dialogTitle: {...T.rowTitle, color: C.text, marginBottom: 14},
+  input: {
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    color: C.text,
+    fontSize: 16,
+    paddingVertical: 8,
+  },
+  dialogRow: {flexDirection: 'row', justifyContent: 'flex-end', marginTop: 18},
+  dialogBtn: {paddingHorizontal: 14, paddingVertical: 8},
+  dialogCancel: {color: C.sub, fontSize: 14, fontWeight: '700'},
+  dialogOk: {color: C.accent, fontSize: 14, fontWeight: '700'},
+  dialogDisabled: {color: C.faint},
 });

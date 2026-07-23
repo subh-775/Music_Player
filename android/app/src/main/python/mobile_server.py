@@ -652,6 +652,12 @@ def search_suggestions():
                 "album": track.album,
                 "sources": [s.value for s in track.sources.keys()],
                 "isrc": track.isrc,
+                # The suggestion list shows a cover next to each row. The search
+                # result already carries artwork, so returning it here costs
+                # nothing — whereas letting the client look it up would mean an
+                # extra request per row, on every debounced keystroke.
+                "artwork_url": (track.get_best_artwork()
+                                if hasattr(track, "get_best_artwork") else None),
             })
             if len(suggestions) >= limit:
                 break

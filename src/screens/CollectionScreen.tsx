@@ -1,142 +1,297 @@
 /**
- * An opened album or playlist. Slides over the tabs rather than replacing them,
- * so closing it returns you exactly where you were.
+ * One screen for every collection: album, playlist, Liked Songs, Downloads.
+ *
+ * There used to be two of these (CollectionScreen and TrackListScreen) and they
+ * had already drifted — one had shuffle, the other didn't. Since every list of
+ * songs is now the same object, it renders through one path.
+ *
+ * Downloads additionally supports select-and-delete: hold a row to enter
+ * selection, then remove the files from the phone's storage.
  */
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {
-  ActivityIndicator,
   FlatList,
-  Image,
-  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {
+  CheckSquare,
+  ChevronLeft,
+  Play,
+  Shuffle,
+  Square,
+  Trash2,
+} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {getCollection, type HomeItem, type Track} from '../backend';
+import {deleteDownload, type Track} from '../backend';
+import {formatTotalDuration, getTrackId} from '../tracks';
+import {
+  collectionSubtitle,
+
+  type Collection,
+} from '../collections';
+import {CollectionArt} from '../components/CollectionArt';
 import {TrackRow} from '../components/TrackRow';
+import {toast} from '../toast';
 
 export function CollectionScreen({
-  item,
+  collection,
   onClose,
-  onPickTrack,
+  onPlay,
+  onChanged,
 }: {
-  item: HomeItem | null;
+  collection: Collection;
   onClose: () => void;
-  onPickTrack: (t: Track, context: Track[]) => void;
+  onPlay: (track: Track, context: Track[]) => void;
+  /** Downloads were deleted — the owner should rescan disk. */
+  onChanged?: () => void;
 }) {
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [selected, setSelected] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (!item?.perma_url) {
+  const tracks = collection.tracks;
+  const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
+  const selecting = selected !== null;
+  const canSelect = collection.kind === 'downloads';
+
+  const toggleOne = useCallback((t: Track) => {
+    setSelected(prev => {
+      const next = new Set(prev ?? []);
+      const id = getTrackId(t);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const allSelected = selecting && selected.size === tracks.length;
+
+  const toggleAll = useCallback(() => {
+    setSelected(allSelected ? new Set() : new Set(tracks.map(getTrackId)));
+  }, [allSelected, tracks]);
+
+  const deleteSelected = useCallback(async () => {
+    if (!selected?.size) {
       return;
     }
-    let alive = true;
     setBusy(true);
-    setError('');
-    setTracks([]);
-    getCollection(item.perma_url)
-      .then(res => {
-        if (!alive) {
-          return;
-        }
-        if (res.error && !res.tracks.length) {
-          setError(res.error);
-        }
-        setTracks(res.tracks);
-      })
-      .catch(e => alive && setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => alive && setBusy(false));
-    return () => {
-      alive = false;
-    };
-  }, [item]);
+    const targets = tracks.filter(t => selected.has(getTrackId(t)));
+    // Sequential, not parallel: each delete may also remove a now-empty album
+    // folder, and two of those racing on the same folder is how you get a
+    // spurious failure on a delete that actually worked.
+    let removed = 0;
+    for (const t of targets) {
+      if (t.file_path && (await deleteDownload(t.file_path))) {
+        removed += 1;
+      }
+    }
+    setBusy(false);
+    setSelected(null);
+    toast(
+      removed === targets.length
+        ? `Deleted ${removed} song${removed === 1 ? '' : 's'}`
+        : `Deleted ${removed} of ${targets.length} — some files were already gone`,
+    );
+    onChanged?.();
+  }, [selected, tracks, onChanged]);
 
-  if (!item) {
-    return null;
-  }
+  const play = useCallback(
+    (t: Track) => onPlay(t, tracks),
+    [onPlay, tracks],
+  );
 
-  const name = item.title || item.name || 'Collection';
+  const shuffle = useCallback(() => {
+    if (!tracks.length) {
+      return;
+    }
+    const start = tracks[Math.floor(Math.random() * tracks.length)];
+    onPlay(start, tracks);
+  }, [onPlay, tracks]);
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose}>
-      <View style={styles.wrap}>
-        <View style={styles.bar}>
-          <TouchableOpacity onPress={onClose} style={styles.back} hitSlop={12}>
-            <Text style={styles.backText}>‹</Text>
-          </TouchableOpacity>
-        </View>
+    <View style={styles.wrap}>
+      <View style={styles.bar}>
+        <TouchableOpacity
+          onPress={selecting ? () => setSelected(null) : onClose}
+          hitSlop={12}
+          style={styles.barBtn}>
+          <ChevronLeft size={28} color={C.text} />
+        </TouchableOpacity>
 
-        <FlatList
-          data={tracks}
-          keyExtractor={(t, i) => `${t.title}-${i}`}
-          contentContainerStyle={styles.list}
-          ListHeaderComponent={
-            <View style={styles.header}>
-              {item.image ? (
-                <Image source={{uri: item.image}} style={styles.art} />
-              ) : (
-                <View style={[styles.art, styles.artFallback]} />
-              )}
-              <Text style={styles.name} numberOfLines={2}>
-                {name}
+        {selecting ? (
+          <>
+            <Text style={styles.barTitle}>{selected.size} selected</Text>
+            <TouchableOpacity onPress={toggleAll} style={styles.selectAll}>
+              <Text style={styles.selectAllText}>
+                {allSelected ? 'Clear' : 'Select all'}
               </Text>
-              {!!item.subtitle && (
-                <Text style={styles.sub} numberOfLines={1}>
-                  {item.subtitle}
-                </Text>
-              )}
-              {tracks.length > 0 && (
-                <Text style={styles.count}>
-                  {tracks.length} {tracks.length === 1 ? 'song' : 'songs'}
-                </Text>
-              )}
-            </View>
-          }
-          renderItem={({item: t, index}) => (
-            <TrackRow track={t} index={index} onPress={() => onPickTrack(t, tracks)} />
-          )}
-          ListEmptyComponent={
-            busy ? (
-              <View style={styles.center}>
-                <ActivityIndicator color={C.accent} />
-              </View>
-            ) : (
-              <View style={styles.center}>
-                <Text style={styles.err}>
-                  {error || 'Nothing playable in here.'}
-                </Text>
-              </View>
-            )
-          }
-        />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={deleteSelected}
+              disabled={busy || !selected.size}
+              hitSlop={10}
+              style={styles.barBtn}>
+              <Trash2
+                size={22}
+                color={selected.size && !busy ? C.danger : C.faint}
+              />
+            </TouchableOpacity>
+          </>
+        ) : (
+          <Text style={styles.barTitle} numberOfLines={1}>
+            {collection.name}
+          </Text>
+        )}
       </View>
-    </Modal>
+
+      <FlatList
+        data={tracks}
+        keyExtractor={(t, i) => `${getTrackId(t)}-${i}`}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <CollectionArt collection={collection} size={168} />
+            <Text style={styles.name} numberOfLines={2}>
+              {collection.name}
+            </Text>
+            <Text style={styles.sub}>
+              {collectionSubtitle(collection)}
+              {runtime ? ` · ${runtime}` : ''}
+            </Text>
+
+            {!selecting && (
+              <View style={styles.actions}>
+                <TouchableOpacity
+                  style={styles.shuffleBtn}
+                  activeOpacity={0.75}
+                  onPress={shuffle}
+                  disabled={!tracks.length}>
+                  <Shuffle size={19} color={C.text} />
+                  <Text style={styles.shuffleText}>Shuffle</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.playBtn}
+                  activeOpacity={0.85}
+                  onPress={() => tracks.length && play(tracks[0])}
+                  disabled={!tracks.length}>
+                  <Play size={26} color={C.bg} fill={C.bg} />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        }
+        ListEmptyComponent={
+          <Text style={styles.empty}>
+            {collection.kind === 'downloads'
+              ? 'Nothing downloaded yet. Songs you download are kept here and play offline.'
+              : collection.kind === 'liked'
+              ? 'Songs you like will show up here.'
+              : 'This list is empty.'}
+          </Text>
+        }
+        renderItem={({item}) => {
+          const id = getTrackId(item);
+          const checked = selecting && selected.has(id);
+          return (
+            <View style={styles.rowWrap}>
+              {selecting && (
+                <TouchableOpacity
+                  onPress={() => toggleOne(item)}
+                  hitSlop={10}
+                  style={styles.check}>
+                  {checked ? (
+                    <CheckSquare size={22} color={C.accent} />
+                  ) : (
+                    <Square size={22} color={C.faint} />
+                  )}
+                </TouchableOpacity>
+              )}
+              <View style={styles.rowFill}>
+                <TrackRow
+                  track={item}
+                  onPress={() =>
+                    selecting ? toggleOne(item) : play(item)
+                  }
+                  onLongPress={
+                    canSelect && !selecting
+                      ? () => setSelected(new Set([id]))
+                      : undefined
+                  }
+                />
+              </View>
+            </View>
+          );
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {flex: 1, backgroundColor: C.bg},
-  bar: {paddingTop: 40, paddingHorizontal: 8},
-  back: {width: 40, height: 36, justifyContent: 'center'},
-  backText: {color: C.text, fontSize: 32, lineHeight: 34},
-  list: {paddingBottom: 28},
-  header: {alignItems: 'center', paddingHorizontal: S.gutter, paddingBottom: 18},
-  art: {width: 190, height: 190, borderRadius: 10, backgroundColor: C.surface},
-  artFallback: {backgroundColor: C.surfaceHi},
-  name: {
-    color: C.text,
-    fontSize: 21,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-    textAlign: 'center',
-    marginTop: 16,
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingHorizontal: 8,
+    paddingBottom: 4,
+    gap: 4,
   },
-  sub: {...T.sub, color: C.sub, marginTop: 5, textAlign: 'center'},
-  count: {...T.sub, color: C.faint, marginTop: 8},
-  center: {paddingTop: 40, alignItems: 'center'},
-  err: {color: C.danger, fontSize: 13, textAlign: 'center', paddingHorizontal: 30},
+  barBtn: {padding: 4},
+  barTitle: {...T.rowTitle, color: C.text, flex: 1, fontSize: 17},
+  selectAll: {paddingHorizontal: 10, paddingVertical: 6},
+  selectAllText: {...T.sub, color: C.accent, fontWeight: '700'},
+  list: {paddingBottom: 20},
+  header: {alignItems: 'center', paddingTop: 10, paddingBottom: 6},
+  name: {
+    ...T.screenTitle,
+    color: C.text,
+    marginTop: 16,
+    textAlign: 'center',
+    paddingHorizontal: S.gutter,
+  },
+  sub: {...T.sub, color: C.sub, marginTop: 5},
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  shuffleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  shuffleText: {...T.body, color: C.text},
+  playBtn: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowWrap: {flexDirection: 'row', alignItems: 'center'},
+  rowFill: {flex: 1, minWidth: 0},
+  check: {paddingLeft: S.gutter, paddingVertical: 12},
+  empty: {
+    color: C.faint,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 34,
+    fontSize: 13,
+    lineHeight: 19,
+  },
 });

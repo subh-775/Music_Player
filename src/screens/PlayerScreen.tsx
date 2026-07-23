@@ -1,10 +1,28 @@
 /**
- * Full-screen player. Only mounted when the audio engine is running.
+ * The full-screen player.
  *
- * The artwork is swipeable: left for next, right for previous. It uses the core
- * PanResponder rather than a gesture library, so it costs no native dependency.
+ * Layout, top to bottom — this ordering is deliberate and matches the WebView
+ * build it replaces:
+ *
+ *   ⌄            ALBUM NAME (or "Now playing")
+ *   [ artwork / lyrics / queue pane ]
+ *   Title                              ⊕  ♥  ⭳
+ *   Artists · source badge · quality badge
+ *   ───────────────── seek ─────────────────
+ *   0:42                                3:57
+ *   (Song) (Lyrics) (Queue)        ᛒ Buds 2r
+ *   ⇄     ⏮        ▶        ⏭      ↻
+ *
+ * The pane toggles sit ABOVE the transport rather than in the header, so the
+ * play controls never move when you switch panes.
  */
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -18,11 +36,26 @@ import {
   View,
 } from 'react-native';
 import {
-  useActiveTrack,
-  usePlaybackState,
-  useProgress,
-} from 'react-native-track-player';
-import {C, S} from '../theme';
+  Bluetooth,
+  Check,
+  ChevronDown,
+  DownloadCloud,
+  Heart,
+  ListMusic,
+  Music,
+  Pause,
+  Play,
+  Plus,
+  Repeat,
+  Repeat1,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Type,
+} from 'lucide-react-native';
+import {C, T} from '../theme';
+import {getLyrics, startDownload, type Lyrics, type Track} from '../backend';
+import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
   State,
@@ -31,57 +64,62 @@ import {
   shuffleQueue,
   skipNext,
   skipPrevious,
+  sourceTrackFor,
   togglePlay,
+  useActiveTrack,
+  usePlaybackState,
+  useProgress,
 } from '../player';
-import {
-  ChevronDown,
-  Heart,
-  Pause,
-  Play,
-  Repeat,
-  Repeat1,
-  Shuffle,
-  SkipBack,
-  SkipForward,
-} from 'lucide-react-native';
-import {getLyrics, type Lyrics} from '../backend';
 import {useLike} from '../store';
-import {QueueScreen} from './QueueScreen';
+import {useAudioOutput} from '../audioOutput';
+import {QualityBadge, SourceBadge} from '../components/Badges';
+import {QueuePane} from './QueueScreen';
+import {toast} from '../toast';
 
 function clock(sec: number): string {
-  if (!isFinite(sec) || sec < 0) {
+  if (!Number.isFinite(sec) || sec < 0) {
     return '0:00';
   }
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
+  const total = Math.floor(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
 
+const PANES = [
+  {id: 'song', label: 'Song', Icon: Music},
+  {id: 'lyrics', label: 'Lyrics', Icon: Type},
+  {id: 'queue', label: 'Queue', Icon: ListMusic},
+] as const;
+
+type Pane = (typeof PANES)[number]['id'];
+
 export function PlayerScreen({
   visible,
   onClose,
+  onAddToPlaylist,
 }: {
   visible: boolean;
   onClose: () => void;
+  onAddToPlaylist: (track: Track) => void;
 }) {
-  const track = useActiveTrack();
+  const active = useActiveTrack();
   const {state} = usePlaybackState() as {state?: State};
   const {position, duration} = useProgress(500);
+  const output = useAudioOutput();
 
-  const likeTarget = useMemo(
-    () =>
-      track
-        ? {title: String(track.title ?? ''), artist: String(track.artist ?? '')}
-        : null,
-    [track],
-  );
-  const {liked, toggle: toggleLike} = useLike(likeTarget as never);
+  // The engine's queue item is a reduced shape; the badges, download and like
+  // all need the real backend Track behind it.
+  const track = useMemo(() => sourceTrackFor(active), [active]);
+  const {liked, toggle: toggleLike} = useLike(track);
 
-  const [pane, setPane] = useState<'song' | 'lyrics' | 'queue'>('song');
+  const [pane, setPane] = useState<Pane>('song');
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
-  const [seekWidth, setSeekWidth] = useState(0);
+  const [shuffled, setShuffled] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
   // Double-tap seek: consecutive taps on the same side stack (10s, 20s, 30s…),
   // the way YouTube does, so a quick triple-tap jumps further.
   const [seekFlash, setSeekFlash] = useState<{side: 1 | -1; secs: number} | null>(
@@ -176,13 +214,41 @@ export function PlayerScreen({
     setRepeat(next).catch(() => {});
   }, [repeat]);
 
-  if (!track) {
+  const onShuffle = useCallback(() => {
+    shuffleQueue()
+      .then(() => {
+        setShuffled(v => !v);
+        toast('Shuffled what comes next');
+      })
+      .catch(() => {});
+  }, []);
+
+  const download = useCallback(async () => {
+    if (!track || downloading) {
+      return;
+    }
+    setDownloading(true);
+    try {
+      await startDownload(track);
+      toast(`Downloading "${cleanText(track.title)}"`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start that download');
+    } finally {
+      setDownloading(false);
+    }
+  }, [track, downloading]);
+
+  if (!active) {
     return null;
   }
 
   const playing = state === State.Playing;
-  const loading = state === State.Buffering || state === State.Loading;
+  const busy = state === State.Buffering || state === State.Loading;
   const pct = duration > 0 ? Math.min(1, position / duration) : 0;
+  const artwork = track ? getBestArtworkUrl(track) : String(active.artwork ?? '');
+  const title = cleanText(String(active.title ?? ''));
+  const artists = splitArtists(String(active.artist ?? '')).join(', ');
+  const album = track?.album ? cleanText(track.album) : '';
 
   return (
     <Modal
@@ -191,148 +257,216 @@ export function PlayerScreen({
       onRequestClose={onClose}
       statusBarTranslucent>
       <View style={styles.wrap}>
+        {/* Header — close on the left, what you're inside of in the middle. */}
         <View style={styles.topBar}>
           <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
-            <ChevronDown size={26} color={C.sub} />
+            <ChevronDown size={26} color={C.text} />
           </TouchableOpacity>
-          <View style={styles.panes}>
-            {(['song', 'lyrics', 'queue'] as const).map(p => (
-              <TouchableOpacity key={p} onPress={() => setPane(p)} hitSlop={8}>
-                <Text
-                  style={[styles.paneTab, pane === p && styles.paneTabOn]}>
-                  {p === 'song' ? 'Song' : p === 'lyrics' ? 'Lyrics' : 'Queue'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={styles.context} numberOfLines={1}>
+            {album || 'Now playing'}
+          </Text>
+          {/* Balances the close button so the label stays centred. */}
           <View style={styles.iconBtn} />
         </View>
 
-        {pane === 'lyrics' && <LyricsPane track={track} position={position} />}
-        {pane === 'queue' && <QueueScreen />}
-        {pane === 'song' && (
-          <View style={styles.artArea} {...pan.panHandlers}>
-            <Animated.View style={{transform: [{translateX: slide}]}}>
-              {track.artwork ? (
-                <Image
-                  source={{uri: String(track.artwork)}}
-                  style={styles.art}
-                />
-              ) : (
-                <View style={[styles.art, styles.artFallback]} />
-              )}
-            </Animated.View>
+        {/* The only flexible row: it shrinks and scrolls rather than pushing
+            the controls below the fold. */}
+        <View style={styles.pane}>
+          {pane === 'lyrics' && (
+            <LyricsPane
+              title={title}
+              artist={String(active.artist ?? '')}
+              durationMs={duration ? duration * 1000 : undefined}
+              position={position}
+            />
+          )}
+          {pane === 'queue' && <QueuePane />}
+          {pane === 'song' && (
+            <View style={styles.artArea} {...pan.panHandlers}>
+              <Animated.View
+                style={[styles.artHolder, {transform: [{translateX: slide}]}]}
+                pointerEvents="none">
+                {artwork ? (
+                  <Image source={{uri: artwork}} style={styles.art} />
+                ) : (
+                  <View style={[styles.art, styles.artFallback]} />
+                )}
+              </Animated.View>
 
-            {/* Double-tap zones sit over the artwork edges. They only claim a
-                TAP — the swipe PanResponder above still owns any drag. */}
-            <View style={styles.tapZones} pointerEvents="box-none">
-              <TapZone onDoubleTap={() => doubleTapSeek(-1)} />
-              <TapZone onDoubleTap={() => doubleTapSeek(1)} />
+              {/* Double-tap zones over the artwork edges. They claim a TAP
+                  only — the swipe responder above still owns any drag. */}
+              <View style={styles.tapZones} pointerEvents="box-none">
+                <TapZone onDoubleTap={() => doubleTapSeek(-1)} />
+                <TapZone onDoubleTap={() => doubleTapSeek(1)} />
+              </View>
+
+              {!!seekFlash && (
+                <View
+                  style={[
+                    styles.flash,
+                    seekFlash.side === 1 ? styles.flashRight : styles.flashLeft,
+                  ]}
+                  pointerEvents="none">
+                  <Text style={styles.flashText}>
+                    {seekFlash.side === 1 ? '▶▶' : '◀◀'}
+                  </Text>
+                  <Text style={styles.flashSecs}>
+                    {seekFlash.side === 1 ? '+' : '−'}
+                    {seekFlash.secs} seconds
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.controls}>
+          {/* Title + credits on the left, the three per-song actions right. */}
+          <View style={styles.metaRow}>
+            <View style={styles.meta}>
+              <Text style={styles.title} numberOfLines={1}>
+                {title}
+              </Text>
+              <View style={styles.creditRow}>
+                <Text style={styles.artist} numberOfLines={1}>
+                  {artists}
+                </Text>
+                <SourceBadge track={track} />
+                <QualityBadge track={track} />
+              </View>
             </View>
 
-            {!!seekFlash && (
-              <View
-                style={[
-                  styles.flash,
-                  seekFlash.side === 1 ? styles.flashRight : styles.flashLeft,
-                ]}
-                pointerEvents="none">
-                <Text style={styles.flashText}>
-                  {seekFlash.side === 1 ? '»' : '«'} {seekFlash.secs}s
+            <View style={styles.actions}>
+              <TouchableOpacity
+                onPress={() => track && onAddToPlaylist(track)}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                {/* A 22px ring so the circled + reads the same visual size as
+                    the bare heart and download glyphs beside it. */}
+                <View style={styles.plusRing}>
+                  <Plus size={13} color={C.sub} strokeWidth={2.6} />
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={toggleLike}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                <Heart
+                  size={22}
+                  color={liked ? C.accent : C.sub}
+                  fill={liked ? C.accent : 'transparent'}
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={download}
+                disabled={downloading}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                {downloading ? (
+                  <Check size={22} color={C.accent} />
+                ) : (
+                  <DownloadCloud size={22} color={C.sub} />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Seek */}
+          <View style={styles.seek}>
+            <View style={styles.seekTrack}>
+              <View style={[styles.seekFill, {width: `${pct * 100}%`}]} />
+            </View>
+            <View style={styles.times}>
+              <Text style={styles.time}>{clock(position)}</Text>
+              <Text style={styles.time}>{clock(duration)}</Text>
+            </View>
+          </View>
+
+          {/* Pane toggles left, audio output right — above the transport so
+              the play controls never shift. */}
+          <View style={styles.paneRow}>
+            <View style={styles.paneTabs}>
+              {PANES.map(({id, label, Icon}) => {
+                const on = pane === id;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    onPress={() => setPane(id)}
+                    activeOpacity={0.8}
+                    style={[styles.paneTab, on && styles.paneTabOn]}>
+                    <Icon size={15} color={on ? C.text : C.faint} />
+                    <Text
+                      style={[styles.paneLabel, on && styles.paneLabelOn]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {!!output && (
+              <View style={styles.output}>
+                <Bluetooth size={13} color={C.accent} />
+                <Text style={styles.outputText} numberOfLines={1}>
+                  {output}
                 </Text>
               </View>
             )}
           </View>
-        )}
 
-        <View style={styles.metaRow}>
-          <View style={styles.meta}>
-            <Text style={styles.title} numberOfLines={2}>
-              {track.title}
-            </Text>
-            <Text style={styles.artist} numberOfLines={1}>
-              {track.artist}
-            </Text>
+          {/* Transport */}
+          <View style={styles.transport}>
+            <TouchableOpacity onPress={onShuffle} hitSlop={10} style={styles.tBtn}>
+              <Shuffle size={24} color={shuffled ? C.accent : C.sub} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => skipPrevious()}
+              hitSlop={10}
+              style={styles.tBtn}>
+              <SkipBack size={34} color={C.text} fill={C.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => togglePlay()}
+              activeOpacity={0.85}
+              style={styles.playBtn}>
+              {busy ? (
+                <ActivityIndicator color={C.bg} />
+              ) : playing ? (
+                <Pause size={30} color={C.bg} fill={C.bg} />
+              ) : (
+                <Play size={30} color={C.bg} fill={C.bg} style={styles.playNudge} />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => skipNext()}
+              hitSlop={10}
+              style={styles.tBtn}>
+              <SkipForward size={34} color={C.text} fill={C.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={cycleRepeat} hitSlop={10} style={styles.tBtn}>
+              {repeat === RepeatMode.Track ? (
+                <Repeat1 size={24} color={C.accent} />
+              ) : (
+                <Repeat
+                  size={24}
+                  color={repeat === RepeatMode.Queue ? C.accent : C.sub}
+                />
+              )}
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={toggleLike} hitSlop={12}>
-            <Heart
-              size={23}
-              color={liked ? C.accent : C.faint}
-              fill={liked ? C.accent : 'transparent'}
-              strokeWidth={2}
-            />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.seekBlock}>
-          <View
-            style={styles.seekHit}
-            onLayout={e => setSeekWidth(e.nativeEvent.layout.width)}
-            onStartShouldSetResponder={() => true}
-            onResponderRelease={e => {
-              if (duration > 0 && seekWidth > 0) {
-                const ratio = Math.max(
-                  0,
-                  Math.min(1, e.nativeEvent.locationX / seekWidth),
-                );
-                seekTo(ratio * duration);
-              }
-            }}>
-            <View style={styles.seekTrack}>
-              <View style={[styles.seekFill, {flex: pct}]} />
-              <View style={{flex: 1 - pct}} />
-            </View>
-          </View>
-          <View style={styles.times}>
-            <Text style={styles.time}>{clock(position)}</Text>
-            <Text style={styles.time}>{clock(duration)}</Text>
-          </View>
-        </View>
-
-        <View style={styles.controls}>
-          <TouchableOpacity onPress={() => shuffleQueue()} hitSlop={12}>
-            <Shuffle size={20} color={C.faint} strokeWidth={2.2} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={skipPrevious} hitSlop={12}>
-            <SkipBack size={30} color={C.text} fill={C.text} strokeWidth={1} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.playBtn}
-            onPress={togglePlay}
-            activeOpacity={0.85}>
-            {loading ? (
-              <ActivityIndicator color={C.bg} />
-            ) : playing ? (
-              <Pause size={26} color={C.bg} fill={C.bg} strokeWidth={1} />
-            ) : (
-              <Play size={26} color={C.bg} fill={C.bg} strokeWidth={1} />
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={skipNext} hitSlop={12}>
-            <SkipForward size={30} color={C.text} fill={C.text} strokeWidth={1} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={cycleRepeat} hitSlop={12}>
-            {repeat === RepeatMode.Track ? (
-              <Repeat1 size={20} color={C.accent} strokeWidth={2.2} />
-            ) : (
-              <Repeat
-                size={20}
-                color={repeat === RepeatMode.Queue ? C.accent : C.faint}
-                strokeWidth={2.2}
-              />
-            )}
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
 }
 
-/** Half of the artwork, listening for a double tap only. A single tap is left
+/** Half the artwork, listening for a double tap only. A single tap is left
  *  alone so it never fights the swipe gesture. */
 function TapZone({onDoubleTap}: {onDoubleTap: () => void}) {
   const last = useRef(0);
@@ -353,42 +487,45 @@ function TapZone({onDoubleTap}: {onDoubleTap: () => void}) {
   );
 }
 
-/** Synced lyrics scroll with the music; plain text is shown when that's all
- *  the sources have. */
+const LINE_H = 44;
+
+/**
+ * Synced lyrics scroll themselves and can be tapped to jump; plain text is
+ * shown when that's all the sources have.
+ */
 function LyricsPane({
-  track,
+  title,
+  artist,
+  durationMs,
   position,
 }: {
-  track: {title?: string; artist?: string; duration?: number};
+  title: string;
+  artist: string;
+  durationMs?: number;
   position: number;
 }) {
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState('');
+  const scroller = useRef<ScrollView>(null);
 
   useEffect(() => {
     let alive = true;
     setBusy(true);
     setErr('');
     setLyrics(null);
-    getLyrics(
-      track.title || '',
-      track.artist || '',
-      track.duration ? track.duration * 1000 : undefined,
-    )
+    getLyrics(title, artist, durationMs)
       .then(l => alive && setLyrics(l))
       .catch(e => alive && setErr(e instanceof Error ? e.message : String(e)))
       .finally(() => alive && setBusy(false));
     return () => {
       alive = false;
     };
-  }, [track.title, track.artist, track.duration]);
+  }, [title, artist, durationMs]);
 
-  const synced = lyrics?.synced ?? [];
+  const synced = useMemo(() => lyrics?.synced ?? [], [lyrics]);
+
   const activeLine = useMemo(() => {
-    if (!synced.length) {
-      return -1;
-    }
     let idx = -1;
     for (let i = 0; i < synced.length; i++) {
       if (synced[i].time <= position) {
@@ -399,6 +536,19 @@ function LyricsPane({
     }
     return idx;
   }, [synced, position]);
+
+  // Keep the current line around a third of the way down, which is where the
+  // eye already is — centring it means constantly reading at the midpoint and
+  // losing the lines just sung.
+  useEffect(() => {
+    if (activeLine < 0 || !scroller.current) {
+      return;
+    }
+    scroller.current.scrollTo({
+      y: Math.max(0, activeLine * LINE_H - 120),
+      animated: true,
+    });
+  }, [activeLine]);
 
   if (busy) {
     return (
@@ -417,22 +567,21 @@ function LyricsPane({
 
   return (
     <ScrollView
+      ref={scroller}
       style={styles.lyricScroll}
       contentContainerStyle={styles.lyricBody}
       showsVerticalScrollIndicator={false}>
       {synced.length > 0
         ? synced.map((line, i) => (
             <Text
-              key={i}
-              style={[
-                styles.lyricLine,
-                i === activeLine && styles.lyricLineOn,
-              ]}>
+              key={`${line.time}-${i}`}
+              onPress={() => seekTo(line.time)}
+              style={[styles.lyricLine, i === activeLine && styles.lyricLineOn]}>
               {line.text || '♪'}
             </Text>
           ))
         : (lyrics?.plain || '').split('\n').map((line, i) => (
-            <Text key={i} style={styles.lyricLine}>
+            <Text key={i} style={styles.lyricPlain}>
               {line || ' '}
             </Text>
           ))}
@@ -441,83 +590,123 @@ function LyricsPane({
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    backgroundColor: C.bg,
-    paddingHorizontal: S.gutter,
-    paddingTop: 40,
-    paddingBottom: 34,
-  },
+  wrap: {flex: 1, backgroundColor: C.bg, paddingTop: 8},
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    height: 48,
+    paddingHorizontal: 12,
   },
-  iconBtn: {padding: 8},
-  chevron: {color: C.sub, fontSize: 26, lineHeight: 26},
-  panes: {flexDirection: 'row', gap: 18},
-  paneTab: {color: C.faint, fontSize: 13.5, fontWeight: '700'},
-  paneTabOn: {color: C.accent},
+  iconBtn: {width: 30, alignItems: 'flex-start'},
+  context: {
+    flex: 1,
+    textAlign: 'center',
+    color: C.sub,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+
+  pane: {flex: 1, minHeight: 0},
+  artArea: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
+  artHolder: {width: '100%', aspectRatio: 1, maxHeight: '100%'},
+  art: {width: '100%', height: '100%', borderRadius: 8, backgroundColor: C.surface},
+  artFallback: {backgroundColor: C.surfaceHi},
   tapZones: {...StyleSheet.absoluteFillObject, flexDirection: 'row'},
   tapZone: {flex: 1},
   flash: {
     position: 'absolute',
-    top: '45%',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 999,
-  },
-  flashLeft: {left: 18},
-  flashRight: {right: 18},
-  flashText: {color: C.text, fontSize: 14, fontWeight: '800'},
-  artArea: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  art: {width: 300, maxWidth: '100%', aspectRatio: 1, borderRadius: 14},
-  artFallback: {backgroundColor: C.surface},
-  metaRow: {
-    flexDirection: 'row',
+    top: 0,
+    bottom: 0,
+    width: '46%',
     alignItems: 'center',
-    gap: 14,
-    marginTop: 10,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
-  meta: {flex: 1, minWidth: 0, gap: 5},
-  title: {color: C.text, fontSize: 21, fontWeight: '800', letterSpacing: -0.4},
-  artist: {color: C.sub, fontSize: 14, fontWeight: '500'},
-  seekBlock: {marginTop: 18},
-  seekHit: {paddingVertical: 10},
-  seekTrack: {
-    flexDirection: 'row',
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: C.border,
-    overflow: 'hidden',
-  },
-  seekFill: {backgroundColor: C.accent},
-  times: {flexDirection: 'row', justifyContent: 'space-between'},
-  time: {color: C.faint, fontSize: 11.5, fontVariant: ['tabular-nums']},
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 16,
-    paddingHorizontal: 4,
-  },
-  sideBtn: {color: C.faint, fontSize: 19},
-  sideBtnOn: {color: C.accent},
-  skip: {color: C.text, fontSize: 26},
-  playBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: C.accent,
+  flashLeft: {left: 0, borderTopRightRadius: 999, borderBottomRightRadius: 999},
+  flashRight: {right: 0, borderTopLeftRadius: 999, borderBottomLeftRadius: 999},
+  flashText: {color: C.text, fontSize: 18, letterSpacing: 2},
+  flashSecs: {color: C.text, fontSize: 13, fontWeight: '600', marginTop: 4},
+
+  controls: {paddingHorizontal: 24, paddingTop: 12, paddingBottom: 34},
+  metaRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
+  meta: {flex: 1, minWidth: 0},
+  title: {fontSize: 20, fontWeight: '800', color: C.text, letterSpacing: -0.3},
+  creditRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3},
+  artist: {...T.sub, color: C.sub, flexShrink: 1, fontSize: 13},
+  actions: {flexDirection: 'row', alignItems: 'center', gap: 2, paddingTop: 2},
+  actionBtn: {padding: 7},
+  plusRing: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: C.sub,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playIcon: {color: C.bg, fontSize: 23, fontWeight: '900'},
-  lyricScroll: {flex: 1, marginTop: 6},
-  lyricBody: {paddingVertical: 20, gap: 12},
-  lyricLine: {color: C.faint, fontSize: 16, lineHeight: 23, fontWeight: '600'},
-  lyricLineOn: {color: C.text, fontSize: 18},
+
+  seek: {marginTop: 16},
+  seekTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    overflow: 'hidden',
+  },
+  seekFill: {height: '100%', backgroundColor: C.text, borderRadius: 2},
+  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
+  time: {color: C.sub, fontSize: 11, fontVariant: ['tabular-nums']},
+
+  paneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 14,
+  },
+  paneTabs: {flexDirection: 'row', gap: 6},
+  paneTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  paneTabOn: {backgroundColor: 'rgba(255,255,255,0.14)'},
+  paneLabel: {fontSize: 11, fontWeight: '600', color: C.faint},
+  paneLabelOn: {color: C.text},
+  output: {flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1},
+  outputText: {color: C.accent, fontSize: 11, fontWeight: '600'},
+
+  transport: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 18,
+  },
+  tBtn: {padding: 6},
+  playBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: C.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playNudge: {marginLeft: 3},
+
+  lyricScroll: {flex: 1},
+  lyricBody: {paddingHorizontal: 26, paddingVertical: 20},
   lyricCenter: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  lyricEmpty: {color: C.sub, fontSize: 13.5},
+  lyricEmpty: {color: C.faint, fontSize: 13},
+  lyricLine: {
+    fontSize: 21,
+    lineHeight: LINE_H,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.38)',
+  },
+  lyricLineOn: {color: C.text},
+  lyricPlain: {fontSize: 16, lineHeight: 26, color: 'rgba(255,255,255,0.8)'},
 });

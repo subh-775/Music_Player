@@ -11,27 +11,36 @@ import {
 import {ErrorBoundary} from './src/ErrorBoundary';
 import {HomeScreen} from './src/screens/HomeScreen';
 import {SearchScreen} from './src/screens/SearchScreen';
-import {LibraryScreen, type OpenList} from './src/screens/LibraryScreen';
+import {LibraryScreen} from './src/screens/LibraryScreen';
 import {SettingsScreen} from './src/screens/SettingsScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
-import {TrackListScreen} from './src/screens/TrackListScreen';
+import {SpotifyImportScreen} from './src/screens/SpotifyImportScreen';
 import {PlayerScreen} from './src/screens/PlayerScreen';
 import {PlayerBar} from './src/components/PlayerBar';
 import {BottomNav, type Tab} from './src/components/BottomNav';
+import {Toaster} from './src/components/Toaster';
+import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {C, S} from './src/theme';
-import {type HomeItem, type Track} from './src/backend';
+import {getCollection, type HomeItem, type Track} from './src/backend';
 import {playTrack, setupPlayer} from './src/player';
 import {hydrate} from './src/store';
+import {normalizeTracks} from './src/tracks';
+import {type Collection} from './src/collections';
+import {toast} from './src/toast';
 
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
-  const [collection, setCollection] = useState<HomeItem | null>(null);
-  const [list, setList] = useState<OpenList | null>(null);
+  // One stack slot: whatever collection is open, wherever it came from.
+  const [open, setOpen] = useState<Collection | null>(null);
+  const [importUrl, setImportUrl] = useState<string | null>(null);
+  const [addTo, setAddTo] = useState<Track | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [notice, setNotice] = useState('');
+  // Bumped after downloads are deleted, so the library rescans disk.
+  const [, setRefresh] = useState(0);
 
   useEffect(() => {
     hydrate();
@@ -49,15 +58,29 @@ function Shell() {
     }
   }, []);
 
-  // A Home card is a track, album or playlist. Tracks play; the other two open.
+  /** A Home card is a track, album or playlist. Tracks play; the rest open —
+   *  and they open as a Collection, the same as anything in the library. */
   const pickHomeItem = useCallback(
-    (item: HomeItem) => {
+    async (item: HomeItem) => {
       if (item.type === 'track' && item.track) {
         play(item.track);
         return;
       }
-      if (item.perma_url) {
-        setCollection(item);
+      if (!item.perma_url) {
+        return;
+      }
+      try {
+        const data = await getCollection(item.perma_url);
+        setOpen({
+          id: item.perma_url,
+          kind: item.type === 'album' ? 'album' : 'sourcePlaylist',
+          name: data.name || item.title || item.name || '',
+          image: item.image,
+          tracks: normalizeTracks(data.tracks),
+          source: item.perma_url,
+        });
+      } catch {
+        toast("Couldn't open that — try again in a moment.");
       }
     },
     [play],
@@ -69,10 +92,12 @@ function Shell() {
 
       <View style={styles.body}>
         {tab === 'home' && <HomeScreen onPickTrack={pickHomeItem} />}
-        {tab === 'search' && <SearchScreen onPickTrack={play} />}
+        {tab === 'search' && (
+          <SearchScreen onPickTrack={play} onImportSpotify={setImportUrl} />
+        )}
         {tab === 'library' && (
           <LibraryScreen
-            onOpenList={setList}
+            onOpen={setOpen}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
@@ -85,26 +110,38 @@ function Shell() {
         </TouchableOpacity>
       )}
 
+      <Toaster bottom={engine ? 132 : 78} />
+
       {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
 
       <BottomNav active={tab} onChange={setTab} />
 
-      <CollectionScreen
-        item={collection}
-        onClose={() => setCollection(null)}
-        onPickTrack={play}
-      />
+      <Modal
+        visible={!!open}
+        animationType="slide"
+        onRequestClose={() => setOpen(null)}>
+        {!!open && (
+          <CollectionScreen
+            collection={open}
+            onClose={() => setOpen(null)}
+            onPlay={play}
+            onChanged={() => {
+              setOpen(null);
+              setRefresh(n => n + 1);
+            }}
+          />
+        )}
+      </Modal>
 
       <Modal
-        visible={!!list}
+        visible={!!importUrl}
         animationType="slide"
-        onRequestClose={() => setList(null)}>
-        {!!list && (
-          <TrackListScreen
-            title={list.title}
-            tracks={list.tracks}
-            onClose={() => setList(null)}
-            onPickTrack={play}
+        onRequestClose={() => setImportUrl(null)}>
+        {!!importUrl && (
+          <SpotifyImportScreen
+            url={importUrl}
+            onClose={() => setImportUrl(null)}
+            onPlay={play}
           />
         )}
       </Modal>
@@ -116,10 +153,13 @@ function Shell() {
         <SettingsScreen onClose={() => setSettingsOpen(false)} />
       </Modal>
 
+      <AddToPlaylistSheet track={addTo} onClose={() => setAddTo(null)} />
+
       {engine && (
         <PlayerScreen
           visible={playerOpen}
           onClose={() => setPlayerOpen(false)}
+          onAddToPlaylist={setAddTo}
         />
       )}
     </SafeAreaView>

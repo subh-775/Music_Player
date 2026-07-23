@@ -17,7 +17,7 @@ import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
 import {TrackPlayer, shuffleQueue} from '../player';
 
-export function QueueScreen() {
+export function QueuePane() {
   const [queue, setQueue] = useState<RNTPTrack[]>([]);
   const [active, setActive] = useState<number | null>(null);
 

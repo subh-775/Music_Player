@@ -21,7 +21,7 @@ import {
   type DownloadsInfo,
   type SourceStatus,
 } from '../backend';
-import {DEFAULT_SETTINGS, resetSettings, useStore, writeSetting} from '../store';
+import {resetSettings, useStore, writeSetting} from '../store';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 

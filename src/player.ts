@@ -25,6 +25,34 @@ import {currentQuality} from './store';
 let ready = false;
 let available: boolean | null = null;
 
+/**
+ * The backend Tracks behind whatever is currently queued.
+ *
+ * The engine's own queue items are a reduced shape — url, title, artist,
+ * artwork — with no `sources`, no ISRC and no artwork_urls. The player screen
+ * needs the real thing to show a source badge, resolve a download, or match a
+ * like, so the originals are kept alongside and looked up by title+artist.
+ */
+let queueSource: Track[] = [];
+
+/** The full Track behind an engine queue item, or null if it isn't ours. */
+export function sourceTrackFor(
+  active: {title?: string | null; artist?: string | null} | null | undefined,
+): Track | null {
+  if (!active) {
+    return null;
+  }
+  const title = String(active.title ?? '').toLowerCase();
+  const artist = String(active.artist ?? '').toLowerCase();
+  return (
+    queueSource.find(
+      t =>
+        (t.title || '').toLowerCase() === title &&
+        (t.artist || '').toLowerCase() === artist,
+    ) ?? null
+  );
+}
+
 /** Build the streaming URL. proxy_stream handles range requests + the bitrate
  *  ladder, and apiUrl attaches the API token the backend requires. */
 export function streamUrlFor(
@@ -164,6 +192,8 @@ export async function playTrack(
     startAt = 0;
   }
 
+  queueSource = items.map(x => x.t);
+
   await TrackPlayer.reset();
   await TrackPlayer.add(items.map(x => x.q));
   if (startAt > 0) {
@@ -249,3 +279,6 @@ export async function seekTo(seconds: number): Promise<void> {
 }
 
 export {TrackPlayer, State, Event, RepeatMode};
+// Re-exported so screens import playback from one module rather than reaching
+// into the library directly — which is what lets the guards above stay honest.
+export {useActiveTrack, usePlaybackState, useProgress} from 'react-native-track-player';

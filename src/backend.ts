@@ -80,9 +80,20 @@ export type Track = {
   album?: string;
   duration_ms?: number;
   artwork_url?: string;
+  artwork_urls?: Record<string, string>;
   playable_source?: string;
   primary_source?: string;
-  sources?: Record<string, {url?: string}>;
+  sources?: Record<string, {url?: string; bitrate?: number}>;
+  is_playable?: boolean;
+  /** Only on tracks scanned from disk — the real file, needed to delete it. */
+  file_path?: string;
+  isrc?: string;
+  release_date?: string;
+  genre?: string;
+  /** Set once /api/enrich has been applied — the guard against re-enriching. */
+  _enriched?: boolean;
+  /** Set on autoplay/radio picks, so the queue can label them "Recommended". */
+  _autoplay?: boolean;
 };
 
 export async function getHome(language = 'hindi,english'): Promise<HomeRow[]> {
@@ -222,6 +233,155 @@ export async function setYouTubeExperimental(
     body: JSON.stringify({enabled}),
   });
   return (await res.json()) as {ok: boolean; enabled: boolean; error?: string};
+}
+
+// ─── Search suggestions ─────────────────────────────────────────────────────
+
+export type Suggestion = {
+  title: string;
+  artist: string;
+  album?: string;
+  sources?: string[];
+  isrc?: string;
+  artwork_url?: string;
+};
+
+/** Autocomplete for the search field. Cheap by design — the backend restricts
+ *  this to JioSaavn and ranks prefix matches above contains above fuzzy. */
+export async function getSuggestions(
+  q: string,
+  limit = 8,
+): Promise<Suggestion[]> {
+  if (q.trim().length < 2) {
+    return [];
+  }
+  const data = await apiGet<{suggestions?: Suggestion[]}>(
+    `/search/suggestions?q=${encodeURIComponent(q)}&limit=${limit}`,
+  );
+  return Array.isArray(data.suggestions) ? data.suggestions : [];
+}
+
+// ─── Enrichment ─────────────────────────────────────────────────────────────
+
+/**
+ * Batch iTunes metadata lookup. Results come back in the SAME ORDER as the
+ * tracks sent (the backend uses executor.map for exactly this), which is how
+ * the caller aligns them without needing an id per row.
+ *
+ * Call this at most once per track — see applyEnrichment's `_enriched` flag.
+ */
+export async function enrichBatch(
+  tracks: Track[],
+): Promise<Array<Record<string, unknown> | null>> {
+  if (!tracks.length) {
+    return [];
+  }
+  const res = await fetch(apiUrl('/enrich'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      tracks: tracks.map(t => ({
+        title: t.title,
+        artist: t.artist,
+        isrc: t.isrc,
+        duration_ms: t.duration_ms,
+      })),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`enrich -> HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as {results?: Array<Record<string, unknown> | null>};
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+// ─── Spotify import ─────────────────────────────────────────────────────────
+
+export type ImportSnapshot = {
+  name: string;
+  image: string;
+  total: number;
+  done: number;
+  matched: number;
+  tracks: Track[];
+  missing: string[];
+  finished: boolean;
+  error: string | null;
+};
+
+/** Poll (and on the first call, start) the background import job for `url`.
+ *  The job lives in the server process, so it survives the screen closing. */
+export const importSpotify = (url: string) =>
+  apiGet<ImportSnapshot>(`/spotify/import?url=${encodeURIComponent(url)}`);
+
+// ─── Downloads ──────────────────────────────────────────────────────────────
+
+export type DownloadTask = {
+  task_id?: string;
+  status?: string;
+  progress?: number;
+  error?: string;
+  filepath?: string;
+};
+
+/**
+ * Queue a download. The backend wants the SOURCE page url plus the catalog
+ * metadata separately — it names the file "{title} - {artist}" from track_info
+ * and embeds those tags, which is what makes the offline library readable back
+ * off disk later. Android ignores any output_dir: scoped storage means
+ * everything lands in the app's Music directory.
+ */
+export async function startDownload(
+  track: Track,
+  bitrate = 320,
+): Promise<DownloadTask> {
+  const source = track.playable_source || track.primary_source || '';
+  const url = source ? track.sources?.[source]?.url : undefined;
+  if (!url) {
+    throw new Error('This track has no downloadable source.');
+  }
+  const res = await fetch(apiUrl('/download'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      url,
+      track_info: {
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration_ms: track.duration_ms,
+        artwork_url: track.artwork_url,
+      },
+      // The backend clamps to 64..320 anyway; clamping here keeps the value
+      // we report to the user honest.
+      max_bitrate: Math.max(64, Math.min(bitrate, 320)),
+    }),
+  });
+  return (await res.json()) as DownloadTask;
+}
+
+export const getDownloadStatus = (taskId: string) =>
+  apiGet<DownloadTask>(`/download/${encodeURIComponent(taskId)}`);
+
+/**
+ * Delete a downloaded file from the phone's storage.
+ *
+ * Takes the real `file_path` from /downloads/local — the backend refuses any
+ * path that doesn't resolve inside the managed download directory, so this
+ * can't be pointed at arbitrary files. It also removes an album subfolder once
+ * emptied.
+ */
+export async function deleteDownload(path: string): Promise<boolean> {
+  if (!path) {
+    return false;
+  }
+  const res = await fetch(apiUrl('/downloads/delete'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path}),
+  });
+  const data = (await res.json()) as {ok?: boolean};
+  return !!data.ok;
 }
 
 /** mm:ss for a duration in milliseconds. */

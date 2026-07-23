@@ -1,55 +1,69 @@
 /**
- * One track line. Shared by Search, Library and album/playlist screens so a
- * track looks and behaves the same everywhere in the app.
+ * One track line. Shared by Search, Library, albums and playlists so a track
+ * looks and behaves the same everywhere in the app.
  */
 import React from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {MoreVertical} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {formatDuration, type Track} from '../backend';
-
-/** Brand tint per source, so where a track came from reads at a glance. */
-export const SOURCE_TINT: Record<string, string> = {
-  jiosaavn: '#2bd17e',
-  soundcloud: '#ff7733',
-  youtube: '#ff4444',
-  youtube_music: '#ff4444',
-  local: '#8b7bd8',
-};
+import {cleanText, getBestArtworkUrl} from '../tracks';
+import {SourceBadge} from './Badges';
 
 export function TrackRow({
   track,
   onPress,
+  onLongPress,
+  onMenu,
   index,
+  active,
 }: {
   track: Track;
   onPress: () => void;
+  onLongPress?: () => void;
+  onMenu?: () => void;
   index?: number;
+  /** True for the track that's currently playing. */
+  active?: boolean;
 }) {
-  const source = track.playable_source || track.primary_source || '';
-  const tint = SOURCE_TINT[source] || C.faint;
   const dur = formatDuration(track.duration_ms);
+  const artwork = getBestArtworkUrl(track);
 
   return (
-    <TouchableOpacity style={styles.row} activeOpacity={0.65} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.row}
+      activeOpacity={0.65}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}>
       {index != null ? (
         <Text style={styles.index}>{index + 1}</Text>
-      ) : track.artwork_url ? (
-        <Image source={{uri: track.artwork_url}} style={styles.thumb} />
+      ) : artwork ? (
+        <Image source={{uri: artwork}} style={styles.thumb} />
       ) : (
         <View style={[styles.thumb, styles.thumbFallback]} />
       )}
+
       <View style={styles.text}>
-        <Text style={styles.title} numberOfLines={1}>
-          {track.title}
+        <Text
+          style={[styles.title, active && styles.titleActive]}
+          numberOfLines={1}>
+          {cleanText(track.title)}
         </Text>
         <View style={styles.metaLine}>
-          {!!source && <View style={[styles.dot, {backgroundColor: tint}]} />}
+          <SourceBadge track={track} />
           <Text style={styles.sub} numberOfLines={1}>
-            {track.artist}
+            {cleanText(track.artist)}
             {dur ? `  ·  ${dur}` : ''}
           </Text>
         </View>
       </View>
+
+      {!!onMenu && (
+        <TouchableOpacity onPress={onMenu} hitSlop={10} style={styles.menu}>
+          <MoreVertical size={19} color={C.faint} />
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 }
@@ -73,7 +87,8 @@ const styles = StyleSheet.create({
   },
   text: {flex: 1, minWidth: 0},
   title: {...T.body, color: C.text},
+  titleActive: {color: C.accent},
   metaLine: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3},
-  dot: {width: 6, height: 6, borderRadius: 3},
   sub: {...T.sub, color: C.sub, flex: 1},
+  menu: {padding: 4},
 });
