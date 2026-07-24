@@ -168,21 +168,63 @@ export function PlayerScreen({
   // Artwork follows the finger, then leaves and re-enters on a change.
   const slide = useRef(new Animated.Value(0)).current;
 
+  // Drag the header down to dismiss. Past a threshold it closes; short of it,
+  // the sheet springs back. Reset to 0 whenever the player (re)opens.
+  const sheetY = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (visible) {
+      sheetY.setValue(0);
+    }
+  }, [visible, sheetY]);
+
+  const dismissPan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) =>
+          g.dy > 8 && g.dy > Math.abs(g.dx) * 1.5,
+        onPanResponderMove: (_e, g) => {
+          if (g.dy > 0) {
+            sheetY.setValue(g.dy);
+          }
+        },
+        onPanResponderRelease: (_e, g) => {
+          if (g.dy > 130) {
+            Animated.timing(sheetY, {
+              toValue: 700,
+              duration: 180,
+              useNativeDriver: true,
+            }).start(() => {
+              sheetY.setValue(0);
+              onClose();
+            });
+          } else {
+            Animated.spring(sheetY, {
+              toValue: 0,
+              useNativeDriver: true,
+              bounciness: 4,
+            }).start();
+          }
+        },
+      }),
+    [sheetY, onClose],
+  );
+
   const commit = useCallback(
     (dir: 'next' | 'prev') => {
+      // Fire the skip IMMEDIATELY so the engine advances during the animation,
+      // not after it — that lag was the "old song lingers, then flips" bug.
+      (dir === 'next' ? skipNext() : skipPrevious()).catch(() => {});
       Animated.timing(slide, {
         toValue: dir === 'next' ? -400 : 400,
-        duration: 180,
+        duration: 160,
         useNativeDriver: true,
       }).start(() => {
-        (dir === 'next' ? skipNext() : skipPrevious()).finally(() => {
-          slide.setValue(dir === 'next' ? 400 : -400);
-          Animated.timing(slide, {
-            toValue: 0,
-            duration: 260,
-            useNativeDriver: true,
-          }).start();
-        });
+        slide.setValue(dir === 'next' ? 400 : -400);
+        Animated.timing(slide, {
+          toValue: 0,
+          duration: 240,
+          useNativeDriver: true,
+        }).start();
       });
     },
     [slide],
@@ -266,10 +308,15 @@ export function PlayerScreen({
       animationType="slide"
       onRequestClose={onClose}
       statusBarTranslucent>
-      <View
-        style={[styles.wrap, !!tint && {backgroundColor: toward(tint, 0.72)}]}>
-        {/* Header — close on the left, what you're inside of in the middle. */}
-        <View style={styles.topBar}>
+      <Animated.View
+        style={[
+          styles.wrap,
+          !!tint && {backgroundColor: toward(tint, 0.72)},
+          {transform: [{translateY: sheetY}]},
+        ]}>
+        {/* Header — close on the left, what you're inside of in the middle.
+            Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
+        <View style={styles.topBar} {...dismissPan.panHandlers}>
           <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
             <ChevronDown size={26} color={C.text} />
           </TouchableOpacity>
@@ -304,7 +351,11 @@ export function PlayerScreen({
                 style={[styles.artHolder, {transform: [{translateX: slide}]}]}
                 pointerEvents="none">
                 {artwork ? (
-                  <Image source={{uri: artwork}} style={styles.art} />
+                  // Keyed by the URL: when the song changes, React swaps in a
+                  // FRESH Image rather than reusing the old element (which held
+                  // the previous cover visible until the new one decoded — the
+                  // "previous artwork for a few ms" flash).
+                  <Image key={artwork} source={{uri: artwork}} style={styles.art} />
                 ) : (
                   <View style={[styles.art, styles.artFallback]} />
                 )}
@@ -465,7 +516,7 @@ export function PlayerScreen({
             sits underneath it, so "Downloading…" was invisible until the
             player was closed. Same queue, second outlet. */}
         <Toaster bottom={40} />
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

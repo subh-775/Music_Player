@@ -24,6 +24,7 @@ import {currentQuality, readSettings} from './store';
 import {cleanText, getTrackId, isPlayableTrack, normalizeTrack} from './tracks';
 import {applyAudioEffects} from './audioEffects';
 import {remember} from './recentlyPlayed';
+import {clearResume, readResume, saveResume} from './resume';
 
 let ready = false;
 let available: boolean | null = null;
@@ -138,17 +139,24 @@ export async function setupPlayer(): Promise<boolean> {
     // Every track the engine lands on — auto-advance, radio, a queue tap —
     // goes into Recently Played AS IT STARTS, so Home updates live. Manual
     // playTrack() also records (first write wins on order; remember() de-dupes).
-    TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, e => {
+    TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async e => {
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
       }
-      // Crossfade's other half: the outgoing song faded down, so the incoming
-      // one rises from quiet instead of slamming in at full volume.
-      const span = crossfadeSpanRef();
-      if (span > 0) {
-        fadeVolumeTo(1, Math.min(span, 3));
-      }
+      // Save the session on every track change (forced past the throttle), so a
+      // reopen lands on the right song even if the app was killed mid-track.
+      try {
+        const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+        saveResume(
+          {track: src, position: 0, queue: queueSource, index: idx},
+          true,
+        );
+      } catch {}
+      // Crossfade's other half: if the outgoing song faded down, bring the
+      // incoming one up from quiet. A no-op (just ensures full volume) on a
+      // normal advance or a manual skip.
+      fadeInIfNeeded();
       // Effects die with the audio session; re-attach for the new one.
       applyAudioEffects();
     });
@@ -169,6 +177,47 @@ export async function setupPlayer(): Promise<boolean> {
 /** True once the engine has initialised; null until setup has been attempted. */
 export function engineAvailable(): boolean | null {
   return available;
+}
+
+/**
+ * Restore the last session: the same song, at the timestamp you left it,
+ * PAUSED, with the queue intact. Returns true if something was restored, which
+ * is what tells the shell to show the mini player straight away.
+ *
+ * Deliberately does not call play() — reopening the app and having music
+ * suddenly start is startling; the WebView paused too. A tap on play resumes.
+ */
+export async function restoreSession(): Promise<boolean> {
+  if (!(await setupPlayer())) {
+    return false;
+  }
+  const s = await readResume();
+  if (!s?.queue?.length) {
+    return false;
+  }
+  const items = s.queue
+    .map(t => ({t, q: toQueueItem(t, currentQuality())}))
+    .filter(x => x.q !== null);
+  if (!items.length) {
+    return false;
+  }
+  try {
+    queueSource = items.map(x => x.t);
+    await TrackPlayer.reset();
+    await TrackPlayer.add(items.map(x => x.q!));
+    const idx = Math.max(0, Math.min(items.length - 1, s.index));
+    if (idx > 0) {
+      await TrackPlayer.skip(idx);
+    }
+    if (s.position > 0) {
+      await TrackPlayer.seekTo(s.position);
+    }
+    // Left paused — see above.
+    applyAudioEffects();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Shape a backend Track for the audio engine. Returns null if unplayable. */
@@ -343,6 +392,7 @@ export async function togglePlay(): Promise<void> {
 export async function stop(): Promise<void> {
   try {
     await TrackPlayer.reset();
+    clearResume(); // an explicit stop means "don't reopen on this"
   } catch {
     /* engine not up — nothing to stop */
   }
@@ -415,6 +465,7 @@ async function topUpFromRadio(): Promise<void> {
  */
 let fadeTimer: ReturnType<typeof setInterval> | null = null;
 let fadedFor = '';
+let didFadeOut = false; // the last advance faded down — so fade the next one UP
 let getCrossfadeSeconds: () => number = () => 0;
 
 /** Current crossfade span; readable outside the watcher (the fade-in half). */
@@ -422,17 +473,29 @@ function crossfadeSpanRef(): number {
   return getCrossfadeSeconds();
 }
 
-/** Ramp volume to `target` over `seconds` in 8 steps. Fire-and-forget. */
-async function fadeVolumeTo(target: number, seconds: number): Promise<void> {
+/**
+ * Fade the incoming track up from quiet — the OTHER half of the transition,
+ * run on track change. Only when the outgoing track actually faded out (a
+ * natural end under crossfade); a manual skip must NOT get an unwanted fade.
+ */
+async function fadeInIfNeeded(): Promise<void> {
+  if (!didFadeOut) {
+    // Make sure volume is full for a normal advance.
+    try {
+      await TrackPlayer.setVolume(1);
+    } catch {}
+    return;
+  }
+  didFadeOut = false;
+  const seconds = Math.min(crossfadeSpanRef(), 3) || 2;
   const steps = 8;
   try {
-    const from = target === 1 ? 0 : 1;
-    await TrackPlayer.setVolume(from);
+    await TrackPlayer.setVolume(0);
     for (let i = 1; i <= steps; i++) {
-      await TrackPlayer.setVolume(from + ((target - from) * i) / steps);
+      await TrackPlayer.setVolume(i / steps);
       await new Promise(r => setTimeout(r, (seconds * 1000) / steps));
     }
-    await TrackPlayer.setVolume(target);
+    await TrackPlayer.setVolume(1);
   } catch {
     try {
       await TrackPlayer.setVolume(1);
@@ -449,6 +512,17 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     // Piggybacked on this tick: keep the queue topped up with similar songs.
     topUpFromRadio().catch(() => {});
 
+    // …and remember the current position, throttled inside saveResume, so a
+    // reopen resumes at the timestamp you left rather than the song's start.
+    try {
+      const {position} = await TrackPlayer.getProgress();
+      const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+      const src = sourceTrackFor((await TrackPlayer.getActiveTrack()) ?? null);
+      if (src) {
+        saveResume({track: src, position, queue: queueSource, index: idx});
+      }
+    } catch {}
+
     const span = getSeconds();
     if (span <= 0) {
       return;
@@ -464,17 +538,23 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
 
       if (remaining <= span && fadedFor !== key) {
         fadedFor = key;
-        // Ramp down over the remaining window, then restore volume so the next
-        // track doesn't start silent.
+        // Ramp the outgoing track DOWN over its final `span` seconds. Do NOT
+        // restore volume here — that was the bug: the song jumped back to full
+        // volume right before ending, so the fade was inaudible. The incoming
+        // track is faded back up by fadeInIfNeeded() on the track change.
+        didFadeOut = true;
         const steps = 8;
         for (let i = 1; i <= steps; i++) {
-          await TrackPlayer.setVolume(Math.max(0, 1 - i / steps));
+          await TrackPlayer.setVolume(Math.max(0.05, 1 - i / steps));
           await new Promise(r => setTimeout(r, (span * 1000) / steps));
         }
-        await TrackPlayer.setVolume(1);
-      } else if (remaining > span && fadedFor === key) {
-        // Seeked backwards — let it fade again on the next approach.
+      } else if (remaining > span + 1 && fadedFor === key) {
+        // Seeked backwards out of the fade zone — cancel it and go back to full.
         fadedFor = '';
+        didFadeOut = false;
+        try {
+          await TrackPlayer.setVolume(1);
+        } catch {}
       }
     } catch {
       /* engine not up */

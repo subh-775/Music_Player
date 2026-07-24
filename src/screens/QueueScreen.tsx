@@ -51,13 +51,18 @@ export function QueuePane() {
     }
   }, []);
 
+  // A just-committed reorder must not be clobbered by the poll reading the
+  // engine's still-catching-up queue — that read-back was the "drop, then it
+  // jumps" lag. Suppress the refresh for a beat after a move.
+  const settleUntil = useRef(0);
+
   useEffect(() => {
     refresh();
     // The queue changes on track advance and on shuffle; a light poll keeps
     // this honest without wiring a listener per event type. Paused mid-drag so
     // a refresh can't reshuffle the list under the finger.
     const t = setInterval(() => {
-      if (dragFrom === null) {
+      if (dragFrom === null && Date.now() > settleUntil.current) {
         refresh();
       }
     }, 1000);
@@ -106,6 +111,7 @@ export function QueuePane() {
         }
         return prev;
       });
+      settleUntil.current = Date.now() + 1500;
       try {
         // RNTP has no move(); remove and re-insert is the supported route.
         const item = queue[from];

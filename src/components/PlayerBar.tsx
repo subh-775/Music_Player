@@ -53,10 +53,10 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const track = useMemo(() => sourceTrackFor(active), [active]);
   const {liked, toggle} = useLike(track);
 
-  // The song INFO slides out the way you swiped and the next one slides in
-  // from the other side — Spotify's mini-player motion. Only the text/artwork
-  // travels; the bar chrome stays put.
-  const contentSlide = useRef(new Animated.Value(0)).current;
+  // Only the TITLE slides — the artwork just swaps to the new song, per the
+  // request. And the skip is fired IMMEDIATELY, not behind the animation, so
+  // the new song appears at once instead of a beat later.
+  const titleSlide = useRef(new Animated.Value(0)).current;
 
   const pan = useMemo(
     () =>
@@ -69,21 +69,14 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
         onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
         onPanResponderRelease: (_e, g) => {
-          const commit = (dir: 1 | -1, go: () => Promise<void>) => {
-            Animated.timing(contentSlide, {
-              toValue: dir * -220,
-              duration: 150,
+          const commit = (dir: 1 | -1, go: () => void) => {
+            go(); // fire the skip NOW — the engine advances while this animates
+            titleSlide.setValue(dir * 90);
+            Animated.timing(titleSlide, {
+              toValue: 0,
+              duration: 220,
               useNativeDriver: true,
-            }).start(() => {
-              go().finally(() => {
-                contentSlide.setValue(dir * 220);
-                Animated.timing(contentSlide, {
-                  toValue: 0,
-                  duration: 200,
-                  useNativeDriver: true,
-                }).start();
-              });
-            });
+            }).start();
           };
           if (g.dx <= -SWIPE_COMMIT) {
             commit(1, skipNext);
@@ -92,7 +85,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           }
         },
       }),
-    [contentSlide],
+    [titleSlide],
   );
 
   const artworkForColor = track
@@ -114,21 +107,20 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
     <View
       style={[styles.wrap, !!tint && {backgroundColor: toward(tint, 0.45)}]}
       {...pan.panHandlers}>
-      {/* The BAR stays put; only its contents travel. Sliding the whole bar
-          made the chrome look like it was falling off the screen every skip. */}
-      <Animated.View
-        style={[styles.slider, {transform: [{translateX: contentSlide}]}]}>
+      {/* The BAR and ARTWORK stay put; only the title travels. */}
+      <View style={styles.slider}>
       <TouchableOpacity
         style={styles.main}
         activeOpacity={0.85}
         onPress={onExpand}>
         {artwork ? (
-          <Image source={{uri: artwork}} style={styles.art} />
+          <Image key={artwork} source={{uri: artwork}} style={styles.art} />
         ) : (
           <View style={[styles.art, styles.artFallback]} />
         )}
 
-        <View style={styles.text}>
+        <Animated.View
+          style={[styles.text, {transform: [{translateX: titleSlide}]}]}>
           <Marquee
             text={cleanText(String(active.title ?? ''))}
             style={styles.title}
@@ -145,9 +137,9 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
               {cleanText(String(active.artist ?? ''))}
             </Text>
           )}
-        </View>
+        </Animated.View>
       </TouchableOpacity>
-      </Animated.View>
+      </View>
 
       <View style={styles.controls}>
         {!!output && <Headphones size={20} color={C.accent} />}

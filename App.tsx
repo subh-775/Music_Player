@@ -26,7 +26,12 @@ import {
 } from './src/components/TrackActionSheet';
 import {C} from './src/theme';
 import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
-import {playTrack, setupPlayer, startCrossfadeWatcher} from './src/player';
+import {
+  playTrack,
+  restoreSession,
+  setupPlayer,
+  startCrossfadeWatcher,
+} from './src/player';
 import {hydrate, readSettings} from './src/store';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
@@ -66,7 +71,19 @@ function Shell() {
 
   useEffect(() => {
     hydrate().then(applyAudioEffects);
-    setupPlayer().then(setEngine);
+    // Boot the engine, then restore the last session so the mini player is
+    // there on reopen (same song, paused, at the timestamp you left).
+    setupPlayer().then(async ok => {
+      setEngine(ok);
+      if (ok) {
+        const restored = await restoreSession();
+        if (restored) {
+          // Force the shell to show the player bar even though nothing was
+          // tapped this launch.
+          setEngine(true);
+        }
+      }
+    });
     // Reads the setting each tick rather than closing over it, so changing
     // crossfade takes effect without restarting the watcher.
     startCrossfadeWatcher(() => readSettings().crossfadeDuration);

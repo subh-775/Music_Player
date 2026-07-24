@@ -218,9 +218,10 @@ function Band({
       onPanResponderRelease: () => {
         if (dragDbRef.current != null) {
           changeRef.current(dragDbRef.current);
+          // Keep SHOWING the released value; clearing dragDb now would flash
+          // the old prop for a frame before the settings write propagates —
+          // that's the "snaps back then returns" the drag had.
         }
-        dragDbRef.current = null;
-        setDragDb(null);
       },
       onPanResponderTerminate: () => {
         dragDbRef.current = null;
@@ -228,6 +229,12 @@ function Band({
       },
     }),
   ).current;
+
+  // Once the incoming prop matches what we released, drop the local hold.
+  if (dragDb != null && Math.abs(value - dragDb) < 0.5) {
+    dragDbRef.current = null;
+    setDragDb(null);
+  }
 
   const shown = dragDb ?? value;
   const pct = (shown - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB);

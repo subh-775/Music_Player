@@ -16,12 +16,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Heart, ListPlus, MoreVertical} from 'lucide-react-native';
+import {ArrowDownToLine, Heart, ListPlus, MoreVertical} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {formatDuration, type Track} from '../backend';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {useLike} from '../store';
 import {addToQueue, useActiveTrack} from '../player';
+import {isDownloaded, useDownloadedIds} from '../downloads';
 import {toast} from '../toast';
 import {SourceBadge} from './Badges';
 
@@ -50,6 +51,10 @@ export function TrackRow({
   const dur = formatDuration(track.duration_ms);
   const artwork = getBestArtworkUrl(track);
   const {liked, toggle} = useLike(track);
+  // A small green tick marks anything already on disk — permanent until the
+  // file is deleted (a disk scan drops the id).
+  useDownloadedIds();
+  const downloaded = isDownloaded(track);
 
   // Every row knows for itself whether it's the song playing — callers kept
   // forgetting to pass `active`, and a list where the playing song isn't green
@@ -128,6 +133,10 @@ export function TrackRow({
             </View>
           </View>
 
+          {showActions && downloaded && (
+            <ArrowDownToLine size={15} color={C.accent} style={styles.dot} />
+          )}
+
           {showActions && (
             <TouchableOpacity onPress={toggle} hitSlop={6} style={styles.act}>
               <Heart
@@ -186,4 +195,5 @@ const styles = StyleSheet.create({
   sub: {...T.sub, color: C.sub, flex: 1},
   act: {paddingHorizontal: 5, paddingVertical: 6},
   menu: {paddingLeft: 3, paddingVertical: 6},
+  dot: {marginRight: 2},
 });
