@@ -41,6 +41,10 @@ export function Seekbar({
 }) {
   const [width, setWidth] = useState(0);
   const [dragging, setDragging] = useState<number | null>(null);
+  // After release the engine takes a beat to report the new position; keep
+  // showing the released value until it catches up, or the thumb snaps back
+  // to the OLD position for a flash on every scrub.
+  const [held, setHeld] = useState<number | null>(null);
 
   // Refs so the PanResponder — created once — always reads current values
   // instead of closing over the first render's.
@@ -80,15 +84,25 @@ export function Seekbar({
         },
         onPanResponderRelease: e => {
           const target = seconds(e.nativeEvent.locationX);
+          setHeld(target);
           onSeek(target);
           setDragging(null);
+          // Failsafe: if the seek never lands (engine error), don't pin the
+          // thumb to a position the audio isn't at.
+          setTimeout(() => setHeld(null), 2500);
         },
         onPanResponderTerminate: () => setDragging(null),
       }),
     [seconds, onSeek],
   );
 
-  const shown = dragging ?? position;
+  // Release the hold once the engine's reported position reaches the seek
+  // target (within a tick), or after it has clearly moved on.
+  if (held !== null && Math.abs(position - held) < 1.5) {
+    setHeld(null);
+  }
+
+  const shown = dragging ?? held ?? position;
   const pct = duration > 0 ? Math.max(0, Math.min(1, shown / duration)) : 0;
 
   return (

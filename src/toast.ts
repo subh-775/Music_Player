@@ -11,14 +11,17 @@
  */
 import {useSyncExternalStore} from 'react';
 
-export type ToastItem = {id: number; message: string};
+/** 'info' is the everyday confirmation bar; 'warn' is visually distinct (dark,
+ *  accent-bordered) for system-ish notices like "press back again to exit". */
+export type ToastKind = 'info' | 'warn';
+export type ToastItem = {id: number; message: string; kind: ToastKind};
 
 const SHOW_MS = 2200;
 const GAP_MS = 180;
 
 let current: ToastItem | null = null;
 let nextId = 0;
-const queue: string[] = [];
+const queue: Array<{message: string; kind: ToastKind}> = [];
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -27,14 +30,14 @@ function emit() {
 }
 
 function pump() {
-  const message = queue.shift();
-  if (message === undefined) {
+  const item = queue.shift();
+  if (item === undefined) {
     current = null;
     timer = null;
     emit();
     return;
   }
-  current = {id: ++nextId, message};
+  current = {id: ++nextId, ...item};
   emit();
   timer = setTimeout(() => {
     current = null;
@@ -43,11 +46,11 @@ function pump() {
   }, SHOW_MS);
 }
 
-export function toast(message: string): void {
+export function toast(message: string, kind: ToastKind = 'info'): void {
   if (!message) {
     return;
   }
-  queue.push(String(message));
+  queue.push({message: String(message), kind});
   if (!timer) {
     pump();
   }

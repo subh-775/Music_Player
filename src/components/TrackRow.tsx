@@ -90,9 +90,12 @@ export function TrackRow({
 
   return (
     <View style={styles.swipeWrap} {...pan.panHandlers}>
-      {/* Revealed behind the row as it slides — says what release will do. */}
-      <View style={styles.queueHint} pointerEvents="none">
-        <ListPlus size={20} color={C.accent} />
+      {/* Revealed behind the row as it slides — the green ground + icon say
+          what releasing will do, the way Spotify's swipe does. */}
+      <View style={styles.queueHintBg} pointerEvents="none">
+        <View style={styles.queueHint}>
+          <ListPlus size={20} color={C.accent} />
+        </View>
       </View>
 
       <Animated.View style={{transform: [{translateX: slide}]}}>
@@ -148,12 +151,16 @@ export function TrackRow({
 
 const styles = StyleSheet.create({
   swipeWrap: {justifyContent: 'center'},
+  queueHintBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(29,185,84,0.16)',
+  },
   queueHint: {
     position: 'absolute',
     left: S.gutter,
-    alignSelf: 'flex-start',
+    top: 0,
+    bottom: 0,
     justifyContent: 'center',
-    height: '100%',
   },
   row: {
     flexDirection: 'row',

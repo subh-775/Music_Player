@@ -54,7 +54,7 @@ import {
 } from 'lucide-react-native';
 import {C, T} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
-import {enqueueDownload} from '../downloads';
+import {enqueueDownload, isDownloaded, useDownloadedIds} from '../downloads';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
@@ -121,6 +121,10 @@ export function PlayerScreen({
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
   const [shuffled, setShuffled] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // Subscribed so the button flips to the green tick the moment the download
+  // completes, and stays a tick on a song that's already on disk.
+  useDownloadedIds();
+  const downloaded = isDownloaded(track);
 
   // Double-tap seek: consecutive taps on the same side stack (10s, 20s, 30s…),
   // the way YouTube does, so a quick triple-tap jumps further.
@@ -210,14 +214,14 @@ export function PlayerScreen({
   );
 
   /**
-   * Repeat is a two-state switch, not a three-state cycle.
+   * Repeat is a two-state switch: off, or repeat THIS song.
    *
-   * RepeatMode.Track would make "next" replay the same song, which contradicts
-   * the skip button. Queue repeat keeps skip meaning skip and simply wraps at
-   * the end — that is what people mean by "repeat" here.
+   * Track mode loops the current song when it ends — dominating shuffle and
+   * autoplay, which is what "replay" means here — while the skip button still
+   * moves to the next song manually (RNTP's skipToNext ignores repeat mode).
    */
   const toggleRepeat = useCallback(() => {
-    const next = repeat === RepeatMode.Off ? RepeatMode.Queue : RepeatMode.Off;
+    const next = repeat === RepeatMode.Off ? RepeatMode.Track : RepeatMode.Off;
     setRepeatState(next);
     setRepeat(next).catch(() => {});
   }, [repeat]);
@@ -279,15 +283,21 @@ export function PlayerScreen({
         {/* The only flexible row: it shrinks and scrolls rather than pushing
             the controls below the fold. */}
         <View style={styles.pane}>
-          {pane === 'lyrics' && (
+          {/* Lyrics and queue stay MOUNTED and are shown/hidden — remounting
+              re-ran their whole load every pane switch, which is the 1-2s
+              "loading again" the pane tabs kept showing. */}
+          <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
             <LyricsPane
               title={title}
               artist={String(active.artist ?? '')}
               durationMs={duration ? duration * 1000 : undefined}
               position={position}
+              visible={pane === 'lyrics'}
             />
-          )}
-          {pane === 'queue' && <QueuePane />}
+          </View>
+          <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
+            <QueuePane />
+          </View>
           {pane === 'song' && (
             <View style={styles.artArea} {...pan.panHandlers}>
               <Animated.View
@@ -364,11 +374,11 @@ export function PlayerScreen({
 
               <TouchableOpacity
                 onPress={download}
-                disabled={downloading}
+                disabled={downloading || downloaded}
                 hitSlop={8}
                 style={styles.actionBtn}>
-                {downloading ? (
-                  <Check size={22} color={C.accent} />
+                {downloaded || downloading ? (
+                  <Check size={22} color={C.accent} strokeWidth={2.6} />
                 ) : (
                   <CircleArrowDown size={23} color={C.sub} strokeWidth={1.8} />
                 )}
@@ -506,11 +516,14 @@ function LyricsPane({
   artist,
   durationMs,
   position,
+  visible = true,
 }: {
   title: string;
   artist: string;
   durationMs?: number;
   position: number;
+  /** Mounted-but-hidden panes must not scroll a view nobody can see. */
+  visible?: boolean;
 }) {
   const cacheKey = `${title}|${artist}`.toLowerCase();
   const cached = lyricsCache.get(cacheKey);
@@ -520,6 +533,8 @@ function LyricsPane({
   const scroller = useRef<ScrollView>(null);
 
   useEffect(() => {
+    // New song, new geometry — stale measurements would centre wrong lines.
+    lineTops.current = [];
     // Cached: the pane paints instantly — switching Song → Queue → Lyrics must
     // not re-fetch what was on screen two taps ago.
     const hit = lyricsCache.get(cacheKey);
@@ -562,18 +577,23 @@ function LyricsPane({
     return idx;
   }, [synced, position]);
 
-  // Keep the current line around a third of the way down, which is where the
-  // eye already is — centring it means constantly reading at the midpoint and
-  // losing the lines just sung.
+  // MEASURED line positions, not index * LINE_H. Long lines wrap to two or
+  // three rows, so the fixed-height guess drifted further with every verse —
+  // which is how the sung line ended up above the fold. Each line reports its
+  // real y; the scroll centres the active one in the visible pane.
+  const lineTops = useRef<number[]>([]);
+  const [paneH, setPaneH] = useState(0);
+
   useEffect(() => {
-    if (activeLine < 0 || !scroller.current) {
+    if (!visible || activeLine < 0 || !scroller.current) {
       return;
     }
+    const y = lineTops.current[activeLine] ?? activeLine * LINE_H;
     scroller.current.scrollTo({
-      y: Math.max(0, activeLine * LINE_H - 120),
+      y: Math.max(0, y - Math.max(90, paneH * 0.4)),
       animated: true,
     });
-  }, [activeLine]);
+  }, [activeLine, visible, paneH]);
 
   if (busy) {
     return (
@@ -595,12 +615,16 @@ function LyricsPane({
       ref={scroller}
       style={styles.lyricScroll}
       contentContainerStyle={styles.lyricBody}
+      onLayout={e => setPaneH(e.nativeEvent.layout.height)}
       showsVerticalScrollIndicator={false}>
       {synced.length > 0
         ? synced.map((line, i) => (
             <Text
               key={`${line.time}-${i}`}
               onPress={() => seekTo(line.time)}
+              onLayout={e => {
+                lineTops.current[i] = e.nativeEvent.layout.y;
+              }}
               style={[styles.lyricLine, i === activeLine && styles.lyricLineOn]}>
               {line.text || '♪'}
             </Text>
@@ -634,6 +658,8 @@ const styles = StyleSheet.create({
   },
 
   pane: {flex: 1, minHeight: 0},
+  paneFill: {flex: 1, minHeight: 0},
+  paneOff: {display: 'none'},
   artArea: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
   artHolder: {width: '100%', aspectRatio: 1, maxHeight: '100%'},
   art: {width: '100%', height: '100%', borderRadius: 8, backgroundColor: C.surface},

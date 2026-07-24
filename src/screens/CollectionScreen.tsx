@@ -8,9 +8,10 @@
  * Downloads additionally supports select-and-delete: hold a row to enter
  * selection, then remove the files from the phone's storage.
  */
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-  FlatList,
+  ActivityIndicator,
+  Animated,
   Image,
   StyleSheet,
   Text,
@@ -40,7 +41,11 @@ import {
 import {CollectionArt} from '../components/CollectionArt';
 import {TrackRow} from '../components/TrackRow';
 import {toast} from '../toast';
-import {enqueueDownload, useDownloadJobs} from '../downloads';
+import {
+  enqueueDownload,
+  overlayDownloadArtwork,
+  useDownloadJobs,
+} from '../downloads';
 import {DownloadRow} from '../components/DownloadRow';
 import {
   State,
@@ -49,15 +54,21 @@ import {
   useActiveTrack,
   usePlaybackState,
 } from '../player';
+import {useLikes} from '../store';
+import {usePlaylists} from '../playlists';
+import {getLocalLibrary} from '../backend';
 
 export function CollectionScreen({
   collection,
+  loading = false,
   onClose,
   onPlay,
   onMenu,
   onChanged,
 }: {
   collection: Collection;
+  /** A fuller tracklist is on its way — show a spinner, not "empty". */
+  loading?: boolean;
   onClose: () => void;
   onPlay: (track: Track, context: Track[]) => void;
   onMenu?: (track: Track, from?: {playlistId?: string; playlistName?: string}) => void;
@@ -68,7 +79,52 @@ export function CollectionScreen({
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(() => isSaved(collection));
   const [shuffled, setShuffled] = useState(false);
+
+  /**
+   * LIVE tracks, not the snapshot the screen was opened with.
+   *
+   * The collection object App holds was built at open time — unlike a song
+   * mid-list, unliking from inside Liked Songs, removing from a playlist, or
+   * finishing a download changed the STORE but not this prop, so the row only
+   * vanished after backing out and reopening. Each mutable kind re-reads its
+   * source of truth here.
+   */
+  const likes = useLikes();
+  const playlists = usePlaylists();
+  const [localTracks, setLocalTracks] = useState<Track[] | null>(null);
   const jobs = useDownloadJobs();
+
+  // Re-scan disk when a download finishes (and once on open) so a completed
+  // song appears in the Downloads list the moment its bar completes.
+  const doneCount = jobs.filter(j => j.status === 'done').length;
+  useEffect(() => {
+    if (collection.kind !== 'downloads') {
+      return;
+    }
+    let alive = true;
+    getLocalLibrary()
+      .then(({tracks: t}) => alive && setLocalTracks(overlayDownloadArtwork(t)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [collection.kind, doneCount]);
+
+  const tracks = useMemo(() => {
+    switch (collection.kind) {
+      case 'liked':
+        return likes;
+      case 'userPlaylist': {
+        const pl = playlists.find(p => `pl:${p.id}` === collection.id);
+        return pl?.tracks ?? collection.tracks;
+      }
+      case 'downloads':
+        return localTracks ?? collection.tracks;
+      default:
+        return collection.tracks;
+    }
+  }, [collection, likes, playlists, localTracks]);
+  const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
 
   // Whether THIS collection is what's sounding right now — that's what decides
   // if the big green button means pause/resume or "start from the top".
@@ -80,17 +136,28 @@ export function CollectionScreen({
     }
     const at = String(activeEngine.title ?? '').toLowerCase();
     const aa = String(activeEngine.artist ?? '').toLowerCase();
-    return collection.tracks.some(
+    return tracks.some(
       t => (t.title || '').toLowerCase() === at && (t.artist || '').toLowerCase() === aa,
     );
-  }, [activeEngine, collection.tracks]);
+  }, [activeEngine, tracks]);
   const isPlaying =
     playState === State.Playing ||
     playState === State.Buffering ||
     playState === State.Loading;
 
-  const tracks = collection.tracks;
-  const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
+  // The header art shrinks as the list scrolls up and comes back full-size on
+  // the way down — the Spotify header feel.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const artScale = scrollY.interpolate({
+    inputRange: [0, 220],
+    outputRange: [1, 0.55],
+    extrapolate: 'clamp',
+  });
+  const artOpacity = scrollY.interpolate({
+    inputRange: [0, 220],
+    outputRange: [1, 0.35],
+    extrapolate: 'clamp',
+  });
 
   // Warm the image cache for the first screenful of covers, so scrolling a
   // freshly-opened playlist doesn't pop empty squares in one by one.
@@ -244,14 +311,22 @@ export function CollectionScreen({
         )}
       </View>
 
-      <FlatList
+      <Animated.FlatList
         data={tracks}
         keyExtractor={(t, i) => `${getTrackId(t)}-${i}`}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        onScroll={Animated.event(
+          [{nativeEvent: {contentOffset: {y: scrollY}}}],
+          {useNativeDriver: true},
+        )}
+        scrollEventThrottle={16}
         ListHeaderComponent={
           <View style={styles.header}>
-            <CollectionArt collection={collection} size={168} />
+            <Animated.View
+              style={{transform: [{scale: artScale}], opacity: artOpacity}}>
+              <CollectionArt collection={collection} size={168} />
+            </Animated.View>
             <Text style={styles.name} numberOfLines={2}>
               {collection.name}
             </Text>
@@ -337,13 +412,20 @@ export function CollectionScreen({
           </View>
         }
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {collection.kind === 'downloads'
-              ? 'Nothing downloaded yet. Songs you download are kept here and play offline.'
-              : collection.kind === 'liked'
-              ? 'Songs you like will show up here.'
-              : 'This list is empty.'}
-          </Text>
+          loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator color={C.accent} />
+              <Text style={styles.empty}>Loading songs…</Text>
+            </View>
+          ) : (
+            <Text style={styles.empty}>
+              {collection.kind === 'downloads'
+                ? 'Nothing downloaded yet. Songs you download are kept here and play offline.'
+                : collection.kind === 'liked'
+                ? 'Songs you like will show up here.'
+                : 'This list is empty.'}
+            </Text>
+          )
         }
         renderItem={({item}) => {
           const id = getTrackId(item);
@@ -446,4 +528,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  loadingBox: {alignItems: 'center', paddingTop: 26},
 });

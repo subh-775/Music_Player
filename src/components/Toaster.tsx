@@ -30,6 +30,7 @@ export function Toaster({bottom = 96}: {bottom?: number}) {
       pointerEvents="none"
       style={[
         styles.wrap,
+        item.kind === 'warn' && styles.warnWrap,
         {
           bottom,
           opacity: anim,
@@ -38,7 +39,9 @@ export function Toaster({bottom = 96}: {bottom?: number}) {
           ],
         },
       ]}>
-      <Text style={styles.text} numberOfLines={2}>
+      <Text
+        style={[styles.text, item.kind === 'warn' && styles.warnText]}
+        numberOfLines={2}>
         {item.message}
       </Text>
     </Animated.View>
@@ -62,4 +65,17 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 8},
   },
   text: {color: '#000', fontSize: 13, fontWeight: '700', textAlign: 'center'},
+  // Warn: inverted from the everyday bar — dark pill with a green border —
+  // so "press back again to exit" doesn't read like a song confirmation.
+  warnWrap: {
+    backgroundColor: '#161616',
+    borderWidth: 1,
+    borderColor: '#1db954',
+    alignSelf: 'center',
+    left: undefined,
+    right: undefined,
+    paddingHorizontal: 22,
+    borderRadius: 999,
+  },
+  warnText: {color: '#fff'},
 });

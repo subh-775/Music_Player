@@ -42,8 +42,15 @@ function Shell() {
   // moment you opened a playlist. As overlays they sit inside the app's own
   // layout, so playback controls stay put while you browse.
   const [collection, setCollection] = useState<Collection | null>(null);
+  const [collectionLoading, setCollectionLoading] = useState(false);
   const [importUrl, setImportUrl] = useState<string | null>(null);
   const [artist, setArtist] = useState<string | null>(null);
+  // Whichever overlay was opened LAST renders on top. Fixed JSX order put the
+  // album under the artist page — it opened invisibly, which read as "albums
+  // don't work". zIndex from a counter mirrors the order things were opened.
+  const zRef = useRef(0);
+  const [collectionZ, setCollectionZ] = useState(0);
+  const [artistZ, setArtistZ] = useState(0);
 
   const [sheetTrack, setSheetTrack] = useState<Track | null>(null);
   const [sheetFrom, setSheetFrom] = useState<SheetContext>(null);
@@ -80,16 +87,30 @@ function Shell() {
    *  Either way the full player closes first — the artist page renders in the
    *  body, and a Modal player would sit on top of it, which is why "clicked
    *  the artist, nothing happened until I pressed back". */
-  const openArtistCredit = useCallback((credit: string) => {
-    const names = splitArtists(credit);
-    if (names.length > 1) {
-      setPlayerOpen(false);
-      setArtistChoices(names);
-    } else if (names.length === 1) {
-      setPlayerOpen(false);
-      setArtist(names[0]);
-    }
+  const openCollection = useCallback((c: Collection) => {
+    setCollection(c);
+    setCollectionZ(++zRef.current);
   }, []);
+
+  const openArtist = useCallback((name: string) => {
+    setPlayerOpen(false);
+    setArtist(name);
+    setArtistZ(++zRef.current);
+  }, []);
+
+  const openArtistCredit = useCallback(
+    (credit: string) => {
+      const names = splitArtists(credit);
+      if (names.length > 1) {
+        // The picker is a sheet OVER whatever is open — the player stays put
+        // until an actual artist is chosen.
+        setArtistChoices(names);
+      } else if (names.length === 1) {
+        openArtist(names[0]);
+      }
+    },
+    [openArtist],
+  );
 
   /** Open an album AS ITS FULL SELF: fetch the real tracklist by name+artist.
    *  Seed tracks (what we already hold) show instantly; the fetch replaces
@@ -104,6 +125,8 @@ function Shell() {
         image: seed[0]?.artwork_url,
         tracks: seed,
       });
+      setCollectionZ(++zRef.current);
+      setCollectionLoading(true);
       try {
         const data = await getAlbum(albumName, artistName);
         if (data.tracks.length) {
@@ -115,6 +138,8 @@ function Shell() {
         }
       } catch {
         // The seed tracks stay — a partial album beats an error screen.
+      } finally {
+        setCollectionLoading(false);
       }
     },
     [],
@@ -152,7 +177,7 @@ function Shell() {
           toast('That one has no playable songs right now.');
           return;
         }
-        setCollection({
+        openCollection({
           id: item.perma_url,
           kind: item.type === 'album' ? 'album' : 'sourcePlaylist',
           name: data.name || item.title || item.name || '',
@@ -164,7 +189,7 @@ function Shell() {
         toast("Couldn't open that — try again in a moment.");
       }
     },
-    [play],
+    [play, openCollection],
   );
 
   const switchTab = useCallback((next: Tab) => {
@@ -229,7 +254,7 @@ function Shell() {
         return false;
       }
       exitArmedAt.current = Date.now();
-      toast('Press back again to exit');
+      toast('Press back again to exit', 'warn');
       return true;
     };
 
@@ -273,6 +298,7 @@ function Shell() {
             onPickTrack={play}
             onImportSpotify={setImportUrl}
             onMenu={openSheet}
+            onOpenArtist={openArtist}
           />
         </View>
         <View style={tab === 'library' ? styles.tabShown : styles.tabHidden}>
@@ -281,16 +307,17 @@ function Shell() {
             visible={tab === 'library'}
             onOpen={c =>
               // A followed artist opens their profile, not an empty tracklist.
-              c.kind === 'artist' ? setArtist(c.name) : setCollection(c)
+              c.kind === 'artist' ? openArtist(c.name) : openCollection(c)
             }
           />
         </View>
 
         {/* Overlays, innermost last. */}
         {!!collection && (
-          <View style={StyleSheet.absoluteFill}>
+          <View style={[StyleSheet.absoluteFill, {zIndex: collectionZ}]}>
             <CollectionScreen
               collection={collection}
+              loading={collectionLoading}
               onClose={() => setCollection(null)}
               onPlay={play}
               onMenu={openSheet}
@@ -313,7 +340,7 @@ function Shell() {
         )}
 
         {!!artist && (
-          <View style={StyleSheet.absoluteFill}>
+          <View style={[StyleSheet.absoluteFill, {zIndex: artistZ}]}>
             <ArtistScreen
               name={artist}
               onClose={() => setArtist(null)}
@@ -362,7 +389,7 @@ function Shell() {
         onClose={() => setArtistChoices([])}
         onPick={name => {
           setArtistChoices([]);
-          setArtist(name);
+          openArtist(name); // closes the player too — the profile is behind it
         }}
       />
 

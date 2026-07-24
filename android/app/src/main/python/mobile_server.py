@@ -1001,6 +1001,64 @@ def serve_local_file():
     return send_file(str(real), conditional=True)
 
 
+@app.get("/api/local/artwork")
+def serve_local_artwork():
+    """Cover art embedded in a downloaded file's own tags.
+
+    The library scan deliberately skips artwork (reading every file's tags for
+    covers on every scan is heavy); this serves ONE file's embedded cover on
+    demand, so downloads show art without the scan paying for it — including
+    files downloaded before the app started remembering covers client-side.
+    Same path confinement as /api/local.
+    """
+    path = request.args.get("path") or ""
+    try:
+        real = Path(path).expanduser().resolve(strict=True)
+    except Exception:
+        return jsonify({"detail": "File not found"}), 404
+
+    root = Path(get_default_download_dir()).resolve()
+    if root not in real.parents:
+        return jsonify({"detail": "Path not allowed"}), 403
+    if real.suffix.lower() not in _LOCAL_AUDIO_EXTS:
+        return jsonify({"detail": "Unsupported file type"}), 403
+
+    try:
+        import mutagen
+        audio = mutagen.File(str(real))
+        data, mime = None, "image/jpeg"
+        if audio is not None:
+            tags = getattr(audio, "tags", None)
+            # MP4/M4A: covr atoms.
+            covr = None
+            try:
+                covr = (tags or {}).get("covr")
+            except Exception:
+                covr = None
+            if covr:
+                data = bytes(covr[0])
+            # MP3: any APIC frame.
+            if data is None and tags is not None:
+                for key in getattr(tags, "keys", lambda: [])():
+                    if str(key).startswith("APIC"):
+                        pic = tags[key]
+                        data, mime = pic.data, pic.mime or mime
+                        break
+            # FLAC/OGG: pictures list.
+            if data is None:
+                pics = getattr(audio, "pictures", None)
+                if pics:
+                    data, mime = pics[0].data, pics[0].mime or mime
+        if not data:
+            return jsonify({"detail": "No embedded artwork"}), 404
+        resp = app.response_class(data, mimetype=mime)
+        # Immutable per file — let the client cache it hard.
+        resp.headers["Cache-Control"] = "public, max-age=604800"
+        return resp
+    except Exception:
+        return jsonify({"detail": "No embedded artwork"}), 404
+
+
 # ─── Lyrics ───────────────────────────────────────────────────────────────────
 @app.get("/api/lyrics")
 def get_lyrics():

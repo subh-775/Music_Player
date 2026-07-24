@@ -134,6 +134,25 @@ export async function setupPlayer(): Promise<boolean> {
       progressUpdateEventInterval: 1,
     });
     await TrackPlayer.setRepeatMode(RepeatMode.Off);
+
+    // Every track the engine lands on — auto-advance, radio, a queue tap —
+    // goes into Recently Played AS IT STARTS, so Home updates live. Manual
+    // playTrack() also records (first write wins on order; remember() de-dupes).
+    TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, e => {
+      const src = sourceTrackFor(e.track ?? null);
+      if (src) {
+        remember(src);
+      }
+      // Crossfade's other half: the outgoing song faded down, so the incoming
+      // one rises from quiet instead of slamming in at full volume.
+      const span = crossfadeSpanRef();
+      if (span > 0) {
+        fadeVolumeTo(1, Math.min(span, 3));
+      }
+      // Effects die with the audio session; re-attach for the new one.
+      applyAudioEffects();
+    });
+
     ready = true;
     available = true;
     return true;
@@ -396,8 +415,33 @@ async function topUpFromRadio(): Promise<void> {
  */
 let fadeTimer: ReturnType<typeof setInterval> | null = null;
 let fadedFor = '';
+let getCrossfadeSeconds: () => number = () => 0;
+
+/** Current crossfade span; readable outside the watcher (the fade-in half). */
+function crossfadeSpanRef(): number {
+  return getCrossfadeSeconds();
+}
+
+/** Ramp volume to `target` over `seconds` in 8 steps. Fire-and-forget. */
+async function fadeVolumeTo(target: number, seconds: number): Promise<void> {
+  const steps = 8;
+  try {
+    const from = target === 1 ? 0 : 1;
+    await TrackPlayer.setVolume(from);
+    for (let i = 1; i <= steps; i++) {
+      await TrackPlayer.setVolume(from + ((target - from) * i) / steps);
+      await new Promise(r => setTimeout(r, (seconds * 1000) / steps));
+    }
+    await TrackPlayer.setVolume(target);
+  } catch {
+    try {
+      await TrackPlayer.setVolume(1);
+    } catch {}
+  }
+}
 
 export function startCrossfadeWatcher(getSeconds: () => number): void {
+  getCrossfadeSeconds = getSeconds;
   if (fadeTimer) {
     return;
   }

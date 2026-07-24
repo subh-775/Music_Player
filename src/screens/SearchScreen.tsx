@@ -27,6 +27,8 @@ import {
   enrichBatch,
   getSuggestions,
   search,
+  searchArtists,
+  type ArtistCard,
   type Suggestion,
   type Track,
 } from '../backend';
@@ -53,14 +55,17 @@ export function SearchScreen({
   onPickTrack,
   onImportSpotify,
   onMenu,
+  onOpenArtist,
 }: {
   onPickTrack: (track: Track, context: Track[]) => void;
   onImportSpotify: (url: string) => void;
   onMenu: (track: Track) => void;
+  onOpenArtist?: (name: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [results, setResults] = useState<Track[]>([]);
+  const [artists, setArtists] = useState<ArtistCard[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const history = useSearchHistory();
@@ -78,6 +83,15 @@ export function SearchScreen({
     setError('');
     setSuggestions([]);
     const ticket = ++latest.current;
+    // Artists ride alongside the song search — like the WebView build, a
+    // query answers with both. Best-effort; a miss just means no strip.
+    searchArtists(text, 8)
+      .then(list => {
+        if (ticket === latest.current) {
+          setArtists(list);
+        }
+      })
+      .catch(() => {});
     try {
       const found = normalizeTracks(await search(text, 25));
       if (ticket !== latest.current) {
@@ -273,6 +287,40 @@ export function SearchScreen({
               <Text style={styles.empty}>No songs matched that.</Text>
             ) : null
           }
+          ListHeaderComponent={
+            artists.length > 0 && onOpenArtist ? (
+              <View>
+                <Text style={styles.section}>Artists</Text>
+                <FlatList
+                  horizontal
+                  data={artists}
+                  keyExtractor={(a, i) => `${a.name}-${i}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.artistStrip}
+                  renderItem={({item}) => (
+                    <TouchableOpacity
+                      style={styles.artistCard}
+                      activeOpacity={0.75}
+                      onPress={() => onOpenArtist(item.name)}>
+                      {item.image ? (
+                        <Image source={{uri: item.image}} style={styles.artistPfp} />
+                      ) : (
+                        <View style={[styles.artistPfp, styles.artistPfpEmpty]}>
+                          <Text style={styles.artistInitial}>
+                            {item.name.trim().charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={styles.artistName} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+                <Text style={styles.section}>Songs</Text>
+              </View>
+            ) : null
+          }
           renderItem={({item}) => (
             <TrackRow
               track={item}
@@ -333,6 +381,16 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 6,
   },
+  artistStrip: {paddingHorizontal: S.gutter, gap: 16, paddingBottom: 6},
+  artistCard: {width: 84, alignItems: 'center'},
+  artistPfp: {width: 76, height: 76, borderRadius: 38, backgroundColor: C.surface},
+  artistPfpEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surfaceHi,
+  },
+  artistInitial: {color: C.faint, fontSize: 26, fontWeight: '700'},
+  artistName: {...T.sub, color: C.text, marginTop: 6, textAlign: 'center'},
   historyRow: {
     flexDirection: 'row',
     alignItems: 'center',

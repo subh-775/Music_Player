@@ -82,15 +82,38 @@ export function QueuePane() {
       if (from === to) {
         return;
       }
+      // Optimistic: the list snaps to its new order the instant the finger
+      // lifts. Waiting for the engine round-trip left a beat where rows
+      // seemed to wander, which read as the drop not having taken.
+      setQueue(prev => {
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+      setActive(prev => {
+        if (prev == null) {
+          return prev;
+        }
+        if (prev === from) {
+          return to;
+        }
+        if (from < prev && to >= prev) {
+          return prev - 1;
+        }
+        if (from > prev && to <= prev) {
+          return prev + 1;
+        }
+        return prev;
+      });
       try {
         // RNTP has no move(); remove and re-insert is the supported route.
         const item = queue[from];
         await TrackPlayer.remove([from]);
         await TrackPlayer.add([item], to);
       } catch {
-        /* fall through to the refresh, which restores the truth */
+        refresh(); // engine refused — restore the truth
       }
-      refresh();
     },
     [queue, refresh],
   );

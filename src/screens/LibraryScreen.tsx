@@ -39,7 +39,7 @@ import {
 } from '../playlists';
 import {MAX_PINS, isPinned, rowId, sortPinned, togglePin, usePins} from '../pins';
 import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
-import {overlayDownloadArtwork} from '../downloads';
+import {markDownloaded, overlayDownloadArtwork} from '../downloads';
 import {useActiveTrack} from '../player';
 import {toast} from '../toast';
 
@@ -126,6 +126,9 @@ export function LibraryScreen({
       // The disk scan carries no artwork; lay back the covers remembered at
       // download time so offline rows aren't blank squares.
       setDownloads(overlayDownloadArtwork(tracks));
+      // The scan is also the truth about what's downloaded — keep the
+      // "already downloaded" set in step with the actual files.
+      markDownloaded(tracks);
     } catch {
       // Offline library unavailable — the rest of the library still works.
     } finally {
@@ -346,7 +349,7 @@ export function LibraryScreen({
                 onPress={() => doPin(menuFor)}>
                 <Pin size={20} color={C.sub} />
                 <Text style={styles.sheetLabel}>
-                  {isPinned(idOf(menuFor)) ? 'Unpin' : 'Pin to top'}
+                  {isPinned(idOf(menuFor)) ? 'Unpin' : 'Pin'}
                 </Text>
               </TouchableOpacity>
             )}

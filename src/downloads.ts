@@ -11,9 +11,9 @@
  * next disk scan — so persisting a stale "in progress" row would be a lie.
  */
 import {useSyncExternalStore} from 'react';
-import {getDownloadStatus, startDownload, type Track} from './backend';
+import {apiUrl, getDownloadStatus, startDownload, type Track} from './backend';
 import {getBestArtworkUrl, getTrackId} from './tracks';
-import {createStore, asArray} from './storage';
+import {createStore, asArray, useStoreValue} from './storage';
 import {toast} from './toast';
 
 /**
@@ -45,16 +45,62 @@ function rememberArtwork(track: Track): void {
   artCache.set([entry, ...rest].slice(0, 500));
 }
 
-/** Fill in artwork for disk-scanned tracks from what was saved at download
- *  time. Leaves tracks that already have art untouched. */
+/** Fill in artwork for disk-scanned tracks: the cover remembered at download
+ *  time first, else the backend's embedded-tag extractor — which also covers
+ *  songs downloaded before this cache existed. */
 export function overlayDownloadArtwork(tracks: Track[]): Track[] {
   const map = new Map(artCache.get());
-  if (!map.size) {
-    return tracks;
+  return tracks.map(t => {
+    if (t.artwork_url) {
+      return t;
+    }
+    const remembered = map.get(getTrackId(t));
+    if (remembered) {
+      return {...t, artwork_url: remembered};
+    }
+    if (t.file_path) {
+      return {
+        ...t,
+        artwork_url: apiUrl(
+          `/local/artwork?path=${encodeURIComponent(t.file_path)}`,
+        ),
+      };
+    }
+    return t;
+  });
+}
+
+// ─── What's already on disk ─────────────────────────────────────────────────
+
+/**
+ * Identities of completed downloads, persisted. This is what lets a search
+ * result or player button say "already downloaded" (green tick) instead of
+ * cheerfully downloading the same song five times.
+ */
+const downloadedIds = createStore<string[]>('mp.downloadedIds.v1', [], raw =>
+  asArray<string>(raw).filter(x => typeof x === 'string').slice(0, 2000),
+);
+
+export function isDownloaded(track: Track | null | undefined): boolean {
+  if (!track) {
+    return false;
   }
-  return tracks.map(t =>
-    t.artwork_url ? t : {...t, artwork_url: map.get(getTrackId(t)) || undefined},
-  );
+  return !!track.file_path || downloadedIds.get().includes(getTrackId(track));
+}
+
+/** Feed a disk scan's results in so the set reflects reality — including
+ *  files deleted outside the app (their ids drop out). */
+export function markDownloaded(tracks: Track[]): void {
+  const ids = tracks.map(getTrackId);
+  const prev = downloadedIds.get();
+  const same = prev.length === ids.length && ids.every((v, i) => v === prev[i]);
+  if (!same) {
+    downloadedIds.set(ids);
+  }
+}
+
+export function useDownloadedIds(): string[] {
+  return useStoreValue(downloadedIds);
 }
 
 export type DownloadJob = {
@@ -103,6 +149,10 @@ function ensurePolling() {
           if (t.status === 'completed' || t.status === 'done') {
             job.status = 'done';
             job.progress = 1;
+            const id = getTrackId(job.track);
+            if (!downloadedIds.get().includes(id)) {
+              downloadedIds.set([...downloadedIds.get(), id]);
+            }
           } else if (t.status === 'failed' || t.status === 'error') {
             job.status = 'error';
             job.error = t.error;
@@ -127,9 +177,14 @@ function ensurePolling() {
   }, 500);
 }
 
-/** Start a download and track it. Ignores a track already in flight. */
+/** Start a download and track it. Ignores a track already in flight — and one
+ *  already ON DISK, which used to be re-downloadable indefinitely. */
 export async function enqueueDownload(track: Track): Promise<void> {
   const id = getTrackId(track);
+  if (isDownloaded(track)) {
+    toast('Already downloaded');
+    return;
+  }
   if (jobs.some(j => getTrackId(j.track) === id && j.status !== 'error')) {
     return;
   }
