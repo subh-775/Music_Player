@@ -1,7 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   BackHandler,
-  Modal,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -144,6 +143,7 @@ function Shell() {
     setCollection(null);
     setArtist(null);
     setImportUrl(null);
+    setSettingsOpen(false);
   }, []);
 
   /**
@@ -236,7 +236,13 @@ function Shell() {
           />
         )}
         {tab === 'library' && (
-          <LibraryScreen key={libraryNonce} onOpen={setCollection} />
+          <LibraryScreen
+            key={libraryNonce}
+            onOpen={c =>
+              // A followed artist opens their profile, not an empty tracklist.
+              c.kind === 'artist' ? setArtist(c.name) : setCollection(c)
+            }
+          />
         )}
 
         {/* Overlays, innermost last. */}
@@ -292,6 +298,14 @@ function Shell() {
             />
           </View>
         )}
+        {/* Settings is an overlay, not a Modal, for the same reason as the
+            rest: a Modal floats over the whole window and hid the mini player.
+            Here it stays inside the body, so playback controls remain visible. */}
+        {settingsOpen && (
+          <View style={StyleSheet.absoluteFill}>
+            <SettingsScreen onClose={() => setSettingsOpen(false)} />
+          </View>
+        )}
       </View>
 
       <Toaster bottom={engine ? 132 : 78} />
@@ -299,13 +313,6 @@ function Shell() {
       {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
 
       <BottomNav active={tab} onChange={switchTab} />
-
-      <Modal
-        visible={settingsOpen}
-        animationType="slide"
-        onRequestClose={() => setSettingsOpen(false)}>
-        <SettingsScreen onClose={() => setSettingsOpen(false)} />
-      </Modal>
 
       <TrackActionSheet
         track={sheetTrack}

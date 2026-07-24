@@ -12,8 +12,50 @@
  */
 import {useSyncExternalStore} from 'react';
 import {getDownloadStatus, startDownload, type Track} from './backend';
-import {getTrackId} from './tracks';
+import {getBestArtworkUrl, getTrackId} from './tracks';
+import {createStore, asArray} from './storage';
 import {toast} from './toast';
+
+/**
+ * Artwork for downloaded songs, persisted.
+ *
+ * The disk scan deliberately returns no cover art (reading embedded art for
+ * every file on every scan is heavy), so a scanned track arrives artless. The
+ * cover IS known at the moment the download starts — the catalog track has it
+ * — so it's remembered here, keyed by track identity, and laid back over the
+ * scan results. Capped so it can't grow forever.
+ */
+const artCache = createStore<Array<[string, string]>>(
+  'mp.downloadArt.v1',
+  [],
+  raw =>
+    asArray<unknown>(raw).filter(
+      (x): x is [string, string] => Array.isArray(x) && x.length === 2,
+    ),
+);
+
+function rememberArtwork(track: Track): void {
+  const art = getBestArtworkUrl(track);
+  if (!art) {
+    return;
+  }
+  const id = getTrackId(track);
+  const rest = artCache.get().filter(([k]) => k !== id);
+  const entry: [string, string] = [id, art];
+  artCache.set([entry, ...rest].slice(0, 500));
+}
+
+/** Fill in artwork for disk-scanned tracks from what was saved at download
+ *  time. Leaves tracks that already have art untouched. */
+export function overlayDownloadArtwork(tracks: Track[]): Track[] {
+  const map = new Map(artCache.get());
+  if (!map.size) {
+    return tracks;
+  }
+  return tracks.map(t =>
+    t.artwork_url ? t : {...t, artwork_url: map.get(getTrackId(t)) || undefined},
+  );
+}
 
 export type DownloadJob = {
   taskId: string;
@@ -96,6 +138,7 @@ export async function enqueueDownload(track: Track): Promise<void> {
     toast(res.error || 'Could not start that download');
     return;
   }
+  rememberArtwork(track);
   jobs = [...jobs, {taskId: res.task_id, track, progress: null, status: 'queued'}];
   emit();
   ensurePolling();

@@ -26,7 +26,7 @@ import {
 import {Menu} from 'lucide-react-native';
 import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
-import {TrackPlayer} from '../player';
+import {TrackPlayer, sourceTrackFor} from '../player';
 
 const ROW_H = 60;
 
@@ -95,50 +95,76 @@ export function QueuePane() {
     [queue, refresh],
   );
 
-  const makeDragResponder = useCallback(
-    (index: number) =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
-          setDragFrom(index);
-          setDragOver(index);
-          dragY.setValue(0);
-          dragYValue.current = 0;
-        },
-        onPanResponderMove: (_e, g) => {
-          dragY.setValue(g.dy);
-          dragYValue.current = g.dy;
-          // Which slot the finger is now over, derived from distance travelled
-          // rather than a hit-test — no measurement, no dependence on the row
-          // under the finger being laid out yet.
-          const shifted = index + Math.round(g.dy / ROW_H);
-          const clamped = Math.max(0, Math.min(queue.length - 1, shifted));
-          setDragOver(clamped);
-        },
-        onPanResponderRelease: () => {
-          const from = index;
-          const to = Math.max(
-            0,
-            Math.min(queue.length - 1, index + Math.round(dragYValue.current / ROW_H)),
-          );
-          setDragFrom(null);
-          setDragOver(null);
-          dragY.setValue(0);
-          commitMove(from, to);
-        },
-        onPanResponderTerminate: () => {
-          setDragFrom(null);
-          setDragOver(null);
-          dragY.setValue(0);
-        },
-      }),
-    [queue.length, dragY, commitMove],
+  // Live values behind the drag handlers. The responders MUST be stable across
+  // renders: setDragOver re-renders mid-gesture, and handing the row a freshly
+  // created responder at that moment orphans the active gesture — which is
+  // exactly the "I dragged it and it snapped back" bug. So each index gets ONE
+  // responder, forever, and it reads current state through these refs.
+  const queueLenRef = useRef(0);
+  queueLenRef.current = queue.length;
+  const commitRef = useRef(commitMove);
+  commitRef.current = commitMove;
+  const responders = useRef(new Map<number, ReturnType<typeof PanResponder.create>>());
+
+  const dragResponderFor = useCallback(
+    (index: number) => {
+      let r = responders.current.get(index);
+      if (!r) {
+        r = PanResponder.create({
+          onStartShouldSetPanResponder: () => true,
+          onMoveShouldSetPanResponder: () => true,
+          // The ScrollView must not steal the gesture once the grip has it.
+          onPanResponderTerminationRequest: () => false,
+          onPanResponderGrant: () => {
+            setDragFrom(index);
+            setDragOver(index);
+            dragY.setValue(0);
+            dragYValue.current = 0;
+          },
+          onPanResponderMove: (_e, g) => {
+            dragY.setValue(g.dy);
+            dragYValue.current = g.dy;
+            // Which slot the finger is over, from distance travelled — no
+            // hit-testing, no dependence on layout timing.
+            const shifted = index + Math.round(g.dy / ROW_H);
+            setDragOver(Math.max(0, Math.min(queueLenRef.current - 1, shifted)));
+          },
+          onPanResponderRelease: () => {
+            const to = Math.max(
+              0,
+              Math.min(
+                queueLenRef.current - 1,
+                index + Math.round(dragYValue.current / ROW_H),
+              ),
+            );
+            setDragFrom(null);
+            setDragOver(null);
+            dragY.setValue(0);
+            commitRef.current(index, to);
+          },
+          onPanResponderTerminate: () => {
+            setDragFrom(null);
+            setDragOver(null);
+            dragY.setValue(0);
+          },
+        });
+        responders.current.set(index, r);
+      }
+      return r;
+    },
+    [dragY],
   );
 
   const upcoming = useMemo(
     () => (active == null ? queue : queue.slice(active + 1)),
     [queue, active],
+  );
+
+  // Where the autoplay-radio tail begins — everything from here on was picked
+  // by the app, not the user, and the divider says so.
+  const firstRecommended = useMemo(
+    () => queue.findIndex(t => sourceTrackFor(t)?._autoplay),
+    [queue],
   );
 
   if (!queue.length) {
@@ -172,9 +198,13 @@ export function QueuePane() {
           }
         }
 
+        const recHeader =
+          i === firstRecommended && firstRecommended > 0 && dragFrom === null;
+
         return (
+          <React.Fragment key={`${t.id ?? t.url}-${i}`}>
+          {recHeader && <Text style={styles.section}>Recommended for you</Text>}
           <Animated.View
-            key={`${t.id ?? t.url}-${i}`}
             style={[
               styles.row,
               isDragged && styles.rowDragged,
@@ -204,10 +234,11 @@ export function QueuePane() {
               </View>
             </TouchableOpacity>
 
-            <View style={styles.grip} {...makeDragResponder(i).panHandlers}>
+            <View style={styles.grip} {...dragResponderFor(i).panHandlers}>
               <Menu size={19} color={C.faint} />
             </View>
           </Animated.View>
+          </React.Fragment>
         );
       })}
     </ScrollView>

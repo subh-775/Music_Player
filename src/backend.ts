@@ -161,11 +161,14 @@ export async function getLyrics(
   artist: string,
   durationMs?: number,
 ): Promise<Lyrics> {
-  const q = new URLSearchParams({title, artist});
+  // Hand-built query, NOT URLSearchParams: Hermes ships a stub whose
+  // .toString() throws "not implemented", which made every lyrics call fail
+  // before the request even left the app — "No lyrics found" for every song.
+  let q = `title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
   if (durationMs) {
-    q.set('duration', String(Math.round(durationMs / 1000)));
+    q += `&duration=${Math.round(durationMs / 1000)}`;
   }
-  return apiGet<Lyrics>(`/lyrics?${q.toString()}`);
+  return apiGet<Lyrics>(`/lyrics?${q}`);
 }
 
 // ─── Collections (album / playlist) ─────────────────────────────────────────
@@ -194,11 +197,13 @@ export async function getAlbum(
   artist = '',
   songUrl = '',
 ): Promise<Collection> {
-  const q = new URLSearchParams({name, artist});
+  // Hand-built for the same Hermes reason as getLyrics — the stub
+  // URLSearchParams broke every album-by-name open (artist page albums).
+  let q = `name=${encodeURIComponent(name)}&artist=${encodeURIComponent(artist)}`;
   if (songUrl) {
-    q.set('song_url', songUrl);
+    q += `&song_url=${encodeURIComponent(songUrl)}`;
   }
-  const data = await apiGet<Partial<Collection>>(`/album?${q.toString()}`);
+  const data = await apiGet<Partial<Collection>>(`/album?${q}`);
   return {
     name: data.name || name,
     tracks: Array.isArray(data.tracks) ? data.tracks : [],
@@ -230,6 +235,33 @@ export type DownloadsInfo = {
 };
 
 export const getDownloadsInfo = () => apiGet<DownloadsInfo>('/downloads/info');
+
+/** Set (or clear, with '') the custom download folder. The backend refuses a
+ *  folder it can't actually write to. */
+export async function setDownloadsDir(
+  path: string,
+): Promise<{ok: boolean; error?: string} & DownloadsInfo> {
+  const res = await fetch(apiUrl('/downloads/dir'), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path}),
+  });
+  return (await res.json()) as {ok: boolean; error?: string} & DownloadsInfo;
+}
+
+/** Songs similar to a seed — what keeps playback going when the queue ends. */
+export async function getRadio(
+  title: string,
+  artist: string,
+  limit = 12,
+): Promise<Track[]> {
+  const data = await apiGet<{tracks?: Track[]}>(
+    `/radio?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(
+      artist,
+    )}&limit=${limit}`,
+  );
+  return Array.isArray(data.tracks) ? data.tracks : [];
+}
 
 export type SourceStatus = {
   status: string;

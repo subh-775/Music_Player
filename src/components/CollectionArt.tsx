@@ -8,7 +8,7 @@
  */
 import React from 'react';
 import {Image, StyleSheet, View} from 'react-native';
-import {ArrowDownToLine, Heart, Music2} from 'lucide-react-native';
+import {ArrowDownToLine, Heart, Music2, User} from 'lucide-react-native';
 import {C} from '../theme';
 import {getBestArtworkUrl} from '../tracks';
 import {type Collection} from '../collections';
@@ -23,8 +23,20 @@ export function CollectionArt({
   collection: Collection;
   size?: number;
 }) {
-  const radius = 4;
+  // A person is round, a record is square — the circle is what separates an
+  // artist row from the playlists around it at a glance.
+  const radius = collection.kind === 'artist' ? size / 2 : 4;
   const box = {width: size, height: size, borderRadius: radius};
+
+  if (collection.kind === 'artist') {
+    return collection.image ? (
+      <Image source={{uri: collection.image}} style={[box, styles.fill]} />
+    ) : (
+      <View style={[box, styles.center, styles.empty]}>
+        <User size={size * 0.44} color={C.faint} />
+      </View>
+    );
+  }
 
   if (collection.kind === 'liked') {
     return (

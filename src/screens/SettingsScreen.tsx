@@ -1,12 +1,16 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
+  NativeModules,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import {Check, ChevronLeft, ChevronRight} from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -16,6 +20,7 @@ import {
   getDownloadsInfo,
   getSourcesStatus,
   getYouTubeExperimental,
+  setDownloadsDir,
   setYouTubeExperimental,
   type DownloadsInfo,
   type SourceStatus,
@@ -25,6 +30,7 @@ import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
 import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
+import {toast} from '../toast';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
@@ -98,6 +104,66 @@ function ToggleRow({
   );
 }
 
+const CROSSFADE_MAX = 12;
+
+/**
+ * The crossfade control: a draggable bar from 0 to 12s, like the WebView build.
+ * Snaps to whole seconds; 0 reads as Off.
+ */
+function CrossfadeRow({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (secs: number) => void;
+}) {
+  const [width, setWidth] = useState(1);
+  const widthRef = useRef(1);
+  widthRef.current = width;
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
+
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    setWidth(Math.max(1, e.nativeEvent.layout.width));
+  }, []);
+
+  // One stable responder; live values via refs (a re-render mid-drag must not
+  // orphan the gesture).
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: e => {
+        const t = e.nativeEvent.locationX / widthRef.current;
+        changeRef.current(Math.round(Math.max(0, Math.min(1, t)) * CROSSFADE_MAX));
+      },
+      onPanResponderMove: e => {
+        const t = e.nativeEvent.locationX / widthRef.current;
+        changeRef.current(Math.round(Math.max(0, Math.min(1, t)) * CROSSFADE_MAX));
+      },
+    }),
+  ).current;
+
+  const pct = Math.max(0, Math.min(1, value / CROSSFADE_MAX));
+
+  return (
+    <View style={styles.row}>
+      <View style={styles.rowText}>
+        <Text style={styles.rowLabel}>Crossfade</Text>
+        <View
+          style={styles.fadeTrackArea}
+          onLayout={onLayout}
+          {...pan.panHandlers}>
+          <View style={styles.fadeTrack} />
+          <View style={[styles.fadeFill, {width: `${pct * 100}%`}]} />
+          <View style={[styles.fadeKnob, {left: `${pct * 100}%`}]} />
+        </View>
+      </View>
+      <Text style={styles.rowValue}>{value > 0 ? `${value}s` : 'Off'}</Text>
+    </View>
+  );
+}
+
 function NavRow({
   label,
   value,
@@ -165,6 +231,42 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   const qualityLabel =
     QUALITIES.find(q => q.value === settings.audioQuality)?.label ?? 'Very High';
   const folder = downloads?.path || downloads?.download_dir || '';
+
+  /** System folder picker -> backend. The backend refuses an unwritable folder,
+   *  so a bad pick fails loudly here instead of silently failing downloads. */
+  const pickDownloadFolder = useCallback(async () => {
+    const native = NativeModules.Backend as {pickFolder?: () => Promise<string>};
+    if (typeof native.pickFolder !== 'function') {
+      toast('Folder picking needs the newest APK.');
+      return;
+    }
+    try {
+      const path = await native.pickFolder();
+      if (!path) {
+        return; // backed out of the picker
+      }
+      const res = await setDownloadsDir(path);
+      if (res.ok === false) {
+        toast(res.error || 'Could not use that folder');
+        return;
+      }
+      setDownloads(d => ({...(d ?? {}), ...res}));
+      toast('Download folder updated');
+    } catch {
+      toast('Could not change the folder');
+    }
+  }, []);
+
+  const confirmReset = useCallback(() => {
+    Alert.alert(
+      'Reset all settings?',
+      "Everything goes back to defaults. Your library isn't touched.",
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {text: 'Reset', style: 'destructive', onPress: resetSettings},
+      ],
+    );
+  }, []);
 
   // Anything with more than a switch's worth of choice gets its OWN screen,
   // not an inline expander — the list stays scannable.
@@ -255,23 +357,9 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
               }
               onPress={() => setPanel('equalizer')}
             />
-            <NavRow
-              label="Crossfade"
-              value={
-                settings.crossfadeDuration > 0
-                  ? `${settings.crossfadeDuration}s`
-                  : 'Off'
-              }
-              onPress={() =>
-                // 0 -> 3 -> 6 -> 9 -> 12 -> off. A stepper rather than its own
-                // screen; there are only five useful values.
-                writeSetting(
-                  'crossfadeDuration',
-                  settings.crossfadeDuration >= 12
-                    ? 0
-                    : settings.crossfadeDuration + 3,
-                )
-              }
+            <CrossfadeRow
+              value={settings.crossfadeDuration}
+              onChange={secs => writeSetting('crossfadeDuration', secs)}
             />
             <ToggleRow
               label="Normalize volume"
@@ -315,11 +403,14 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           </Section>
 
           <Section title="Storage">
-            <Row
+            <NavRow
               label="Download folder"
-              hint={folder || 'Not available yet'}
               value={downloads?.using_fallback ? 'Private' : undefined}
+              onPress={pickDownloadFolder}
             />
+            <Text style={styles.folderPath} numberOfLines={2}>
+              {folder || 'Not available yet'}
+            </Text>
           </Section>
 
           <Section title="About">
@@ -334,7 +425,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           <TouchableOpacity
             style={styles.reset}
             activeOpacity={0.7}
-            onPress={resetSettings}>
+            onPress={confirmReset}>
             <Text style={styles.resetText}>Reset all settings</Text>
             <Text style={styles.rowHint}>
               Puts everything back to defaults. Your library isn&apos;t touched.
@@ -403,4 +494,36 @@ const styles = StyleSheet.create({
   },
   resetText: {color: C.danger, fontSize: 15, fontWeight: '700'},
   tail: {height: 10},
+  folderPath: {
+    ...T.sub,
+    color: C.sub,
+    paddingHorizontal: S.gutter,
+    paddingBottom: 10,
+    marginTop: -6,
+  },
+  fadeTrackArea: {
+    height: 28,
+    justifyContent: 'center',
+    marginTop: 8,
+    marginRight: 4,
+  },
+  fadeTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  fadeFill: {
+    position: 'absolute',
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: C.accent,
+  },
+  fadeKnob: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginLeft: -8,
+    backgroundColor: C.accentBright,
+  },
 });

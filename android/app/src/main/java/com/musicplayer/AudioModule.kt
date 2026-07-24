@@ -62,6 +62,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
             equalizer = Equalizer(0, session).apply { enabled = false }
             loudness = LoudnessEnhancer(session).apply { enabled = false }
             attachedSession = session
+            Log.i(TAG, "effects attached to audio session $session")
             true
         } catch (e: Exception) {
             // Some devices refuse effects on a fast-path/offloaded session.
@@ -191,27 +192,42 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     fun getAudioOutput(promise: Promise) {
         try {
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            for (d in devices) {
-                when (d.type) {
-                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
-                        val name = d.productName?.toString()?.trim()
-                        promise.resolve(if (name.isNullOrEmpty()) "Bluetooth" else name)
-                        return
-                    }
-                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
-                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> {
-                        promise.resolve("Wired headphones")
-                        return
-                    }
-                    AudioDeviceInfo.TYPE_USB_HEADSET -> {
-                        promise.resolve("USB headphones")
-                        return
-                    }
-                }
+            val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+
+            // Rank matters — same lesson the WebView build learned on-device.
+            // SCO is the PHONE's own call endpoint and reports the handset's
+            // model as its productName, which is how "my phone's name" showed
+            // up as the headphones. Real headsets (A2DP / BLE / wired) win.
+            fun rank(t: Int) = when (t) {
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> 0
+                AudioDeviceInfo.TYPE_USB_HEADSET -> 2
+                AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 3
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> 4
+                else -> if (android.os.Build.VERSION.SDK_INT >= 31 &&
+                    t == AudioDeviceInfo.TYPE_BLE_HEADSET) 1 else 99
             }
-            promise.resolve(null)
+
+            val routed = outs.filter { rank(it.type) < 99 }.minByOrNull { rank(it.type) }
+            if (routed == null) {
+                promise.resolve(null) // phone speaker — the UI shows nothing
+                return
+            }
+            val name = routed.productName?.toString()?.trim().orEmpty()
+            // Some OEMs report the handset's own model as productName. That is
+            // never the headphone's name, so say "Bluetooth" instead of a lie.
+            val phoneOwn = name.isEmpty() ||
+                name.equals(android.os.Build.MODEL, true) ||
+                name.equals(android.os.Build.PRODUCT, true)
+            promise.resolve(
+                when {
+                    !phoneOwn -> name
+                    routed.type == AudioDeviceInfo.TYPE_USB_HEADSET -> "USB headphones"
+                    routed.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        routed.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired headphones"
+                    else -> "Bluetooth"
+                },
+            )
         } catch (e: Exception) {
             promise.resolve(null)
         }

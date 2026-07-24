@@ -19,8 +19,9 @@ import TrackPlayer, {
   RepeatMode,
   State,
 } from 'react-native-track-player';
-import {apiUrl, type Track} from './backend';
-import {currentQuality} from './store';
+import {apiUrl, getRadio, type Track} from './backend';
+import {currentQuality, readSettings} from './store';
+import {cleanText, getTrackId, isPlayableTrack, normalizeTrack} from './tracks';
 import {applyAudioEffects} from './audioEffects';
 import {remember} from './recentlyPlayed';
 
@@ -318,6 +319,56 @@ export async function seekTo(seconds: number): Promise<void> {
 }
 
 /**
+ * Autoplay radio: when the queue is nearly out, fetch songs similar to what's
+ * playing and append them — playback continues endlessly, like the WebView
+ * build (and Spotify). Tracks are tagged `_autoplay` so the queue screen can
+ * label them "Recommended".
+ *
+ * Runs off the same 1s watcher tick as the crossfade, so there is exactly one
+ * background timer for playback upkeep.
+ */
+let radioBusy = false;
+
+async function topUpFromRadio(): Promise<void> {
+  if (radioBusy || !readSettings().autoplay) {
+    return;
+  }
+  const [queue, index] = await Promise.all([
+    TrackPlayer.getQueue(),
+    TrackPlayer.getActiveTrackIndex(),
+  ]);
+  if (!queue.length || index == null || queue.length - index > 2) {
+    return;
+  }
+  const seed = sourceTrackFor(queue[index]) ?? queueSource[queueSource.length - 1];
+  if (!seed) {
+    return;
+  }
+  radioBusy = true;
+  try {
+    const seen = new Set(queueSource.map(getTrackId));
+    const picks: Track[] = (
+      await getRadio(cleanText(seed.title), cleanText(seed.artist))
+    )
+      .map(raw => normalizeTrack(raw))
+      .filter((t): t is Track => !!t && isPlayableTrack(t) && !seen.has(getTrackId(t)))
+      .slice(0, 8)
+      .map(t => ({...t, _autoplay: true}));
+    const items = picks
+      .map(t => ({t, q: toQueueItem(t, currentQuality())}))
+      .filter(x => x.q !== null);
+    if (items.length) {
+      await TrackPlayer.add(items.map(x => x.q!));
+      queueSource = [...queueSource, ...items.map(x => x.t)];
+    }
+  } catch {
+    // Radio is a bonus — never let it surface as an error.
+  } finally {
+    radioBusy = false;
+  }
+}
+
+/**
  * Fade between songs.
  *
  * NOT a true crossfade, and the setting's hint says so. A real one overlaps two
@@ -336,6 +387,9 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     return;
   }
   fadeTimer = setInterval(async () => {
+    // Piggybacked on this tick: keep the queue topped up with similar songs.
+    topUpFromRadio().catch(() => {});
+
     const span = getSeconds();
     if (span <= 0) {
       return;

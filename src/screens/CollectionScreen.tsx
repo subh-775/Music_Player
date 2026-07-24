@@ -21,6 +21,7 @@ import {
   CheckSquare,
   ChevronLeft,
   Heart,
+  Pause,
   Play,
   Shuffle,
   Square,
@@ -40,6 +41,13 @@ import {TrackRow} from '../components/TrackRow';
 import {toast} from '../toast';
 import {enqueueDownload, useDownloadJobs} from '../downloads';
 import {DownloadRow} from '../components/DownloadRow';
+import {
+  State,
+  shuffleQueue,
+  togglePlay,
+  useActiveTrack,
+  usePlaybackState,
+} from '../player';
 
 export function CollectionScreen({
   collection,
@@ -58,7 +66,27 @@ export function CollectionScreen({
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(() => isSaved(collection));
+  const [shuffled, setShuffled] = useState(false);
   const jobs = useDownloadJobs();
+
+  // Whether THIS collection is what's sounding right now — that's what decides
+  // if the big green button means pause/resume or "start from the top".
+  const activeEngine = useActiveTrack();
+  const {state: playState} = usePlaybackState() as {state?: State};
+  const playingHere = useMemo(() => {
+    if (!activeEngine) {
+      return false;
+    }
+    const at = String(activeEngine.title ?? '').toLowerCase();
+    const aa = String(activeEngine.artist ?? '').toLowerCase();
+    return collection.tracks.some(
+      t => (t.title || '').toLowerCase() === at && (t.artist || '').toLowerCase() === aa,
+    );
+  }, [activeEngine, collection.tracks]);
+  const isPlaying =
+    playState === State.Playing ||
+    playState === State.Buffering ||
+    playState === State.Loading;
 
   const tracks = collection.tracks;
   const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
@@ -135,13 +163,38 @@ export function CollectionScreen({
     }
   }, [tracks]);
 
-  const shuffle = useCallback(() => {
+  /**
+   * Shuffle reorders what comes NEXT without touching the current song when
+   * this collection is already playing; otherwise it starts playback from a
+   * random track. Either way the icon goes green to say the order is shuffled.
+   */
+  const shuffle = useCallback(async () => {
     if (!tracks.length) {
       return;
     }
-    const start = tracks[Math.floor(Math.random() * tracks.length)];
-    onPlay(start, tracks);
-  }, [onPlay, tracks]);
+    if (playingHere) {
+      await shuffleQueue().catch(() => {});
+      toast('Shuffled what comes next');
+    } else {
+      onPlay(tracks[Math.floor(Math.random() * tracks.length)], tracks);
+      // Give the queue a beat to build before reshuffling its tail.
+      setTimeout(() => shuffleQueue().catch(() => {}), 600);
+    }
+    setShuffled(true);
+  }, [onPlay, tracks, playingHere]);
+
+  /** The green button: pause/resume when this collection is playing, start it
+   *  otherwise — never a dead control. */
+  const onBigPlay = useCallback(() => {
+    if (!tracks.length) {
+      return;
+    }
+    if (playingHere) {
+      togglePlay().catch(() => {});
+    } else {
+      play(tracks[0]);
+    }
+  }, [tracks, playingHere, play]);
 
   return (
     <View style={styles.wrap}>
@@ -243,16 +296,25 @@ export function CollectionScreen({
                       onPress={shuffle}
                       hitSlop={12}
                       disabled={!tracks.length}>
-                      <Shuffle size={24} color={tracks.length ? C.text : C.faint} />
+                      <Shuffle
+                        size={24}
+                        color={
+                          shuffled ? C.accent : tracks.length ? C.text : C.faint
+                        }
+                      />
                     </TouchableOpacity>
                   )}
                 </View>
                 <TouchableOpacity
                   style={styles.playBtn}
                   activeOpacity={0.85}
-                  onPress={() => tracks.length && play(tracks[0])}
+                  onPress={onBigPlay}
                   disabled={!tracks.length}>
-                  <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
+                  {playingHere && isPlaying ? (
+                    <Pause size={26} color={C.bg} fill={C.bg} />
+                  ) : (
+                    <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
+                  )}
                 </TouchableOpacity>
               </View>
             )}

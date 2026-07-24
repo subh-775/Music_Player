@@ -1,6 +1,10 @@
 package com.musicplayer
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Finds the ExoPlayer audio session id that react-native-track-player is
@@ -40,8 +44,28 @@ object PlaybackSession {
     /**
      * The live audio session id, or -1 when nothing is playing yet or the
      * fields could not be found.
+     *
+     * ExoPlayer enforces thread confinement: getAudioSessionId() called from
+     * any thread but the player's application thread (main) throws. React
+     * native-module methods run on their own thread, so this hops to the main
+     * looper and waits briefly — without the hop every lookup "failed" with a
+     * wrong-thread IllegalStateException and the EQ silently attached to
+     * nothing.
      */
     fun currentId(): Int {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return lookup()
+        }
+        var result = -1
+        val latch = CountDownLatch(1)
+        Handler(Looper.getMainLooper()).post {
+            result = lookup()
+            latch.countDown()
+        }
+        return if (latch.await(2, TimeUnit.SECONDS)) result else -1
+    }
+
+    private fun lookup(): Int {
         val service = MusicServiceRef.instance ?: return -1
         return try {
             val playerField = service.javaClass.getDeclaredField("player")

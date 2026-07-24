@@ -32,6 +32,7 @@ import {
 import {createPlaylist} from '../playlists';
 import {MAX_PINS, isPinned, rowId, sortPinned, togglePin, usePins} from '../pins';
 import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
+import {overlayDownloadArtwork} from '../downloads';
 import {toast} from '../toast';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
@@ -83,7 +84,9 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
   const loadDownloads = useCallback(async () => {
     try {
       const {tracks} = await getLocalLibrary();
-      setDownloads(tracks);
+      // The disk scan carries no artwork; lay back the covers remembered at
+      // download time so offline rows aren't blank squares.
+      setDownloads(overlayDownloadArtwork(tracks));
     } catch {
       // Offline library unavailable — the rest of the library still works.
     } finally {

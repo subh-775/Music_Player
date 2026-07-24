@@ -10,6 +10,7 @@
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Dimensions,
   PanResponder,
   ScrollView,
   StyleSheet,
@@ -324,8 +325,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: S.gutter,
   },
   preset: {
-    // Three per row: (100% - two 10px gaps) / 3.
-    width: '31.5%',
+    // Three per row, computed in px — a % width resolved against the screen
+    // rather than the padded content box overflowed to two per row on-device.
+    width: Math.floor((Dimensions.get('window').width - 2 * S.gutter - 2 * 10) / 3),
     alignItems: 'center',
     gap: 6,
     paddingVertical: 14,
