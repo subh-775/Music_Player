@@ -233,6 +233,55 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         }
     }
 
+    /**
+     * Dominant colour of an artwork image, as "#rrggbb", or null when it can't
+     * be worked out. Palette is the platform's own tool for exactly this.
+     *
+     * The bitmap is decoded small (Palette samples anyway, detail is wasted)
+     * and the whole thing is best-effort: a null just means the UI keeps its
+     * plain background.
+     */
+    @ReactMethod
+    fun artworkColor(url: String, promise: Promise) {
+        Thread {
+            try {
+                val conn = java.net.URL(url).openConnection()
+                conn.connectTimeout = 5000
+                conn.readTimeout = 8000
+                val bytes = conn.getInputStream().use { it.readBytes() }
+
+                // Two-pass decode: bounds first, then sampled down to ~112px.
+                val bounds = android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                var sample = 1
+                while (bounds.outWidth / (sample * 2) >= 112) sample *= 2
+                val opts = android.graphics.BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                }
+                val bmp = android.graphics.BitmapFactory
+                    .decodeByteArray(bytes, 0, bytes.size, opts)
+                if (bmp == null) {
+                    promise.resolve(null)
+                    return@Thread
+                }
+                val palette = androidx.palette.graphics.Palette.from(bmp).generate()
+                bmp.recycle()
+                // Vibrant reads best against a dark UI; muted and dominant are
+                // the fallbacks, in that order.
+                val color = palette.getVibrantColor(
+                    palette.getMutedColor(palette.getDominantColor(0)),
+                )
+                promise.resolve(
+                    if (color == 0) null else String.format("#%06x", color and 0xffffff),
+                )
+            } catch (e: Exception) {
+                promise.resolve(null)
+            }
+        }.start()
+    }
+
     override fun onCatalystInstanceDestroy() {
         release()
     }

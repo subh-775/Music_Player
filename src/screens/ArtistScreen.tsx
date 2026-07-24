@@ -16,11 +16,22 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ChevronLeft, Play} from 'lucide-react-native';
+import {ChevronLeft, Pause, Play} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getArtist, type ArtistProfile, type Track} from '../backend';
 import {normalizeTracks} from '../tracks';
 import {TrackRow} from '../components/TrackRow';
+import {useFollowedArtists} from '../artists';
+import {
+  State,
+  togglePlay,
+  useActiveTrack,
+  usePlaybackState,
+} from '../player';
+
+/** Profiles the session has already opened — going back to an artist you just
+ *  visited must not spin a loader again. */
+const profileCache = new Map<string, ArtistProfile>();
 
 function compact(n?: number | null): string {
   if (!n || n <= 0) {
@@ -42,7 +53,6 @@ export function ArtistScreen({
   onMenu,
   onOpenAlbum,
   onToggleFollow,
-  following,
 }: {
   name: string;
   onClose: () => void;
@@ -50,16 +60,32 @@ export function ArtistScreen({
   onMenu: (track: Track) => void;
   onOpenAlbum: (albumName: string, artistName: string) => void;
   onToggleFollow: (name: string, image?: string) => void;
-  following: boolean;
 }) {
-  const [profile, setProfile] = useState<ArtistProfile | null>(null);
-  const [busy, setBusy] = useState(true);
+  const cachedProfile = profileCache.get(name.toLowerCase()) ?? null;
+  const [profile, setProfile] = useState<ArtistProfile | null>(cachedProfile);
+  const [busy, setBusy] = useState(!cachedProfile);
+
+  // Subscribed to the store, so tapping Follow flips the button IMMEDIATELY —
+  // a prop computed once by the parent went stale until something else
+  // re-rendered.
+  const followed = useFollowedArtists();
+  const following = followed.some(
+    a => a.name.toLowerCase() === (profile?.name || name).toLowerCase(),
+  );
 
   useEffect(() => {
+    if (profileCache.has(name.toLowerCase())) {
+      return;
+    }
     let alive = true;
     setBusy(true);
     getArtist(name)
-      .then(p => alive && setProfile(p))
+      .then(p => {
+        profileCache.set(name.toLowerCase(), p);
+        if (alive) {
+          setProfile(p);
+        }
+      })
       .catch(() => alive && setProfile(null))
       .finally(() => alive && setBusy(false));
     return () => {
@@ -70,6 +96,26 @@ export function ArtistScreen({
   const songs = normalizeTracks(profile?.top_songs ?? []);
   const albums = profile?.albums ?? [];
   const listeners = compact(profile?.listeners ?? profile?.followers);
+
+  // Green button mirrors reality: pause icon while one of this artist's top
+  // songs is what's playing, and tapping it pauses/resumes instead of
+  // restarting from the top.
+  const activeEngine = useActiveTrack();
+  const {state: playState} = usePlaybackState() as {state?: State};
+  const playingHere = (() => {
+    if (!activeEngine) {
+      return false;
+    }
+    const at = String(activeEngine.title ?? '').toLowerCase();
+    const aa = String(activeEngine.artist ?? '').toLowerCase();
+    return songs.some(
+      t => (t.title || '').toLowerCase() === at && (t.artist || '').toLowerCase() === aa,
+    );
+  })();
+  const isPlaying =
+    playState === State.Playing ||
+    playState === State.Buffering ||
+    playState === State.Loading;
 
   return (
     <View style={styles.wrap}>
@@ -115,8 +161,14 @@ export function ArtistScreen({
               <TouchableOpacity
                 style={styles.playBtn}
                 activeOpacity={0.85}
-                onPress={() => onPlay(songs[0], songs)}>
-                <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
+                onPress={() =>
+                  playingHere ? togglePlay().catch(() => {}) : onPlay(songs[0], songs)
+                }>
+                {playingHere && isPlaying ? (
+                  <Pause size={26} color={C.bg} fill={C.bg} />
+                ) : (
+                  <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
+                )}
               </TouchableOpacity>
             )}
             </View>

@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BackHandler,
   SafeAreaView,
@@ -31,7 +31,7 @@ import {hydrate, readSettings} from './src/store';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
 import {applyAudioEffects} from './src/audioEffects';
-import {isFollowing, toggleFollow} from './src/artists';
+import {toggleFollow} from './src/artists';
 import {toast} from './src/toast';
 
 function Shell() {
@@ -55,6 +55,7 @@ function Shell() {
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
+  const exitArmedAt = useRef(0);
 
   useEffect(() => {
     hydrate().then(applyAudioEffects);
@@ -75,31 +76,59 @@ function Shell() {
     }
   }, []);
 
-  /** A single credited artist opens directly; several ask which one first. */
+  /** A single credited artist opens directly; several ask which one first.
+   *  Either way the full player closes first — the artist page renders in the
+   *  body, and a Modal player would sit on top of it, which is why "clicked
+   *  the artist, nothing happened until I pressed back". */
   const openArtistCredit = useCallback((credit: string) => {
     const names = splitArtists(credit);
     if (names.length > 1) {
+      setPlayerOpen(false);
       setArtistChoices(names);
     } else if (names.length === 1) {
+      setPlayerOpen(false);
       setArtist(names[0]);
     }
   }, []);
 
-  const openAlbumOf = useCallback((track: Track) => {
-    if (!track.album) {
-      return;
-    }
-    // Album pages are keyed by name+artist; the collection screen renders
-    // whatever tracks we already hold until a fuller fetch exists.
-    setCollection({
-      id: `album:${track.album}`,
-      kind: 'album',
-      name: track.album,
-      artist: track.artist,
-      image: track.artwork_url,
-      tracks: [track],
-    });
-  }, []);
+  /** Open an album AS ITS FULL SELF: fetch the real tracklist by name+artist.
+   *  Seed tracks (what we already hold) show instantly; the fetch replaces
+   *  them when it lands, so the screen is never empty and never stale. */
+  const openAlbumByName = useCallback(
+    async (albumName: string, artistName: string, seed: Track[] = []) => {
+      setCollection({
+        id: `album:${albumName}`,
+        kind: 'album',
+        name: albumName,
+        artist: artistName,
+        image: seed[0]?.artwork_url,
+        tracks: seed,
+      });
+      try {
+        const data = await getAlbum(albumName, artistName);
+        if (data.tracks.length) {
+          setCollection(prev =>
+            prev && prev.id === `album:${albumName}`
+              ? {...prev, name: data.name || albumName, tracks: normalizeTracks(data.tracks)}
+              : prev,
+          );
+        }
+      } catch {
+        // The seed tracks stay — a partial album beats an error screen.
+      }
+    },
+    [],
+  );
+
+  const openAlbumOf = useCallback(
+    (track: Track) => {
+      if (!track.album) {
+        return;
+      }
+      openAlbumByName(track.album, track.artist, [track]);
+    },
+    [openAlbumByName],
+  );
 
   /** A Home card is a track, album or playlist. Tracks play; the rest open —
    *  as a Collection, the same as anything in the library. */
@@ -194,7 +223,14 @@ function Shell() {
         setTab('home');
         return true;
       }
-      return false;
+      // On Home with nothing open, one press warns, a second within 2s exits —
+      // so a stray back can't kill the music by accident.
+      if (Date.now() - exitArmedAt.current < 2000) {
+        return false;
+      }
+      exitArmedAt.current = Date.now();
+      toast('Press back again to exit');
+      return true;
     };
 
     const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
@@ -221,29 +257,34 @@ function Shell() {
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
       <View style={styles.body}>
-        {tab === 'home' && (
+        {/* All three tabs stay MOUNTED; switching shows/hides them. Unmounting
+            threw away each screen's state, so coming back to Home replayed
+            "Starting the music engine…" and Library re-fetched everything —
+            the single biggest "why is it reloading" complaint. */}
+        <View style={tab === 'home' ? styles.tabShown : styles.tabHidden}>
           <HomeScreen
             onPickTrack={pickHomeItem}
             onPlayTrack={play}
             onOpenSettings={() => setSettingsOpen(true)}
           />
-        )}
-        {tab === 'search' && (
+        </View>
+        <View style={tab === 'search' ? styles.tabShown : styles.tabHidden}>
           <SearchScreen
             onPickTrack={play}
             onImportSpotify={setImportUrl}
             onMenu={openSheet}
           />
-        )}
-        {tab === 'library' && (
+        </View>
+        <View style={tab === 'library' ? styles.tabShown : styles.tabHidden}>
           <LibraryScreen
             key={libraryNonce}
+            visible={tab === 'library'}
             onOpen={c =>
               // A followed artist opens their profile, not an empty tracklist.
               c.kind === 'artist' ? setArtist(c.name) : setCollection(c)
             }
           />
-        )}
+        </View>
 
         {/* Overlays, innermost last. */}
         {!!collection && (
@@ -278,7 +319,6 @@ function Shell() {
               onClose={() => setArtist(null)}
               onPlay={play}
               onMenu={openSheet}
-              following={isFollowing(artist)}
               onToggleFollow={(n, img) =>
                 toast(
                   toggleFollow(n, img)
@@ -286,15 +326,7 @@ function Shell() {
                     : `Unfollowed ${n}`,
                 )
               }
-              onOpenAlbum={(albumName, artistName) =>
-                setCollection({
-                  id: `album:${albumName}`,
-                  kind: 'album',
-                  name: albumName,
-                  artist: artistName,
-                  tracks: [],
-                })
-              }
+              onOpenAlbum={openAlbumByName}
             />
           </View>
         )}
@@ -357,4 +389,6 @@ export default function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   body: {flex: 1},
+  tabShown: {...StyleSheet.absoluteFillObject},
+  tabHidden: {...StyleSheet.absoluteFillObject, display: 'none'},
 });

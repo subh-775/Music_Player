@@ -12,7 +12,9 @@ import {useSettings} from '../store';
 import {getPlayableSource} from '../tracks';
 import type {Track} from '../backend';
 
-const META: Record<string, {label: string; tint: string}> = {
+/** One palette for "which source" everywhere — the badge on a track row and
+ *  the Sources list in Settings must never disagree about a colour. */
+export const SOURCE_META: Record<string, {label: string; tint: string}> = {
   jiosaavn: {label: 'JioSaavn', tint: '#1ed760'},
   soundcloud: {label: 'SoundCloud', tint: '#ff7733'},
   youtube: {label: 'YouTube', tint: '#ff4444'},
@@ -27,7 +29,7 @@ export function SourceBadge({track}: {track: Track | null}) {
   }
   const source =
     track.playable_source || track.primary_source || getPlayableSource(track);
-  const meta = source ? META[source] : undefined;
+  const meta = source ? SOURCE_META[source] : undefined;
   if (!meta) {
     return null;
   }

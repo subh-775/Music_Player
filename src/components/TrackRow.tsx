@@ -21,7 +21,7 @@ import {C, S, T} from '../theme';
 import {formatDuration, type Track} from '../backend';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {useLike} from '../store';
-import {addToQueue} from '../player';
+import {addToQueue, useActiveTrack} from '../player';
 import {toast} from '../toast';
 import {SourceBadge} from './Badges';
 
@@ -50,6 +50,18 @@ export function TrackRow({
   const dur = formatDuration(track.duration_ms);
   const artwork = getBestArtworkUrl(track);
   const {liked, toggle} = useLike(track);
+
+  // Every row knows for itself whether it's the song playing — callers kept
+  // forgetting to pass `active`, and a list where the playing song isn't green
+  // leaves the user hunting. The prop still wins when supplied.
+  const engineTrack = useActiveTrack();
+  const isActive =
+    active ??
+    (!!engineTrack &&
+      String(engineTrack.title ?? '').toLowerCase() ===
+        (track.title || '').toLowerCase() &&
+      String(engineTrack.artist ?? '').toLowerCase() ===
+        (track.artist || '').toLowerCase());
 
   const slide = useRef(new Animated.Value(0)).current;
   const trackRef = useRef(track);
@@ -100,7 +112,7 @@ export function TrackRow({
 
           <View style={styles.text}>
             <Text
-              style={[styles.title, active && styles.titleActive]}
+              style={[styles.title, isActive && styles.titleActive]}
               numberOfLines={1}>
               {cleanText(track.title)}
             </Text>

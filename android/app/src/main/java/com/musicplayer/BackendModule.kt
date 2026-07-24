@@ -30,6 +30,7 @@ class BackendModule(reactContext: ReactApplicationContext) :
     override fun getName() = "Backend"
 
     private var folderPromise: Promise? = null
+    private var imagePromise: Promise? = null
 
     private val activityListener: ActivityEventListener =
         object : BaseActivityEventListener() {
@@ -39,11 +40,29 @@ class BackendModule(reactContext: ReactApplicationContext) :
                 resultCode: Int,
                 data: Intent?,
             ) {
-                if (requestCode != PICK_FOLDER) return
-                val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
-                // "" tells JS the user backed out — not an error.
-                folderPromise?.resolve(uri?.let { treeUriToPath(it) } ?: "")
-                folderPromise = null
+                when (requestCode) {
+                    PICK_FOLDER -> {
+                        val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                        // "" tells JS the user backed out — not an error.
+                        folderPromise?.resolve(uri?.let { treeUriToPath(it) } ?: "")
+                        folderPromise = null
+                    }
+                    PICK_IMAGE -> {
+                        val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                        if (uri != null) {
+                            // Keep read access across restarts — the playlist
+                            // cover must still load next launch.
+                            try {
+                                reactApplicationContext.contentResolver
+                                    .takePersistableUriPermission(
+                                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                    )
+                            } catch (_: Exception) {}
+                        }
+                        imagePromise?.resolve(uri?.toString() ?: "")
+                        imagePromise = null
+                    }
+                }
             }
         }
 
@@ -83,6 +102,31 @@ class BackendModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Pick an image (playlist cover). Resolves a persistable content:// URI —
+     *  RN's <Image> renders those directly — or "" on cancel. */
+    @ReactMethod
+    fun pickImage(promise: Promise) {
+        val activity = currentActivity
+        if (activity == null) {
+            promise.resolve("")
+            return
+        }
+        imagePromise?.resolve("")
+        imagePromise = promise
+        try {
+            activity.startActivityForResult(
+                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "image/*"
+                },
+                PICK_IMAGE,
+            )
+        } catch (e: Exception) {
+            imagePromise = null
+            promise.resolve("")
+        }
+    }
+
     /**
      * content:// tree URI -> real filesystem path. Same translation the WebView
      * build shipped: the primary volume maps to the external storage root, any
@@ -106,5 +150,6 @@ class BackendModule(reactContext: ReactApplicationContext) :
 
     companion object {
         private const val PICK_FOLDER = 51423
+        private const val PICK_IMAGE = 51424
     }
 }

@@ -8,9 +8,10 @@
  * Downloads additionally supports select-and-delete: hold a row to enter
  * selection, then remove the files from the phone's storage.
  */
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   FlatList,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -29,7 +30,7 @@ import {
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {deleteDownload, type Track} from '../backend';
-import {formatTotalDuration, getTrackId} from '../tracks';
+import {formatTotalDuration, getBestArtworkUrl, getTrackId} from '../tracks';
 import {
   collectionSubtitle,
   isSaved,
@@ -90,6 +91,17 @@ export function CollectionScreen({
 
   const tracks = collection.tracks;
   const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
+
+  // Warm the image cache for the first screenful of covers, so scrolling a
+  // freshly-opened playlist doesn't pop empty squares in one by one.
+  useEffect(() => {
+    tracks.slice(0, 12).forEach(t => {
+      const art = getBestArtworkUrl(t);
+      if (art) {
+        Image.prefetch(art).catch(() => {});
+      }
+    });
+  }, [tracks]);
   const selecting = selected !== null;
   const canSelect = collection.kind === 'downloads';
   // Only a playlist of the user's can offer "remove from this playlist".
@@ -263,33 +275,37 @@ export function CollectionScreen({
             {!selecting && (
               <View style={styles.actions}>
                 <View style={styles.leftGroup}>
+                  {/* Anything that came from a SOURCE (album or playlist) can
+                      be saved to the library with the heart — that's how it
+                      shows up under Your Library, same as Spotify. */}
+                  {(collection.kind === 'album' ||
+                    collection.kind === 'sourcePlaylist') && (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      hitSlop={10}
+                      onPress={() => {
+                        const now = toggleSaved(collection);
+                        setSaved(now);
+                        toast(now ? `Saved ${collection.name}` : `Removed ${collection.name}`);
+                      }}>
+                      <Heart
+                        size={24}
+                        color={saved ? C.accent : C.text}
+                        fill={saved ? C.accent : 'transparent'}
+                      />
+                    </TouchableOpacity>
+                  )}
                   {collection.kind === 'album' ? (
-                    <>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        hitSlop={10}
-                        onPress={() => {
-                          const now = toggleSaved(collection);
-                          setSaved(now);
-                          toast(now ? `Saved ${collection.name}` : `Removed ${collection.name}`);
-                        }}>
-                        <Heart
-                          size={24}
-                          color={saved ? C.accent : C.text}
-                          fill={saved ? C.accent : 'transparent'}
-                        />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        hitSlop={10}
-                        onPress={downloadAll}
-                        disabled={!tracks.length}>
-                        <ArrowDownToLine
-                          size={24}
-                          color={tracks.length ? C.text : C.faint}
-                        />
-                      </TouchableOpacity>
-                    </>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      hitSlop={10}
+                      onPress={downloadAll}
+                      disabled={!tracks.length}>
+                      <ArrowDownToLine
+                        size={24}
+                        color={tracks.length ? C.text : C.faint}
+                      />
+                    </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
                       activeOpacity={0.7}

@@ -178,36 +178,65 @@ function Band({
   const heightRef = useRef(SLIDER_H);
   heightRef.current = height;
 
+  // Live value while the finger is down. Committing to settings on every move
+  // re-rendered the screen and REBUILT this responder mid-gesture — which is
+  // why dragging felt like tapping discrete points. The drag is local now;
+  // settings get one write on release.
+  const [dragDb, setDragDb] = useState<number | null>(null);
+  const dragDbRef = useRef<number | null>(null);
+  const disabledRef = useRef(!!disabled);
+  disabledRef.current = !!disabled;
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
+
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     setHeight(e.nativeEvent.layout.height);
   }, []);
 
-  const pan = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => !disabled,
-        onMoveShouldSetPanResponder: () => !disabled,
-        onPanResponderGrant: e => {
-          const h = heightRef.current || 1;
-          const t = 1 - e.nativeEvent.locationY / h;
-          onChange(EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB));
-        },
-        onPanResponderMove: e => {
-          const h = heightRef.current || 1;
-          const t = 1 - e.nativeEvent.locationY / h;
-          onChange(EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB));
-        },
-      }),
-    [onChange, disabled],
-  );
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !disabledRef.current,
+      onMoveShouldSetPanResponder: () => !disabledRef.current,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: e => {
+        const h = heightRef.current || 1;
+        const t = 1 - e.nativeEvent.locationY / h;
+        const db = EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB);
+        dragDbRef.current = db;
+        setDragDb(db);
+      },
+      onPanResponderMove: e => {
+        const h = heightRef.current || 1;
+        const t = 1 - e.nativeEvent.locationY / h;
+        const db = Math.max(
+          EQ_MIN_DB,
+          Math.min(EQ_MAX_DB, EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB)),
+        );
+        dragDbRef.current = db;
+        setDragDb(db);
+      },
+      onPanResponderRelease: () => {
+        if (dragDbRef.current != null) {
+          changeRef.current(dragDbRef.current);
+        }
+        dragDbRef.current = null;
+        setDragDb(null);
+      },
+      onPanResponderTerminate: () => {
+        dragDbRef.current = null;
+        setDragDb(null);
+      },
+    }),
+  ).current;
 
-  const pct = (value - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB);
+  const shown = dragDb ?? value;
+  const pct = (shown - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB);
 
   return (
     <View style={styles.band}>
       <Text style={styles.bandDb}>
-        {value > 0 ? '+' : ''}
-        {Math.round(value)}
+        {shown > 0 ? '+' : ''}
+        {Math.round(shown)}
       </Text>
       <View
         style={[styles.column, disabled && styles.columnOff]}

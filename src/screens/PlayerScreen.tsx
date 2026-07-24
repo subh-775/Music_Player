@@ -39,14 +39,14 @@ import {
   Bluetooth,
   Check,
   ChevronDown,
-  DownloadCloud,
+  CircleArrowDown,
+  CirclePlus,
   Heart,
   ListMusic,
   Music,
   Pause,
   Play,
-  Plus,
-  Repeat,
+  Repeat2,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -72,10 +72,12 @@ import {
 } from '../player';
 import {useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
+import {toward, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
 import {Seekbar} from '../components/Seekbar';
 import {SeekPeek} from '../components/SeekPeek';
 import {QueuePane} from './QueueScreen';
+import {Toaster} from '../components/Toaster';
 import {toast} from '../toast';
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
@@ -108,6 +110,12 @@ export function PlayerScreen({
   // all need the real backend Track behind it.
   const track = useMemo(() => sourceTrackFor(active), [active]);
   const {liked, toggle: toggleLike} = useLike(track);
+
+  // The screen takes on the song's colour, darkened hard enough that every
+  // label keeps contrast. Falls back to plain black when unknown.
+  const tint = useArtworkColor(
+    track ? getBestArtworkUrl(track) : String(active?.artwork ?? '') || undefined,
+  );
 
   const [pane, setPane] = useState<Pane>('song');
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
@@ -254,7 +262,8 @@ export function PlayerScreen({
       animationType="slide"
       onRequestClose={onClose}
       statusBarTranslucent>
-      <View style={styles.wrap}>
+      <View
+        style={[styles.wrap, !!tint && {backgroundColor: toward(tint, 0.72)}]}>
         {/* Header — close on the left, what you're inside of in the middle. */}
         <View style={styles.topBar}>
           <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
@@ -333,15 +342,13 @@ export function PlayerScreen({
             </View>
 
             <View style={styles.actions}>
+              {/* Circled glyphs, matching the reference: ⊕ add, ♥ like,
+                  ⬇-in-circle download. */}
               <TouchableOpacity
                 onPress={() => track && onAddToPlaylist(track)}
                 hitSlop={8}
                 style={styles.actionBtn}>
-                {/* A 22px ring so the circled + reads the same visual size as
-                    the bare heart and download glyphs beside it. */}
-                <View style={styles.plusRing}>
-                  <Plus size={13} color={C.sub} strokeWidth={2.6} />
-                </View>
+                <CirclePlus size={23} color={C.sub} strokeWidth={1.8} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -363,7 +370,7 @@ export function PlayerScreen({
                 {downloading ? (
                   <Check size={22} color={C.accent} />
                 ) : (
-                  <DownloadCloud size={22} color={C.sub} />
+                  <CircleArrowDown size={23} color={C.sub} strokeWidth={1.8} />
                 )}
               </TouchableOpacity>
             </View>
@@ -435,14 +442,19 @@ export function PlayerScreen({
             </TouchableOpacity>
 
             <TouchableOpacity onPress={toggleRepeat} hitSlop={10} style={styles.tBtn}>
-              <Repeat
-                size={24}
+              <Repeat2
+                size={26}
                 color={repeat === RepeatMode.Off ? C.sub : C.accent}
-                strokeWidth={repeat === RepeatMode.Off ? 2 : 2.6}
+                strokeWidth={repeat === RepeatMode.Off ? 2 : 2.4}
               />
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Toasts must be visible INSIDE this modal — the app-root toaster
+            sits underneath it, so "Downloading…" was invisible until the
+            player was closed. Same queue, second outlet. */}
+        <Toaster bottom={40} />
       </View>
     </Modal>
   );
@@ -471,6 +483,20 @@ function TapZone({onDoubleTap}: {onDoubleTap: () => void}) {
 
 const LINE_H = 44;
 
+/** Session-lifetime lyrics cache. Keyed on title|artist; capped so a long
+ *  session can't hold hundreds of lyric sheets. */
+const lyricsCache = new Map<string, Lyrics>();
+
+function trimCache(map: Map<string, unknown>, max = 40): void {
+  while (map.size > max) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    map.delete(oldest);
+  }
+}
+
 /**
  * Synced lyrics scroll themselves and can be tapped to jump; plain text is
  * shown when that's all the sources have.
@@ -486,24 +512,41 @@ function LyricsPane({
   durationMs?: number;
   position: number;
 }) {
-  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
-  const [busy, setBusy] = useState(true);
+  const cacheKey = `${title}|${artist}`.toLowerCase();
+  const cached = lyricsCache.get(cacheKey);
+  const [lyrics, setLyrics] = useState<Lyrics | null>(cached ?? null);
+  const [busy, setBusy] = useState(!cached);
   const [err, setErr] = useState('');
   const scroller = useRef<ScrollView>(null);
 
   useEffect(() => {
+    // Cached: the pane paints instantly — switching Song → Queue → Lyrics must
+    // not re-fetch what was on screen two taps ago.
+    const hit = lyricsCache.get(cacheKey);
+    if (hit) {
+      setLyrics(hit);
+      setBusy(false);
+      setErr('');
+      return;
+    }
     let alive = true;
     setBusy(true);
     setErr('');
     setLyrics(null);
     getLyrics(title, artist, durationMs)
-      .then(l => alive && setLyrics(l))
+      .then(l => {
+        lyricsCache.set(cacheKey, l);
+        trimCache(lyricsCache);
+        if (alive) {
+          setLyrics(l);
+        }
+      })
       .catch(e => alive && setErr(e instanceof Error ? e.message : String(e)))
       .finally(() => alive && setBusy(false));
     return () => {
       alive = false;
     };
-  }, [title, artist, durationMs]);
+  }, [cacheKey, title, artist, durationMs]);
 
   const synced = useMemo(() => lyrics?.synced ?? [], [lyrics]);
 

@@ -31,6 +31,7 @@ import {EqualizerScreen} from './EqualizerScreen';
 import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
+import {SOURCE_META} from '../components/Badges';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
@@ -375,31 +376,47 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           <Section title="Sources">
             {Object.entries(sources)
               .filter(([, v]) => v.type === 'audio')
-              .map(([name, s]) =>
-                name === 'youtube' ? (
-                  <ToggleRow
-                    key={name}
-                    label="YouTube"
-                    hint={
-                      ytBusy
-                        ? 'Checking this device…'
-                        : yt?.supported
-                        ? 'Adds YouTube as a search source. No sign-in needed.'
-                        : 'Not available on this device.'
-                    }
-                    value={!!yt?.enabled}
-                    disabled={ytBusy || !yt?.supported}
-                    onChange={toggleYt}
-                  />
+              .map(([name, s]) => {
+                // Same tints as the track badges, so "which source is this"
+                // reads the same everywhere.
+                const tint = SOURCE_META[name]?.tint;
+                return name === 'youtube' ? (
+                  <View key={name} style={styles.row}>
+                    <View style={styles.rowText}>
+                      <Text style={[styles.rowLabel, !!tint && {color: tint}]}>
+                        YouTube
+                      </Text>
+                      <Text style={styles.rowHint}>
+                        {ytBusy
+                          ? 'Checking this device…'
+                          : yt?.supported
+                          ? 'Adds YouTube as a search source. No sign-in needed.'
+                          : 'Not available on this device.'}
+                      </Text>
+                    </View>
+                    <Toggle
+                      value={!!yt?.enabled}
+                      disabled={ytBusy || !yt?.supported}
+                      onChange={toggleYt}
+                    />
+                  </View>
                 ) : (
-                  <Row
-                    key={name}
-                    label={name === 'jiosaavn' ? 'JioSaavn' : 'SoundCloud'}
-                    value={s.status === 'ready' ? 'On' : s.status}
-                    hint={s.quality}
-                  />
-                ),
-              )}
+                  <View key={name} style={styles.row}>
+                    <View style={styles.rowText}>
+                      <Text style={[styles.rowLabel, !!tint && {color: tint}]}>
+                        {SOURCE_META[name]?.label ||
+                          (name === 'jiosaavn' ? 'JioSaavn' : 'SoundCloud')}
+                      </Text>
+                      {!!s.quality && (
+                        <Text style={styles.rowHint}>{s.quality}</Text>
+                      )}
+                    </View>
+                    <Text style={styles.rowValue}>
+                      {s.status === 'ready' ? 'On' : s.status}
+                    </Text>
+                  </View>
+                );
+              })}
           </Section>
 
           <Section title="Storage">
@@ -452,7 +469,9 @@ const styles = StyleSheet.create({
   back: {padding: 4},
   barTitle: {...T.screenTitle, color: C.text, fontSize: 22},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  scroll: {paddingBottom: 30},
+  // Enough tail room that the last row clears the mini player + bottom nav —
+  // the reset button was getting clipped by a small amount.
+  scroll: {paddingBottom: 90},
   section: {paddingTop: 20},
   sectionTitle: {
     fontSize: 12,

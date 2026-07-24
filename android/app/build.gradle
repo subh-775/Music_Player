@@ -176,4 +176,9 @@ dependencies {
     // natively (bundled Rhino). Called from Python via YouTubeNP.kt. GPLv3, same
     // as this project. Pinned to the version Fix-Spotify runs in production.
     implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.3'
+
+    // Dominant-colour extraction from album art, for the player tint. This is
+    // the platform's own answer to the problem (it ships in every Material
+    // music app) — the WebView build used a canvas, which RN doesn't have.
+    implementation 'androidx.palette:palette:1.0.0'
 }

@@ -125,6 +125,11 @@ export async function setupPlayer(): Promise<boolean> {
         Capability.Pause,
         Capability.SkipToNext,
         Capability.SkipToPrevious,
+        // Declared here too, not just in `capabilities` — this list is what
+        // the MediaSession advertises to the notification/lock screen, and
+        // without SeekTo there the lock-screen progress bar renders but
+        // refuses to drag.
+        Capability.SeekTo,
       ],
       progressUpdateEventInterval: 1,
     });
@@ -234,7 +239,17 @@ export async function addToQueue(track: Track): Promise<void> {
   if (!item) {
     throw new Error('This track has no playable source.');
   }
-  await TrackPlayer.add([item]);
+  // A song the user queues goes BEFORE the autoplay-radio tail — "add to
+  // queue" means "play this soon", not "after eight songs you didn't pick".
+  // The position comes from the ENGINE's queue (the truth), since the JS-side
+  // pool can drift after manual reorders.
+  const queue = await TrackPlayer.getQueue();
+  const firstAuto = queue.findIndex(it => sourceTrackFor(it)?._autoplay);
+  if (firstAuto >= 0) {
+    await TrackPlayer.add([item], firstAuto);
+  } else {
+    await TrackPlayer.add([item]);
+  }
   queueSource = [...queueSource, track];
 }
 

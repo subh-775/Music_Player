@@ -203,47 +203,87 @@ export function QueuePane() {
 
         return (
           <React.Fragment key={`${t.id ?? t.url}-${i}`}>
-          {recHeader && <Text style={styles.section}>Recommended for you</Text>}
-          <Animated.View
-            style={[
-              styles.row,
-              isDragged && styles.rowDragged,
-              isDragged
-                ? [styles.lift, {transform: [{translateY: dragY}]}]
-                : {transform: [{translateY: shift}]},
-            ]}
-            pointerEvents={isDragged ? 'none' : 'auto'}>
-            <TouchableOpacity
-              style={styles.rowMain}
-              activeOpacity={0.7}
-              onPress={() => jump(i)}>
-              {t.artwork ? (
-                <Image source={{uri: String(t.artwork)}} style={styles.art} />
-              ) : (
-                <View style={[styles.art, styles.artEmpty]} />
-              )}
-              <View style={styles.text}>
-                <Text
-                  style={[styles.title, i === active && styles.titleActive]}
-                  numberOfLines={1}>
-                  {String(t.title ?? '')}
-                </Text>
-                <Text style={styles.artist} numberOfLines={1}>
-                  {String(t.artist ?? '')}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <View style={styles.grip} {...dragResponderFor(i).panHandlers}>
-              <Menu size={19} color={C.faint} />
-            </View>
-          </Animated.View>
+            {recHeader && (
+              <Text style={styles.section}>Recommended for you</Text>
+            )}
+            <QueueRow
+              track={t}
+              index={i}
+              isActive={i === active}
+              isDragged={isDragged}
+              shift={shift}
+              dragY={dragY}
+              panHandlers={dragResponderFor(i).panHandlers}
+              onJump={jump}
+            />
           </React.Fragment>
         );
       })}
     </ScrollView>
   );
 }
+
+/**
+ * One queue row, memoized: while a drag repaints the screen every frame, only
+ * the picked-up row and the rows sliding out of its way re-render — which is
+ * the difference between a drag that glides and one that stutters.
+ */
+const QueueRow = React.memo(function QueueRow({
+  track: t,
+  index,
+  isActive,
+  isDragged,
+  shift,
+  dragY,
+  panHandlers,
+  onJump,
+}: {
+  track: RNTPTrack;
+  index: number;
+  isActive: boolean;
+  isDragged: boolean;
+  shift: number;
+  dragY: Animated.Value;
+  panHandlers: object;
+  onJump: (i: number) => void;
+}) {
+  return (
+    <Animated.View
+      style={[
+        styles.row,
+        isDragged && styles.rowDragged,
+        isDragged
+          ? [styles.lift, {transform: [{translateY: dragY}]}]
+          : {transform: [{translateY: shift}]},
+      ]}
+      pointerEvents={isDragged ? 'none' : 'auto'}>
+      <TouchableOpacity
+        style={styles.rowMain}
+        activeOpacity={0.7}
+        onPress={() => onJump(index)}>
+        {t.artwork ? (
+          <Image source={{uri: String(t.artwork)}} style={styles.art} />
+        ) : (
+          <View style={[styles.art, styles.artEmpty]} />
+        )}
+        <View style={styles.text}>
+          <Text
+            style={[styles.title, isActive && styles.titleActive]}
+            numberOfLines={1}>
+            {String(t.title ?? '')}
+          </Text>
+          <Text style={styles.artist} numberOfLines={1}>
+            {String(t.artist ?? '')}
+          </Text>
+        </View>
+      </TouchableOpacity>
+
+      <View style={styles.grip} {...panHandlers}>
+        <Menu size={19} color={C.faint} />
+      </View>
+    </Animated.View>
+  );
+});
 
 const styles = StyleSheet.create({
   wrap: {flex: 1},

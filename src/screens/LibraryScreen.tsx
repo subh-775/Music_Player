@@ -11,15 +11,17 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
+  NativeModules,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Pin, Plus} from 'lucide-react-native';
+import {ImagePlus, Pencil, Pin, Plus, Trash2} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getLocalLibrary, type Track} from '../backend';
 import {useLikes} from '../store';
@@ -29,10 +31,16 @@ import {
   useLibrary,
   type Collection,
 } from '../collections';
-import {createPlaylist} from '../playlists';
+import {
+  createPlaylist,
+  deletePlaylist,
+  renamePlaylist,
+  setPlaylistImage,
+} from '../playlists';
 import {MAX_PINS, isPinned, rowId, sortPinned, togglePin, usePins} from '../pins';
 import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
 import {overlayDownloadArtwork} from '../downloads';
+import {useActiveTrack} from '../player';
 import {toast} from '../toast';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
@@ -54,17 +62,48 @@ function idOf(c: Collection): string {
   });
 }
 
-export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
+export function LibraryScreen({
+  onOpen,
+  visible = true,
+}: {
+  onOpen: (c: Collection) => void;
+  /** The tab stays mounted now; this flags when it's actually on screen so
+   *  downloads can re-scan quietly without a full-screen spinner. */
+  visible?: boolean;
+}) {
   const [filter, setFilter] = useState<Filter>('all');
   const [downloads, setDownloads] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  /** The row a long-press opened options for. */
+  const [menuFor, setMenuFor] = useState<Collection | null>(null);
+  const [renaming, setRenaming] = useState<Collection | null>(null);
+  const [renameText, setRenameText] = useState('');
 
   const likes = useLikes();
   const pins = usePins();
   const artists = useFollowedArtists();
   const library = useLibrary(likes, downloads);
+
+  // Which collection the playing song belongs to — its title renders green,
+  // so the library answers "what am I listening to" at a glance.
+  const engineTrack = useActiveTrack();
+  const isPlayingFrom = useCallback(
+    (c: Collection) => {
+      if (!engineTrack || !c.tracks.length) {
+        return false;
+      }
+      const at = String(engineTrack.title ?? '').toLowerCase();
+      const aa = String(engineTrack.artist ?? '').toLowerCase();
+      return c.tracks.some(
+        t =>
+          (t.title || '').toLowerCase() === at &&
+          (t.artist || '').toLowerCase() === aa,
+      );
+    },
+    [engineTrack],
+  );
 
   // Followed artists render as rows too, so one list handles everything.
   const withArtists = useMemo(
@@ -94,9 +133,14 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
     }
   }, []);
 
+  // Re-scan whenever the tab comes on screen. Only the FIRST scan shows the
+  // spinner (`loading` starts true); later ones swap the data in quietly, so
+  // returning to the tab is instant.
   useEffect(() => {
-    loadDownloads();
-  }, [loadDownloads]);
+    if (visible) {
+      loadDownloads();
+    }
+  }, [visible, loadDownloads]);
 
   const rows = useMemo(() => {
     const matches = (c: Collection) => {
@@ -111,22 +155,82 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
           return true;
       }
     };
-    return sortPinned(withArtists.filter(matches), pins, idOf);
+    // Liked Songs and Downloaded are fixtures: always first, in that order.
+    // Pins reorder only what comes after them.
+    const list = withArtists.filter(matches);
+    const fixed = list.filter(c => c.kind === 'liked' || c.kind === 'downloads');
+    const rest = list.filter(c => c.kind !== 'liked' && c.kind !== 'downloads');
+    return [...fixed, ...sortPinned(rest, pins, idOf)];
   }, [withArtists, pins, filter]);
 
+  /** Only playlists pin — not artists, not albums, and not the fixtures. */
+  const canPin = (c: Collection) =>
+    c.kind === 'userPlaylist' || c.kind === 'sourcePlaylist';
+
+  /** Long-press opens the options sheet; what's in it depends on the row. */
   const onLongPress = useCallback((c: Collection) => {
-    // Liked Songs and Downloads are already pinned to the top by construction —
-    // pinning them would be a no-op the user couldn't see.
-    if (c.kind === 'liked' || c.kind === 'downloads') {
+    if (c.kind === 'liked' || c.kind === 'downloads' || c.kind === 'artist') {
       return;
     }
+    if (c.kind === 'album') {
+      return; // nothing to offer yet — albums unsave from their own screen
+    }
+    setMenuFor(c);
+  }, []);
+
+  const doPin = useCallback((c: Collection) => {
     const result = togglePin(idOf(c));
     if (result === 'full') {
       toast(`You can pin up to ${MAX_PINS}. Unpin one first.`);
     } else {
       toast(result === 'pinned' ? `Pinned ${c.name}` : `Unpinned ${c.name}`);
     }
+    setMenuFor(null);
   }, []);
+
+  const playlistIdOf = (c: Collection) => c.id.replace(/^pl:/, '');
+
+  const doChangeCover = useCallback(async (c: Collection) => {
+    setMenuFor(null);
+    const native = NativeModules.Backend as {pickImage?: () => Promise<string>};
+    if (typeof native.pickImage !== 'function') {
+      toast('Changing the cover needs the newest APK.');
+      return;
+    }
+    try {
+      const uri = await native.pickImage();
+      if (uri) {
+        setPlaylistImage(playlistIdOf(c), uri);
+        toast('Cover updated');
+      }
+    } catch {
+      toast('Could not use that image');
+    }
+  }, []);
+
+  const doDelete = useCallback((c: Collection) => {
+    setMenuFor(null);
+    Alert.alert(`Delete "${c.name}"?`, 'The songs themselves are not touched.', [
+      {text: 'Cancel', style: 'cancel'},
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          deletePlaylist(playlistIdOf(c));
+          toast(`Deleted ${c.name}`);
+        },
+      },
+    ]);
+  }, []);
+
+  const submitRename = useCallback(() => {
+    if (renaming && renameText.trim()) {
+      renamePlaylist(playlistIdOf(renaming), renameText.trim());
+      toast('Playlist renamed');
+    }
+    setRenaming(null);
+    setRenameText('');
+  }, [renaming, renameText]);
 
   const submitNew = useCallback(() => {
     const pl = createPlaylist(newName);
@@ -189,7 +293,12 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
               delayLongPress={350}>
               <CollectionArt collection={item} size={56} />
               <View style={styles.rowText}>
-                <Text style={styles.rowTitle} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.rowTitle,
+                    isPlayingFrom(item) && styles.rowTitlePlaying,
+                  ]}
+                  numberOfLines={1}>
                   {item.name}
                 </Text>
                 <View style={styles.metaLine}>
@@ -210,6 +319,116 @@ export function LibraryScreen({onOpen}: {onOpen: (c: Collection) => void}) {
           )}
         />
       )}
+
+      {/* Long-press options: pin, and for your own playlists rename / cover /
+          delete. A sheet, not an instant action — pinning by accident was
+          worse than one extra tap. */}
+      <Modal
+        visible={!!menuFor}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMenuFor(null)}>
+        <TouchableOpacity
+          style={styles.sheetScrim}
+          activeOpacity={1}
+          onPress={() => setMenuFor(null)}
+        />
+        {menuFor && (
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle} numberOfLines={1}>
+              {menuFor.name}
+            </Text>
+            {canPin(menuFor) && (
+              <TouchableOpacity
+                style={styles.sheetRow}
+                activeOpacity={0.7}
+                onPress={() => doPin(menuFor)}>
+                <Pin size={20} color={C.sub} />
+                <Text style={styles.sheetLabel}>
+                  {isPinned(idOf(menuFor)) ? 'Unpin' : 'Pin to top'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {menuFor.kind === 'userPlaylist' && (
+              <>
+                <TouchableOpacity
+                  style={styles.sheetRow}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setRenaming(menuFor);
+                    setRenameText(menuFor.name);
+                    setMenuFor(null);
+                  }}>
+                  <Pencil size={20} color={C.sub} />
+                  <Text style={styles.sheetLabel}>Rename</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.sheetRow}
+                  activeOpacity={0.7}
+                  onPress={() => doChangeCover(menuFor)}>
+                  <ImagePlus size={20} color={C.sub} />
+                  <Text style={styles.sheetLabel}>Change cover</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.sheetRow}
+                  activeOpacity={0.7}
+                  onPress={() => doDelete(menuFor)}>
+                  <Trash2 size={20} color={C.danger} />
+                  <Text style={[styles.sheetLabel, styles.sheetDanger]}>
+                    Delete playlist
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
+      </Modal>
+
+      {/* Rename dialog — same shape as "New playlist". */}
+      <Modal
+        visible={!!renaming}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenaming(null)}>
+        <View style={styles.scrim}>
+          <View style={styles.dialog}>
+            <Text style={styles.dialogTitle}>Rename playlist</Text>
+            <TextInput
+              value={renameText}
+              onChangeText={setRenameText}
+              placeholder="New name"
+              placeholderTextColor={C.faint}
+              style={styles.input}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={submitRename}
+            />
+            <View style={styles.dialogRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  setRenaming(null);
+                  setRenameText('');
+                }}
+                style={styles.dialogBtn}>
+                <Text style={styles.dialogCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={submitRename}
+                disabled={!renameText.trim()}
+                style={styles.dialogBtn}>
+                <Text
+                  style={[
+                    styles.dialogOk,
+                    !renameText.trim() && styles.dialogDisabled,
+                  ]}>
+                  Save
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={creating}
@@ -296,6 +515,7 @@ const styles = StyleSheet.create({
   },
   rowText: {flex: 1, minWidth: 0},
   rowTitle: {...T.rowTitle, color: C.text, fontSize: 16},
+  rowTitlePlaying: {color: C.accent},
   metaLine: {flexDirection: 'row', alignItems: 'center', marginTop: 3},
   pin: {marginRight: 5, transform: [{rotate: '45deg'}]},
   rowSub: {...T.sub, color: C.sub, flex: 1},
@@ -331,4 +551,36 @@ const styles = StyleSheet.create({
   dialogCancel: {color: C.sub, fontSize: 14, fontWeight: '700'},
   dialogOk: {color: C.accent, fontSize: 14, fontWeight: '700'},
   dialogDisabled: {color: C.faint},
+  sheetScrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
+  sheet: {
+    backgroundColor: C.surfaceHi,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: 26,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginTop: 8,
+  },
+  sheetTitle: {
+    ...T.rowTitle,
+    color: C.text,
+    paddingHorizontal: S.gutter,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: S.gutter,
+    paddingVertical: 14,
+  },
+  sheetLabel: {fontSize: 15, color: C.text},
+  sheetDanger: {color: C.danger},
 });

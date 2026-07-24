@@ -39,6 +39,7 @@ import {
 } from '../player';
 import {useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
+import {toward, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
 
@@ -75,16 +76,25 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
     [],
   );
 
+  const artworkForColor = track
+    ? getBestArtworkUrl(track)
+    : String(active?.artwork ?? '');
+  // The bar takes on the song's colour, darkened enough that the white text
+  // keeps its contrast — same trick as the WebView build.
+  const tint = useArtworkColor(artworkForColor || undefined);
+
   if (!active) {
     return null;
   }
 
   const playing = state === State.Playing;
-  const artwork = track ? getBestArtworkUrl(track) : String(active.artwork ?? '');
+  const artwork = artworkForColor;
   const pct = duration > 0 ? Math.min(1, position / duration) : 0;
 
   return (
-    <View style={styles.wrap} {...pan.panHandlers}>
+    <View
+      style={[styles.wrap, !!tint && {backgroundColor: toward(tint, 0.45)}]}
+      {...pan.panHandlers}>
       {/* The BAR stays put; only its contents travel. Sliding the whole bar
           made the chrome look like it was falling off the screen every skip. */}
       <View style={styles.slider}>
