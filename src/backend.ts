@@ -156,6 +156,30 @@ export type Lyrics = {
 
 /** Synced lyrics (lrclib) with a plain-text fallback. The backend gates matches
  *  on artist + duration, so passing duration materially improves accuracy. */
+/**
+ * YouTube titles carry video cruft — "(Official Music Video)", "[Lyrics]",
+ * "| Channel", "ft. X", "4K" — that a lyrics database will never match. Strip it
+ * so a YT-sourced track looks up the same as a clean JioSaavn one. Left alone,
+ * every YouTube song read "No lyrics found".
+ */
+function cleanForLyrics(title: string): string {
+  return (
+    title
+      // bracketed / parenthesised video tags
+      .replace(
+        /[([]\s*(official|lyric|lyrics|audio|video|music video|visuali[sz]er|hd|4k|mv|full song|slowed|reverb)[^)\]]*[)\]]/gi,
+        '',
+      )
+      // trailing "| channel name" or "- Topic"
+      .replace(/\s*[|]\s*.*$/, '')
+      .replace(/\s*-\s*Topic\s*$/i, '')
+      // feat./ft. tails
+      .replace(/\s*(feat\.?|ft\.?|featuring)\s+.*$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim() || title
+  );
+}
+
 export async function getLyrics(
   title: string,
   artist: string,
@@ -164,7 +188,8 @@ export async function getLyrics(
   // Hand-built query, NOT URLSearchParams: Hermes ships a stub whose
   // .toString() throws "not implemented", which made every lyrics call fail
   // before the request even left the app — "No lyrics found" for every song.
-  let q = `title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
+  const cleanTitle = cleanForLyrics(title);
+  let q = `title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(artist)}`;
   if (durationMs) {
     q += `&duration=${Math.round(durationMs / 1000)}`;
   }

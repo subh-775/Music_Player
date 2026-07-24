@@ -6,7 +6,7 @@
  * when the user hasn't asked for them.
  */
 import React from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text} from 'react-native';
 import {C} from '../theme';
 import {useSettings} from '../store';
 import {getPlayableSource} from '../tracks';
@@ -33,11 +33,8 @@ export function SourceBadge({track}: {track: Track | null}) {
   if (!meta) {
     return null;
   }
-  return (
-    <View style={[styles.pill, {backgroundColor: `${meta.tint}26`}]}>
-      <Text style={[styles.text, {color: meta.tint}]}>{meta.label}</Text>
-    </View>
-  );
+  // Just the coloured word — no pill, no tinted rectangle behind it.
+  return <Text style={[styles.text, {color: meta.tint}]}>{meta.label}</Text>;
 }
 
 /**
@@ -70,20 +67,11 @@ export function QualityBadge({
   if (!kbps) {
     return null;
   }
-  return (
-    <View style={[styles.pill, styles.quality]}>
-      <Text style={[styles.text, styles.qualityText]}>{kbps} kbps</Text>
-    </View>
-  );
+  // Just the number — no pill behind it, per the request.
+  return <Text style={[styles.text, styles.qualityText]}>{kbps}</Text>;
 }
 
 const styles = StyleSheet.create({
-  pill: {
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2.5,
-  },
-  quality: {backgroundColor: 'rgba(255,255,255,0.10)'},
-  text: {fontSize: 10, fontWeight: '700', lineHeight: 12},
+  text: {fontSize: 10.5, fontWeight: '700', lineHeight: 13},
   qualityText: {color: C.sub},
 });

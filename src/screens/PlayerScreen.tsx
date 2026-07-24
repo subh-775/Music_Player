@@ -58,7 +58,6 @@ import {enqueueDownload, isDownloaded, useDownloadedIds} from '../downloads';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
-  State,
   seekTo,
   setRepeat,
   shuffleQueue,
@@ -67,7 +66,7 @@ import {
   sourceTrackFor,
   togglePlay,
   useActiveTrack,
-  usePlaybackState,
+  useIsPlaying,
   useProgress,
 } from '../player';
 import {useLike} from '../store';
@@ -102,7 +101,7 @@ export function PlayerScreen({
   onOpenArtist: (credit: string) => void;
 }) {
   const active = useActiveTrack();
-  const {state} = usePlaybackState() as {state?: State};
+  const playing = useIsPlaying();
   const {position, duration} = useProgress(500);
   const output = useAudioOutput();
 
@@ -131,7 +130,6 @@ export function PlayerScreen({
   const [seekFlash, setSeekFlash] = useState<{
     side: 1 | -1;
     secs: number;
-    nonce: number;
   } | null>(null);
   const tapRef = useRef<{t: number; side: 1 | -1; secs: number} | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,9 +143,8 @@ export function PlayerScreen({
       tapRef.current = {t: now, side, secs: stacked};
 
       seekTo(Math.max(0, position + side * stacked));
-      // nonce changes every tap, which is what replays the animation when the
-      // side and the total happen to be unchanged.
-      setSeekFlash({side, secs: stacked, nonce: now});
+      // The disc holds steady while it's up; only the number changes here.
+      setSeekFlash({side, secs: stacked});
       if (flashTimer.current) {
         clearTimeout(flashTimer.current);
       }
@@ -296,7 +293,6 @@ export function PlayerScreen({
     return null;
   }
 
-  const playing = state === State.Playing;
   const artwork = track ? getBestArtworkUrl(track) : String(active.artwork ?? '');
   const title = cleanText(String(active.title ?? ''));
   const artists = splitArtists(String(active.artist ?? '')).join(', ');
@@ -369,11 +365,7 @@ export function PlayerScreen({
               </View>
 
               {!!seekFlash && (
-                <SeekPeek
-                  side={seekFlash.side}
-                  seconds={seekFlash.secs}
-                  nonce={seekFlash.nonce}
-                />
+                <SeekPeek side={seekFlash.side} seconds={seekFlash.secs} />
               )}
             </View>
           )}

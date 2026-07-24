@@ -1,10 +1,12 @@
 /**
  * Double-tap seek feedback, YouTube-style.
  *
- * A soft half-disc blooms from the tapped edge and three chevrons light up ONE
- * AFTER ANOTHER, travelling in the direction you're going. The whole thing
- * fades as it leaves rather than blinking off, so a fast triple-tap reads as
- * one continuous gesture instead of three flashes.
+ * The half-disc blooms in ONCE when the gesture starts and then holds steady —
+ * extra taps only bump the number (10 → 20 → 30). It does NOT replay the bloom
+ * on every tap, which read as a flicker. The three chevrons run a continuous
+ * loop while it's up, so the motion is calm and constant rather than restarting
+ * under the finger. It fades out only when the gesture ends (the component
+ * unmounts).
  */
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
@@ -14,46 +16,34 @@ import {C} from '../theme';
 export function SeekPeek({
   side,
   seconds,
-  nonce,
 }: {
   side: 1 | -1;
   seconds: number;
-  /** Changes on every tap, so a repeat tap replays the animation. */
-  nonce: number;
 }) {
+  // Presence: blooms in on mount, holds at 1. Only `side` re-arms it, because a
+  // tap on the OTHER edge is a genuinely new gesture; a bigger number is not.
   const bloom = useRef(new Animated.Value(0)).current;
   const chevrons = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
-    bloom.setValue(0);
-    chevrons.forEach(c => c.setValue(0));
+    Animated.timing(bloom, {
+      toValue: 1,
+      duration: 140,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [side, bloom]);
 
-    Animated.parallel([
-      // Bloom in fast, hold, then ease out — the fade is the longest part so
-      // the disc doesn't vanish mid-gesture.
-      Animated.sequence([
-        Animated.timing(bloom, {
-          toValue: 1,
-          duration: 110,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.delay(180),
-        Animated.timing(bloom, {
-          toValue: 0,
-          duration: 320,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-      // Chevrons chase each other outward, 90ms apart.
+  useEffect(() => {
+    // One continuous chase, looping for as long as the disc is up.
+    const loop = Animated.loop(
       Animated.stagger(
-        90,
+        140,
         chevrons.map(c =>
           Animated.sequence([
             Animated.timing(c, {
               toValue: 1,
-              duration: 150,
+              duration: 260,
               easing: Easing.out(Easing.cubic),
               useNativeDriver: true,
             }),
@@ -66,8 +56,10 @@ export function SeekPeek({
           ]),
         ),
       ),
-    ]).start();
-  }, [nonce, bloom, chevrons]);
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [chevrons]);
 
   const Chevron = side === 1 ? ChevronRight : ChevronLeft;
 
@@ -83,7 +75,7 @@ export function SeekPeek({
             {
               scale: bloom.interpolate({
                 inputRange: [0, 1],
-                outputRange: [0.86, 1],
+                outputRange: [0.9, 1],
               }),
             },
           ],
@@ -91,19 +83,7 @@ export function SeekPeek({
       ]}>
       <View style={styles.row}>
         {chevrons.map((c, i) => (
-          <Animated.View
-            key={i}
-            style={{
-              opacity: c,
-              transform: [
-                {
-                  translateX: c.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, side * 5],
-                  }),
-                },
-              ],
-            }}>
+          <Animated.View key={i} style={{opacity: c.interpolate({inputRange: [0, 1], outputRange: [0.35, 1]})}}>
             <Chevron size={22} color={C.text} strokeWidth={2.6} />
           </Animated.View>
         ))}

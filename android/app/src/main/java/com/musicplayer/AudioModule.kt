@@ -1,10 +1,14 @@
 package com.musicplayer
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -282,8 +286,117 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         }.start()
     }
 
+    // ─── Real crossfade: a SECOND player for the overlap ────────────────────
+    //
+    // react-native-track-player runs one ExoPlayer → one output, so from JS we
+    // can only fade that single stream up or down. True crossfade needs two
+    // songs audible at once. This is that second stream: a plain MediaPlayer
+    // (no new dependency, and it does NOT grab audio focus, so it won't fight
+    // RNTP) that plays the INCOMING track rising while JS fades the outgoing
+    // RNTP track down. Android's own mixer sums the two — that's the overlap.
+    //
+    // The handoff is driven from JS on the real track change: it reads
+    // crossfadePosition(), seeks RNTP there under cover of this player's audio,
+    // then stopCrossfade() cuts this one. Kept entirely on the main looper so
+    // MediaPlayer's state machine and its callbacks never race.
+    private var cfPlayer: MediaPlayer? = null
+    private var cfRamp: Runnable? = null
+    private val cfHandler = Handler(Looper.getMainLooper())
+
+    @ReactMethod
+    fun startCrossfade(url: String, durationMs: Int, promise: Promise) {
+        cfHandler.post {
+            try {
+                stopCfInternal()
+                val mp = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build(),
+                    )
+                    setDataSource(url)
+                    setVolume(0f, 0f)
+                    setOnPreparedListener { p ->
+                        try {
+                            p.start()
+                            rampUp(p, durationMs)
+                        } catch (_: Exception) {}
+                    }
+                    // A dead stream must not crash — just abandon the overlap;
+                    // the outgoing track still ends and RNTP advances normally.
+                    setOnErrorListener { _, _, _ ->
+                        stopCfInternal()
+                        true
+                    }
+                    prepareAsync()
+                }
+                cfPlayer = mp
+                promise.resolve(true)
+            } catch (e: Exception) {
+                Log.w(TAG, "startCrossfade failed: ${e.message}")
+                stopCfInternal()
+                promise.resolve(false)
+            }
+        }
+    }
+
+    private fun rampUp(mp: MediaPlayer, durationMs: Int) {
+        val steps = 16
+        val stepMs = (durationMs / steps).coerceAtLeast(30).toLong()
+        var i = 0
+        val r = object : Runnable {
+            override fun run() {
+                if (cfPlayer !== mp) return // superseded — stop ramping
+                i++
+                val v = (i.toFloat() / steps).coerceIn(0f, 1f)
+                try {
+                    mp.setVolume(v, v)
+                } catch (_: Exception) {
+                    return
+                }
+                if (i < steps) cfHandler.postDelayed(this, stepMs)
+            }
+        }
+        cfRamp = r
+        cfHandler.postDelayed(r, stepMs)
+    }
+
+    /** Where the overlap player has reached, in seconds — so JS can seek RNTP to
+     *  the same spot for a near-seamless handoff. -1 when nothing is crossfading. */
+    @ReactMethod
+    fun crossfadePosition(promise: Promise) {
+        cfHandler.post {
+            val mp = cfPlayer
+            promise.resolve(
+                try {
+                    if (mp != null) mp.currentPosition / 1000.0 else -1.0
+                } catch (_: Exception) {
+                    -1.0
+                },
+            )
+        }
+    }
+
+    @ReactMethod
+    fun stopCrossfade(promise: Promise) {
+        cfHandler.post {
+            stopCfInternal()
+            promise.resolve(true)
+        }
+    }
+
+    private fun stopCfInternal() {
+        cfRamp?.let { cfHandler.removeCallbacks(it) }
+        cfRamp = null
+        try { cfPlayer?.stop() } catch (_: Exception) {}
+        try { cfPlayer?.release() } catch (_: Exception) {}
+        cfPlayer = null
+    }
+
     override fun onCatalystInstanceDestroy() {
         release()
+        stopCfInternal()
     }
 
     companion object {

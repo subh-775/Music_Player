@@ -230,8 +230,12 @@ export function QueuePane() {
         const recHeader =
           i === firstRecommended && firstRecommended > 0 && dragFrom === null;
 
+        // Key by the track's own identity, NOT the index. With the index in the
+        // key, a reorder changed every moved row's key, so React unmounted and
+        // remounted them — the artwork re-decoded and the list visibly lagged
+        // catching up to the drop. A stable key lets React MOVE the same row.
         return (
-          <React.Fragment key={`${t.id ?? t.url}-${i}`}>
+          <React.Fragment key={String(t.id ?? t.url ?? i)}>
             {recHeader && (
               <Text style={styles.section}>Recommended for you</Text>
             )}

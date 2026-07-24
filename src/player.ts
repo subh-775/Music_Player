@@ -12,17 +12,25 @@
  * everything here is guarded and `isAvailable()` reports the truth instead of
  * the app crashing.
  */
+import {useEffect, useState} from 'react';
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
   Event,
   RepeatMode,
   State,
+  usePlaybackState,
 } from 'react-native-track-player';
 import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
 import {currentQuality, readSettings} from './store';
 import {cleanText, getTrackId, isPlayableTrack, normalizeTrack} from './tracks';
-import {applyAudioEffects} from './audioEffects';
+import {
+  applyAudioEffects,
+  beginCrossfade,
+  crossfadePosition,
+  crossfadeSupported,
+  endCrossfade,
+} from './audioEffects';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
 
@@ -153,10 +161,15 @@ export async function setupPlayer(): Promise<boolean> {
           true,
         );
       } catch {}
-      // Crossfade's other half: if the outgoing song faded down, bring the
-      // incoming one up from quiet. A no-op (just ensures full volume) on a
-      // normal advance or a manual skip.
-      fadeInIfNeeded();
+      // Crossfade's other half. With a real overlap running, hand off to the
+      // incoming track (seek RNTP to where the overlap reached, then cut it).
+      // Otherwise bring the incoming one up from quiet, or just ensure full
+      // volume on a normal advance / manual skip.
+      if (cfActive) {
+        await handoffCrossfade();
+      } else {
+        fadeInIfNeeded();
+      }
       // Effects die with the audio session; re-attach for the new one.
       applyAudioEffects();
     });
@@ -324,6 +337,7 @@ export async function addToQueue(track: Track): Promise<void> {
 /** Skips always resume playback: changing song while paused and getting
  *  silence reads as the skip having failed. */
 export async function skipNext(): Promise<void> {
+  cancelCrossfade(); // a manual skip isn't a crossfade — kill any overlap
   try {
     await TrackPlayer.skipToNext();
     await TrackPlayer.play();
@@ -335,6 +349,7 @@ export async function skipNext(): Promise<void> {
 /** Restart the track first; only jump back when already near the start — the
  *  behaviour every other player has, so one stray tap can't lose your place. */
 export async function skipPrevious(): Promise<void> {
+  cancelCrossfade();
   try {
     const pos = await TrackPlayer.getPosition();
     if (pos > 3) {
@@ -383,6 +398,7 @@ export async function togglePlay(): Promise<void> {
     state === State.Buffering ||
     state === State.Loading;
   if (active) {
+    cancelCrossfade(); // pausing must silence the overlap player too
     await TrackPlayer.pause();
   } else {
     await TrackPlayer.play();
@@ -390,6 +406,7 @@ export async function togglePlay(): Promise<void> {
 }
 
 export async function stop(): Promise<void> {
+  cancelCrossfade();
   try {
     await TrackPlayer.reset();
     clearResume(); // an explicit stop means "don't reopen on this"
@@ -501,7 +518,53 @@ async function prefetchNext(): Promise<void> {
 let fadeTimer: ReturnType<typeof setInterval> | null = null;
 let fadedFor = '';
 let didFadeOut = false; // the last advance faded down — so fade the next one UP
+// Bumped whenever a new fade starts. Any in-flight ramp checks this and bails
+// the instant a newer one begins, so the outgoing fade-down and the incoming
+// fade-up can never fight over setVolume (which left the next song stuck quiet).
+let fadeGen = 0;
+// True while the native overlap player is running toward a handoff — a REAL
+// crossfade (two songs audible at once) rather than the fade-down/up fallback.
+let cfActive = false;
 let getCrossfadeSeconds: () => number = () => 0;
+
+/**
+ * Tear down a running crossfade WITHOUT the handoff seek — for a manual skip or
+ * stop, where the user is choosing the next track rather than letting the queue
+ * flow into it. Restores full volume so the chosen track isn't left quiet.
+ */
+function cancelCrossfade(): void {
+  if (!cfActive) {
+    return;
+  }
+  cfActive = false;
+  didFadeOut = false;
+  fadeGen++; // abort any in-flight RNTP ramp
+  endCrossfade();
+  TrackPlayer.setVolume(1).catch(() => {});
+}
+
+/**
+ * The overlap reached the track boundary. RNTP has just advanced to the
+ * incoming track at position 0, still quiet from the fade-down. Seek it to
+ * where the overlap player has reached — under cover of that player's audio, so
+ * the re-buffer is inaudible — bring RNTP back to full, THEN cut the overlap.
+ */
+async function handoffCrossfade(): Promise<void> {
+  cfActive = false;
+  fadeGen++; // no stray RNTP ramp during the handoff
+  try {
+    const pos = await crossfadePosition();
+    if (pos > 0.5) {
+      await TrackPlayer.seekTo(pos);
+      // Give RNTP a beat to buffer at pos while the overlap still covers sound.
+      await new Promise(r => setTimeout(r, 250));
+    }
+  } catch {}
+  try {
+    await TrackPlayer.setVolume(1);
+  } catch {}
+  await endCrossfade();
+}
 
 /** Current crossfade span; readable outside the watcher (the fade-in half). */
 function crossfadeSpanRef(): number {
@@ -522,15 +585,21 @@ async function fadeInIfNeeded(): Promise<void> {
     return;
   }
   didFadeOut = false;
+  const gen = ++fadeGen;
   const seconds = Math.min(crossfadeSpanRef(), 3) || 2;
-  const steps = 8;
+  const steps = 12;
   try {
     await TrackPlayer.setVolume(0);
     for (let i = 1; i <= steps; i++) {
+      if (gen !== fadeGen) {
+        return; // a newer fade took over — stop ramping
+      }
       await TrackPlayer.setVolume(i / steps);
       await new Promise(r => setTimeout(r, (seconds * 1000) / steps));
     }
-    await TrackPlayer.setVolume(1);
+    if (gen === fadeGen) {
+      await TrackPlayer.setVolume(1);
+    }
   } catch {
     try {
       await TrackPlayer.setVolume(1);
@@ -583,15 +652,44 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
         // volume right before ending, so the fade was inaudible. The incoming
         // track is faded back up by fadeInIfNeeded() on the track change.
         didFadeOut = true;
-        const steps = 8;
+
+        // Real crossfade: start the SECOND stream on the incoming track, rising,
+        // so it overlaps this fade-down. Only if the build supports it and the
+        // next track's stream URL is known; otherwise this degrades to the plain
+        // fade-down/up handled by fadeInIfNeeded on the track change.
+        if (crossfadeSupported && !cfActive && active != null) {
+          try {
+            const q = await TrackPlayer.getQueue();
+            const nextUrl = q[active + 1]?.url;
+            const repeatOne =
+              (await TrackPlayer.getRepeatMode()) === RepeatMode.Track;
+            if (
+              nextUrl &&
+              !repeatOne &&
+              (await beginCrossfade(String(nextUrl), Math.round(span * 1000)))
+            ) {
+              cfActive = true;
+            }
+          } catch {
+            /* couldn't resolve the next stream — plain fade it is */
+          }
+        }
+
+        const gen = ++fadeGen;
+        const steps = 12;
         for (let i = 1; i <= steps; i++) {
-          await TrackPlayer.setVolume(Math.max(0.05, 1 - i / steps));
+          if (gen !== fadeGen) {
+            break; // the track changed and fade-in took over
+          }
+          await TrackPlayer.setVolume(Math.max(0.04, 1 - i / steps));
           await new Promise(r => setTimeout(r, (span * 1000) / steps));
         }
       } else if (remaining > span + 1 && fadedFor === key) {
         // Seeked backwards out of the fade zone — cancel it and go back to full.
         fadedFor = '';
         didFadeOut = false;
+        fadeGen++; // abort any in-flight fade-down
+        cancelCrossfade(); // and drop any overlap that had started
         try {
           await TrackPlayer.setVolume(1);
         } catch {}
@@ -600,6 +698,34 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       /* engine not up */
     }
   }, 1000);
+}
+
+/**
+ * Is the player playing — but STABLE across a seek.
+ *
+ * Seeking makes ExoPlayer flash through Buffering/Loading/Ready before it
+ * settles back to Playing, and reading the raw state made the play/pause icon
+ * blink pause→play→pause on every scrub. Only the definite states flip this;
+ * the transient ones hold the last real intent.
+ */
+export function useIsPlaying(): boolean {
+  const {state} = usePlaybackState() as {state?: State};
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (state === State.Playing) {
+      setPlaying(true);
+    } else if (
+      state === State.Paused ||
+      state === State.Stopped ||
+      state === State.Ended ||
+      state === State.None ||
+      state === State.Error
+    ) {
+      setPlaying(false);
+    }
+    // Buffering / Loading / Ready / Connecting: leave the icon as-is.
+  }, [state]);
+  return playing;
 }
 
 export {TrackPlayer, State, Event, RepeatMode};

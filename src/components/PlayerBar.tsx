@@ -29,13 +29,12 @@ import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {Marquee} from './Marquee';
 import {
-  State,
   skipNext,
   skipPrevious,
   sourceTrackFor,
   togglePlay,
   useActiveTrack,
-  usePlaybackState,
+  useIsPlaying,
   useProgress,
 } from '../player';
 import {useLike} from '../store';
@@ -46,7 +45,7 @@ const SWIPE_COMMIT = 56;
 
 export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const active = useActiveTrack();
-  const {state} = usePlaybackState() as {state?: State};
+  const playing = useIsPlaying();
   const {position, duration} = useProgress(1000);
   const output = useAudioOutput();
 
@@ -99,7 +98,6 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
     return null;
   }
 
-  const playing = state === State.Playing;
   const artwork = artworkForColor;
   const pct = duration > 0 ? Math.min(1, position / duration) : 0;
 
@@ -127,7 +125,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           />
           {output ? (
             <View style={styles.outputRow}>
-              <Bluetooth size={11} color={C.accent} />
+              <Bluetooth size={10} color={C.accent} />
               <Text style={styles.output} numberOfLines={1}>
                 {output}
               </Text>
@@ -142,7 +140,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
       </View>
 
       <View style={styles.controls}>
-        {!!output && <Headphones size={20} color={C.accent} />}
+        {!!output && <Headphones size={18} color={C.accent} />}
 
         <TouchableOpacity onPress={toggle} hitSlop={8} style={styles.ctl}>
           <Heart
@@ -191,20 +189,20 @@ const styles = StyleSheet.create({
     padding: 8,
     minWidth: 0,
   },
-  art: {width: 44, height: 44, borderRadius: 4, backgroundColor: C.surface},
+  art: {width: 44, height: 44, borderRadius: 5, backgroundColor: C.surface},
   artFallback: {backgroundColor: C.bg},
   text: {flex: 1, minWidth: 0},
-  title: {fontSize: 13.5, fontWeight: '700', color: C.text},
-  artist: {fontSize: 11.5, color: C.sub, marginTop: 2},
-  outputRow: {flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2},
-  output: {fontSize: 11.5, color: C.accent, flexShrink: 1},
+  title: {fontSize: 13, fontWeight: '700', color: C.text, letterSpacing: 0.1},
+  artist: {fontSize: 12, color: C.sub, marginTop: 1.5},
+  outputRow: {flexDirection: 'row', alignItems: 'center', gap: 3.5, marginTop: 2},
+  output: {fontSize: 10.5, fontWeight: '600', color: C.accent, flexShrink: 1},
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     paddingRight: S.gutter - 8,
   },
-  ctl: {padding: 5},
+  ctl: {padding: 6},
   progressTrack: {
     position: 'absolute',
     left: 8,

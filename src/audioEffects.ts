@@ -14,6 +14,9 @@ type AudioNative = {
   getCapabilities?: () => Promise<EqCapabilities>;
   setEqualizer?: (enabled: boolean, gainsDb: number[]) => Promise<boolean>;
   setNormalize?: (enabled: boolean) => Promise<boolean>;
+  startCrossfade?: (url: string, durationMs: number) => Promise<boolean>;
+  crossfadePosition?: () => Promise<number>;
+  stopCrossfade?: () => Promise<boolean>;
 };
 
 export type EqCapabilities = {
@@ -28,6 +31,41 @@ const native = (NativeModules.Audio ?? {}) as AudioNative;
 /** False on a build without the native module — the UI says so rather than
  *  offering sliders that quietly do nothing. */
 export const eqSupported = typeof native.setEqualizer === 'function';
+
+/** True only on a build that shipped the overlap player (the crossfade half). */
+export const crossfadeSupported = typeof native.startCrossfade === 'function';
+
+/** Start the second stream: the INCOMING track, fading up over `durationMs`,
+ *  played alongside RNTP's outgoing track for a real overlap. */
+export async function beginCrossfade(
+  url: string,
+  durationMs: number,
+): Promise<boolean> {
+  try {
+    return (await native.startCrossfade?.(url, durationMs)) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/** How far the overlap player has reached, in seconds (-1 when idle) — used to
+ *  seek RNTP to the same spot before cutting the overlap. */
+export async function crossfadePosition(): Promise<number> {
+  try {
+    return (await native.crossfadePosition?.()) ?? -1;
+  } catch {
+    return -1;
+  }
+}
+
+/** Cut the overlap player. Safe to call when nothing is crossfading. */
+export async function endCrossfade(): Promise<void> {
+  try {
+    await native.stopCrossfade?.();
+  } catch {
+    /* nothing playing — fine */
+  }
+}
 
 export async function getEqCapabilities(): Promise<EqCapabilities> {
   if (typeof native.getCapabilities !== 'function') {
