@@ -19,7 +19,7 @@ import TrackPlayer, {
   RepeatMode,
   State,
 } from 'react-native-track-player';
-import {apiUrl, getRadio, type Track} from './backend';
+import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
 import {currentQuality, readSettings} from './store';
 import {cleanText, getTrackId, isPlayableTrack, normalizeTrack} from './tracks';
 import {applyAudioEffects} from './audioEffects';
@@ -453,6 +453,41 @@ async function topUpFromRadio(): Promise<void> {
 }
 
 /**
+ * Warm the next track's stream once we're ~3s into the current one. Resolving
+ * the source (source id -> signed CDN URL) is the slow part of a skip; doing it
+ * ahead of time on the backend's cache makes the skip feel instant. Downloaded
+ * tracks need no warming (they're a local file), and each next-track is warmed
+ * at most once.
+ */
+let prefetchedFor = '';
+
+async function prefetchNext(): Promise<void> {
+  try {
+    const {position} = await TrackPlayer.getProgress();
+    if (position < 3) {
+      return;
+    }
+    const idx = await TrackPlayer.getActiveTrackIndex();
+    if (idx == null) {
+      return;
+    }
+    const key = `${idx}`;
+    if (prefetchedFor === key) {
+      return;
+    }
+    const next = queueSource[idx + 1];
+    if (!next || next.file_path) {
+      prefetchedFor = key;
+      return;
+    }
+    prefetchedFor = key;
+    await getStreamInfo(next, currentQuality());
+  } catch {
+    // Best-effort — a failed warm just means the skip resolves normally.
+  }
+}
+
+/**
  * Fade between songs.
  *
  * NOT a true crossfade, and the setting's hint says so. A real one overlaps two
@@ -511,6 +546,11 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
   fadeTimer = setInterval(async () => {
     // Piggybacked on this tick: keep the queue topped up with similar songs.
     topUpFromRadio().catch(() => {});
+
+    // …and warm the NEXT track's stream a few seconds in, so pressing skip (or
+    // an auto-advance) plays instantly instead of resolving the source cold.
+    // getStreamInfo caches exactly what proxy_stream reuses a beat later.
+    prefetchNext().catch(() => {});
 
     // …and remember the current position, throttled inside saveResume, so a
     // reopen resumes at the timestamp you left rather than the song's start.

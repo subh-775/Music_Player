@@ -1,6 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Linking,
   NativeModules,
@@ -192,12 +191,15 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     null,
   );
   const [ytBusy, setYtBusy] = useState(false);
-  const [busy, setBusy] = useState(true);
   const [qualityOpen, setQualityOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
-      // Independent — one failing shouldn't blank the whole screen.
+      // Independent — one failing shouldn't blank the whole screen. And NOT
+      // gated behind a full-screen spinner: every setting above Sources is
+      // local and instant, so the screen paints immediately and the
+      // backend-backed rows (sources, download folder) fill in when ready.
+      // The old spinner made opening Settings feel like loading a web page.
       const [s, d, y] = await Promise.allSettled([
         getSourcesStatus(),
         getDownloadsInfo(),
@@ -212,7 +214,6 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
       if (y.status === 'fulfilled') {
         setYt(y.value);
       }
-      setBusy(false);
     })();
   }, []);
 
@@ -284,12 +285,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
         <Text style={styles.barTitle}>Settings</Text>
       </View>
 
-      {busy ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={C.accent} />
-        </View>
-      ) : (
-        <ScrollView
+      <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}>
           <Section title="Media quality">
@@ -374,6 +370,9 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           </Section>
 
           <Section title="Sources">
+            {Object.keys(sources).length === 0 && (
+              <Text style={styles.folderPath}>Checking sources…</Text>
+            )}
             {Object.entries(sources)
               .filter(([, v]) => v.type === 'audio')
               .map(([name, s]) => {
@@ -451,7 +450,6 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
 
           <View style={styles.tail} />
         </ScrollView>
-      )}
     </View>
   );
 }

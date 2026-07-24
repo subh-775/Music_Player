@@ -15,6 +15,17 @@ import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '
 import {Greeting} from '../components/Greeting';
 import {useRecentlyPlayed} from '../recentlyPlayed';
 import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
+import {createStore, asArray, useStoreValue} from '../storage';
+
+/**
+ * Last Home rows, persisted. Showing these instantly on the next launch is
+ * what replaces the "Starting the music engine…" wait with actual content —
+ * the backend still warms up behind them and the fresh rows swap in when
+ * ready, but the user never stares at a spinner.
+ */
+const homeCache = createStore<HomeRow[]>('mp.homeRows.v1', [], raw =>
+  asArray<HomeRow>(raw).filter(r => r && Array.isArray(r.items)),
+);
 
 type Props = {
   onPickTrack: (item: HomeItem) => void;
@@ -24,24 +35,33 @@ type Props = {
 
 export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
   const recent = useRecentlyPlayed();
-  const [rows, setRows] = useState<HomeRow[]>([]);
-  const [phase, setPhase] = useState<'boot' | 'ready' | 'error'>('boot');
+  // Subscribed, so cached rows appear the moment disk hydration finishes even
+  // if that lands after first render.
+  const cachedRows = useStoreValue(homeCache);
+  const [fresh, setFresh] = useState<HomeRow[] | null>(null);
   const [error, setError] = useState('');
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (!isRefresh) {
-      setPhase('boot');
-    }
+  const rows = fresh ?? cachedRows;
+  const phase: 'boot' | 'ready' | 'error' =
+    rows.length ? 'ready' : error ? 'error' : 'boot';
+
+  const load = useCallback(async () => {
     setError('');
     try {
       if (!(await waitForBackend())) {
         throw new Error('The music engine did not start.');
       }
-      setRows(await getHome());
-      setPhase('ready');
+      const data = await getHome();
+      if (data.length) {
+        setFresh(data);
+        homeCache.set(data); // seed the next launch
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setPhase('error');
+      // Only surface the error if there's nothing on screen — a failed refresh
+      // behind cached rows should stay silent.
+      if (!homeCache.get().length) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     }
   }, []);
 
