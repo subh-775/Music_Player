@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Alert,
+  Animated,
   Linking,
   NativeModules,
   PanResponder,
@@ -9,7 +10,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  type LayoutChangeEvent,
 } from 'react-native';
 import {Check, ChevronLeft, ChevronRight} from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -105,6 +105,7 @@ function ToggleRow({
 }
 
 const CROSSFADE_MAX = 12;
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 /**
  * The crossfade control: a draggable bar from 0 to 12s, like the WebView build.
@@ -117,34 +118,59 @@ function CrossfadeRow({
   value: number;
   onChange: (secs: number) => void;
 }) {
-  const [width, setWidth] = useState(1);
+  // Animated fill/knob (transform-only) driven straight from the gesture; the
+  // seconds label updates on whole-second changes; settings commit on release.
   const widthRef = useRef(1);
-  widthRef.current = width;
+  const t = useRef(new Animated.Value(clamp01(value / CROSSFADE_MAX))).current;
+  const [label, setLabel] = useState(value);
+  const draggingRef = useRef(false);
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    setWidth(Math.max(1, e.nativeEvent.layout.width));
-  }, []);
+  useEffect(() => {
+    if (!draggingRef.current) {
+      t.setValue(clamp01(value / CROSSFADE_MAX));
+      setLabel(value);
+    }
+  }, [value, t]);
 
-  // One stable responder; live values via refs (a re-render mid-drag must not
-  // orphan the gesture).
+  const apply = useCallback(
+    (x: number) => {
+      const tt = clamp01(x / widthRef.current);
+      t.setValue(tt);
+      const secs = Math.round(tt * CROSSFADE_MAX);
+      setLabel(prev => (prev === secs ? prev : secs));
+      return secs;
+    },
+    [t],
+  );
+
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: e => {
-        const t = e.nativeEvent.locationX / widthRef.current;
-        changeRef.current(Math.round(Math.max(0, Math.min(1, t)) * CROSSFADE_MAX));
+        draggingRef.current = true;
+        apply(e.nativeEvent.locationX);
       },
-      onPanResponderMove: e => {
-        const t = e.nativeEvent.locationX / widthRef.current;
-        changeRef.current(Math.round(Math.max(0, Math.min(1, t)) * CROSSFADE_MAX));
+      onPanResponderMove: e => apply(e.nativeEvent.locationX),
+      onPanResponderRelease: e => {
+        const secs = apply(e.nativeEvent.locationX);
+        draggingRef.current = false;
+        changeRef.current(secs);
+      },
+      onPanResponderTerminate: () => {
+        draggingRef.current = false;
       },
     }),
   ).current;
 
-  const pct = Math.max(0, Math.min(1, value / CROSSFADE_MAX));
+  // Percentage interpolation — the track width is dynamic, so this avoids
+  // measuring it. Still no React re-render per frame.
+  const pct = t.interpolate({inputRange: [0, 1], outputRange: ['0%', '100%']});
+  const fillStyle = {width: pct};
+  const knobStyle = {left: pct};
 
   return (
     <View style={styles.row}>
@@ -152,14 +178,16 @@ function CrossfadeRow({
         <Text style={styles.rowLabel}>Crossfade</Text>
         <View
           style={styles.fadeTrackArea}
-          onLayout={onLayout}
+          onLayout={e => {
+            widthRef.current = Math.max(1, e.nativeEvent.layout.width);
+          }}
           {...pan.panHandlers}>
           <View style={styles.fadeTrack} />
-          <View style={[styles.fadeFill, {width: `${pct * 100}%`}]} />
-          <View style={[styles.fadeKnob, {left: `${pct * 100}%`}]} />
+          <Animated.View style={[styles.fadeFill, fillStyle]} />
+          <Animated.View style={[styles.fadeKnob, knobStyle]} />
         </View>
       </View>
-      <Text style={styles.rowValue}>{value > 0 ? `${value}s` : 'Off'}</Text>
+      <Text style={styles.rowValue}>{label > 0 ? `${label}s` : 'Off'}</Text>
     </View>
   );
 }
@@ -519,9 +547,10 @@ const styles = StyleSheet.create({
     marginTop: -6,
   },
   fadeTrackArea: {
-    height: 28,
+    // 44px touch target (Fitts'), while the bar still reads as 4px.
+    height: 44,
     justifyContent: 'center',
-    marginTop: 8,
+    marginTop: 4,
     marginRight: 4,
   },
   fadeTrack: {
@@ -542,5 +571,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginLeft: -8,
     backgroundColor: C.accentBright,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 3,
   },
 });

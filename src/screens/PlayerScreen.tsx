@@ -766,7 +766,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 18,
   },
-  tBtn: {padding: 6},
+  // 10px padding takes the 24px shuffle/repeat icons to a 44px touch target.
+  tBtn: {padding: 10},
   playBtn: {
     width: 72,
     height: 72,

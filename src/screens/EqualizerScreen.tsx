@@ -10,6 +10,7 @@
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Animated,
   Dimensions,
   PanResponder,
   ScrollView,
@@ -162,7 +163,19 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
   );
 }
 
-/** One vertical band. Drag anywhere on the column, not just the handle. */
+const toT = (db: number) => (db - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB);
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+/**
+ * One vertical band. Drag anywhere on the column.
+ *
+ * The fill and knob are driven by ONE Animated.Value updated with setValue()
+ * inside the gesture — that moves the native views directly, with NO React
+ * re-render per frame. The old version called setState every move, re-rendering
+ * the whole screen ~60×/s on the JS thread, which is exactly why the drag felt
+ * like snapping between points. Only the dB label (which changes ~24 times
+ * across a full drag, not per frame) and the final commit use React state.
+ */
 function Band({
   hz,
   value,
@@ -174,24 +187,33 @@ function Band({
   disabled?: boolean;
   onChange: (db: number) => void;
 }) {
-  const [height, setHeight] = useState(SLIDER_H);
+  const t = useRef(new Animated.Value(toT(value))).current;
+  const [labelDb, setLabelDb] = useState(Math.round(value));
   const heightRef = useRef(SLIDER_H);
-  heightRef.current = height;
-
-  // Live value while the finger is down. Committing to settings on every move
-  // re-rendered the screen and REBUILT this responder mid-gesture — which is
-  // why dragging felt like tapping discrete points. The drag is local now;
-  // settings get one write on release.
-  const [dragDb, setDragDb] = useState<number | null>(null);
-  const dragDbRef = useRef<number | null>(null);
+  const draggingRef = useRef(false);
   const disabledRef = useRef(!!disabled);
   disabledRef.current = !!disabled;
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    setHeight(e.nativeEvent.layout.height);
-  }, []);
+  // Follow the prop when it changes from OUTSIDE a drag (preset pick, reset).
+  useEffect(() => {
+    if (!draggingRef.current) {
+      t.setValue(toT(value));
+      setLabelDb(Math.round(value));
+    }
+  }, [value, t]);
+
+  const apply = useCallback(
+    (y: number) => {
+      const tt = clamp01(1 - y / (heightRef.current || 1));
+      t.setValue(tt); // native view update, no React render
+      const db = Math.round(EQ_MIN_DB + tt * (EQ_MAX_DB - EQ_MIN_DB));
+      setLabelDb(prev => (prev === db ? prev : db));
+      return EQ_MIN_DB + tt * (EQ_MAX_DB - EQ_MIN_DB);
+    },
+    [t],
+  );
 
   const pan = useRef(
     PanResponder.create({
@@ -199,70 +221,53 @@ function Band({
       onMoveShouldSetPanResponder: () => !disabledRef.current,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: e => {
-        const h = heightRef.current || 1;
-        const t = 1 - e.nativeEvent.locationY / h;
-        const db = EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB);
-        dragDbRef.current = db;
-        setDragDb(db);
+        draggingRef.current = true;
+        apply(e.nativeEvent.locationY);
       },
-      onPanResponderMove: e => {
-        const h = heightRef.current || 1;
-        const t = 1 - e.nativeEvent.locationY / h;
-        const db = Math.max(
-          EQ_MIN_DB,
-          Math.min(EQ_MAX_DB, EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB)),
-        );
-        dragDbRef.current = db;
-        setDragDb(db);
-      },
-      onPanResponderRelease: () => {
-        if (dragDbRef.current != null) {
-          changeRef.current(dragDbRef.current);
-          // Keep SHOWING the released value; clearing dragDb now would flash
-          // the old prop for a frame before the settings write propagates —
-          // that's the "snaps back then returns" the drag had.
-        }
+      onPanResponderMove: e => apply(e.nativeEvent.locationY),
+      onPanResponderRelease: e => {
+        const db = apply(e.nativeEvent.locationY);
+        draggingRef.current = false;
+        changeRef.current(db);
       },
       onPanResponderTerminate: () => {
-        dragDbRef.current = null;
-        setDragDb(null);
+        draggingRef.current = false;
       },
     }),
   ).current;
 
-  // Once the incoming prop matches what we released, drop the local hold.
-  if (dragDb != null && Math.abs(value - dragDb) < 0.5) {
-    dragDbRef.current = null;
-    setDragDb(null);
-  }
-
-  const shown = dragDb ?? value;
-  const pct = (shown - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB);
+  // Bottom-anchored fill via scaleY, and the knob via translateY — both are
+  // transform-only, so they composite on the UI thread at 60fps.
+  const fillStyle = {
+    transform: [
+      {translateY: t.interpolate({inputRange: [0, 1], outputRange: [SLIDER_H / 2, 0]})},
+      {scaleY: t},
+    ],
+  };
+  const knobStyle = {
+    transform: [
+      {translateY: t.interpolate({inputRange: [0, 1], outputRange: [0, -SLIDER_H]})},
+    ],
+  };
 
   return (
     <View style={styles.band}>
       <Text style={styles.bandDb}>
-        {shown > 0 ? '+' : ''}
-        {Math.round(shown)}
+        {labelDb > 0 ? '+' : ''}
+        {labelDb}
       </Text>
       <View
         style={[styles.column, disabled && styles.columnOff]}
-        onLayout={onLayout}
+        onLayout={(e: LayoutChangeEvent) => {
+          heightRef.current = e.nativeEvent.layout.height;
+        }}
         {...pan.panHandlers}>
         <View style={styles.columnTrack} />
-        <View
-          style={[
-            styles.columnFill,
-            {height: `${Math.max(0, Math.min(1, pct)) * 100}%`},
-            disabled && styles.fillOff,
-          ]}
+        <Animated.View
+          style={[styles.columnFill, fillStyle, disabled && styles.fillOff]}
         />
-        <View
-          style={[
-            styles.handle,
-            {bottom: `${Math.max(0, Math.min(1, pct)) * 100}%`},
-            disabled && styles.handleOff,
-          ]}
+        <Animated.View
+          style={[styles.handle, knobStyle, disabled && styles.handleOff]}
           pointerEvents="none"
         />
       </View>
@@ -329,18 +334,26 @@ const styles = StyleSheet.create({
   columnFill: {
     position: 'absolute',
     bottom: 0,
-    width: 3,
+    width: 4,
+    height: SLIDER_H, // sized by scaleY; the transform anchors it to the bottom
     borderRadius: 2,
     backgroundColor: C.accent,
   },
   fillOff: {backgroundColor: C.faint},
   handle: {
     position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    marginBottom: -7,
+    bottom: 0,
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    marginBottom: -1, // sits on the fill's leading edge; translateY drives it up
     backgroundColor: C.accentBright,
+    // A soft ring so the knob reads as a grabbable control, not a dot.
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 3,
   },
   handleOff: {backgroundColor: C.sub},
   bandHz: {...T.sub, color: C.faint, fontSize: 10.5, marginTop: 8},

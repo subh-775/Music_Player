@@ -1,17 +1,18 @@
 /**
  * A draggable seek bar.
  *
- * The position is held locally WHILE dragging and only committed on release.
- * Seeking on every movement event would fire a Range request against
- * /api/proxy_stream for each pixel the thumb travels, which stalls the stream
- * you're trying to scrub through.
+ * The fill and thumb are driven by an Animated.Value updated straight from the
+ * gesture — no React re-render per frame, so the scrub is smooth even under a
+ * busy JS thread. Seeking only happens on release (one Range request, not one
+ * per pixel), and the released position is HELD until the engine's own progress
+ * catches up, so the thumb never snaps back to the old spot for a frame.
  *
- * While a drag is in flight the incoming `position` prop is ignored — otherwise
- * the engine's own progress ticks would yank the thumb out from under the
- * finger every half-second.
+ * The time label updates on whole-second changes only — cheap, and all the eye
+ * needs while scrubbing.
  */
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
+  Animated,
   PanResponder,
   StyleSheet,
   Text,
@@ -30,6 +31,8 @@ function clock(sec: number): string {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
 export function Seekbar({
   position,
   duration,
@@ -39,91 +42,100 @@ export function Seekbar({
   duration: number;
   onSeek: (seconds: number) => void;
 }) {
-  const [width, setWidth] = useState(0);
-  const [dragging, setDragging] = useState<number | null>(null);
-  // After release the engine takes a beat to report the new position; keep
-  // showing the released value until it catches up, or the thumb snaps back
-  // to the OLD position for a flash on every scrub.
-  const [held, setHeld] = useState<number | null>(null);
+  const t = useRef(new Animated.Value(0)).current;
+  const [label, setLabel] = useState(0);
+  const [scrubbing, setScrubbing] = useState(false);
 
-  // Refs so the PanResponder — created once — always reads current values
-  // instead of closing over the first render's.
   const widthRef = useRef(0);
   const durationRef = useRef(0);
-  widthRef.current = width;
   durationRef.current = duration;
+  const draggingRef = useRef(false);
+  // Held target after release, until the engine reports it caught up.
+  const heldRef = useRef<number | null>(null);
+  const onSeekRef = useRef(onSeek);
+  onSeekRef.current = onSeek;
+
+  // Follow engine progress when not dragging and not holding a just-seeked spot.
+  useEffect(() => {
+    if (draggingRef.current || heldRef.current !== null) {
+      if (heldRef.current !== null && Math.abs(position - heldRef.current) < 1.5) {
+        heldRef.current = null; // engine caught up — resume following
+      } else {
+        return;
+      }
+    }
+    const frac = duration > 0 ? clamp01(position / duration) : 0;
+    t.setValue(frac);
+    setLabel(position);
+  }, [position, duration, t]);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
-    setWidth(e.nativeEvent.layout.width);
+    widthRef.current = Math.max(1, e.nativeEvent.layout.width);
   }, []);
 
-  const seconds = useCallback((x: number) => {
-    const w = widthRef.current;
-    const d = durationRef.current;
-    if (w <= 0 || d <= 0) {
-      return 0;
-    }
-    return Math.max(0, Math.min(d, (x / w) * d));
-  }, []);
-
-  const pan = useMemo(
-    () =>
-      PanResponder.create({
-        // Claim on touch-down: this whole strip is the control, so a tap
-        // anywhere on it should scrub, not just a drag from the thumb.
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: e => {
-          setDragging(seconds(e.nativeEvent.locationX));
-        },
-        onPanResponderMove: e => {
-          // locationX is relative to this view and can run past either end once
-          // the finger leaves it; seconds() clamps, so dragging off the edge
-          // pins to 0:00 / the full duration rather than jumping.
-          setDragging(seconds(e.nativeEvent.locationX));
-        },
-        onPanResponderRelease: e => {
-          const target = seconds(e.nativeEvent.locationX);
-          setHeld(target);
-          onSeek(target);
-          setDragging(null);
-          // Failsafe: if the seek never lands (engine error), don't pin the
-          // thumb to a position the audio isn't at.
-          setTimeout(() => setHeld(null), 2500);
-        },
-        onPanResponderTerminate: () => setDragging(null),
-      }),
-    [seconds, onSeek],
+  const apply = useCallback(
+    (x: number) => {
+      const frac = clamp01(x / widthRef.current);
+      t.setValue(frac);
+      const secs = frac * (durationRef.current || 0);
+      setLabel(prev => (Math.floor(prev) === Math.floor(secs) ? prev : secs));
+      return secs;
+    },
+    [t],
   );
 
-  // Release the hold once the engine's reported position reaches the seek
-  // target (within a tick), or after it has clearly moved on.
-  if (held !== null && Math.abs(position - held) < 1.5) {
-    setHeld(null);
-  }
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: e => {
+        draggingRef.current = true;
+        setScrubbing(true);
+        apply(e.nativeEvent.locationX);
+      },
+      onPanResponderMove: e => apply(e.nativeEvent.locationX),
+      onPanResponderRelease: e => {
+        const secs = apply(e.nativeEvent.locationX);
+        draggingRef.current = false;
+        setScrubbing(false);
+        heldRef.current = secs;
+        onSeekRef.current(secs);
+        // Failsafe: never pin the thumb forever if the seek never lands.
+        setTimeout(() => {
+          heldRef.current = null;
+        }, 2500);
+      },
+      onPanResponderTerminate: () => {
+        draggingRef.current = false;
+        setScrubbing(false);
+      },
+    }),
+  ).current;
 
-  const shown = dragging ?? held ?? position;
-  const pct = duration > 0 ? Math.max(0, Math.min(1, shown / duration)) : 0;
+  const widthPct = t.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
   return (
     <View style={styles.wrap}>
-      {/* Generous vertical padding makes the touch target ~28px tall while the
-          bar still LOOKS 4px — a 4px target is unhittable with a thumb. */}
+      {/* ~28px visual, 44px touch (Fitts') — a 4px bar is unhittable. */}
       <View style={styles.touch} onLayout={onLayout} {...pan.panHandlers}>
         <View style={styles.track}>
-          <View style={[styles.fill, {width: `${pct * 100}%`}]} />
+          <Animated.View style={[styles.fill, {width: widthPct}]} />
         </View>
-        <View
+        <Animated.View
           style={[
             styles.thumb,
-            {left: `${pct * 100}%`},
-            dragging !== null && styles.thumbActive,
+            {left: widthPct},
+            scrubbing && styles.thumbActive,
           ]}
           pointerEvents="none"
         />
       </View>
       <View style={styles.times}>
-        <Text style={styles.time}>{clock(shown)}</Text>
+        <Text style={styles.time}>{clock(label)}</Text>
         <Text style={styles.time}>{clock(duration)}</Text>
       </View>
     </View>
@@ -132,7 +144,7 @@ export function Seekbar({
 
 const styles = StyleSheet.create({
   wrap: {marginTop: 14},
-  touch: {justifyContent: 'center', height: 28},
+  touch: {justifyContent: 'center', height: 44},
   track: {
     height: 4,
     borderRadius: 2,
@@ -142,19 +154,24 @@ const styles = StyleSheet.create({
   fill: {height: '100%', backgroundColor: C.text, borderRadius: 2},
   thumb: {
     position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginLeft: -6,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    marginLeft: -6.5,
     backgroundColor: C.text,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 3,
   },
   thumbActive: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginLeft: -8,
+    width: 17,
+    height: 17,
+    borderRadius: 9,
+    marginLeft: -8.5,
     backgroundColor: C.accentBright,
   },
-  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 4},
+  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
   time: {color: C.sub, fontSize: 11, fontVariant: ['tabular-nums']},
 });
