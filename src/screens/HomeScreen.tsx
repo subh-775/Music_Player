@@ -88,6 +88,8 @@ export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
     <ScrollView
       contentContainerStyle={styles.scroll}
       showsVerticalScrollIndicator={false}
+      overScrollMode="never"
+      bounces={false}
 >
       <View style={styles.header}>
         <Greeting />

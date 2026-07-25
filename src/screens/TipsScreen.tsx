@@ -118,7 +118,9 @@ export function TipsScreen({onClose}: {onClose: () => void}) {
 
       <ScrollView
         contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        overScrollMode="never"
+        bounces={false}>
         <Text style={styles.intro}>
           This app runs on gestures. Here’s everything your fingers can do.
         </Text>

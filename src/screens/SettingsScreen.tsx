@@ -1,6 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  Animated,
   BackHandler,
   Linking,
   NativeModules,
@@ -38,6 +37,7 @@ import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
 import {SOURCE_META} from '../components/Badges';
+import {checkUpdate, updateSupported, useUpdate} from '../update';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
@@ -127,23 +127,6 @@ function CrossfadeStepper({
   value: number;
   onChange: (secs: number) => void;
 }) {
-  const pop = useRef(new Animated.Value(1)).current;
-  const first = useRef(true);
-
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    pop.setValue(1.28);
-    Animated.spring(pop, {
-      toValue: 1,
-      useNativeDriver: true,
-      friction: 5,
-      tension: 140,
-    }).start();
-  }, [value, pop]);
-
   const step = (delta: number) => {
     const next = Math.max(0, Math.min(CROSSFADE_MAX, value + delta));
     if (next !== value) {
@@ -168,9 +151,7 @@ function CrossfadeStepper({
           style={styles.stepBtn}>
           <ChevronsLeft size={22} color={atMin ? C.faint : C.text} />
         </TouchableOpacity>
-        <Animated.Text style={[styles.stepValue, {transform: [{scale: pop}]}]}>
-          {value > 0 ? `${value}s` : 'Off'}
-        </Animated.Text>
+        <Text style={styles.stepValue}>{value > 0 ? `${value}s` : 'Off'}</Text>
         <TouchableOpacity
           onPress={() => step(1)}
           disabled={atMax}
@@ -305,16 +286,35 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     toast('Settings reset to defaults');
   }, []);
 
-  // Dummy for now: once a tag ships, this checks GitHub releases and offers the
-  // update in-app, the way the WebView build does. Until then it just confirms
-  // the installed version.
+  // Real check: asks GitHub for the latest release. A newer one raises the
+  // in-app update popup (UpdateModal); "up to date" just toasts. The manualCheck
+  // ref keeps the launch-time silent check from toasting on its own.
+  const update = useUpdate();
+  const manualCheck = useRef(false);
   const checkUpdates = useCallback(() => {
-    toast(
-      appVersion
-        ? `You're on the latest version (${appVersion})`
-        : "You're on the latest version",
-    );
+    if (!updateSupported) {
+      toast('Updating needs the newest APK.');
+      return;
+    }
+    manualCheck.current = true;
+    toast('Checking for updates…');
+    checkUpdate();
   }, []);
+  useEffect(() => {
+    if (!manualCheck.current) {
+      return;
+    }
+    if (update.phase === 'current') {
+      manualCheck.current = false;
+      toast(
+        appVersion
+          ? `You're on the latest version (${appVersion})`
+          : "You're on the latest version",
+      );
+    } else if (update.phase === 'found') {
+      manualCheck.current = false; // the popup takes over
+    }
+  }, [update.phase]);
 
   // Anything with more than a switch's worth of choice gets its OWN screen,
   // not an inline expander — the list stays scannable.
@@ -338,7 +338,9 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
         </View>
         <ScrollView
           contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          bounces={false}>
           <Section title="Listening controls">
             <ToggleRow
               label="Autoplay"
@@ -386,7 +388,9 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
 
       <ScrollView
           contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          bounces={false}>
           <Section title="Media quality">
             <Row
               label="Streaming quality"
@@ -519,7 +523,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                 style={styles.setBtn}
                 onPress={pickDownloadFolder}
                 activeOpacity={0.85}>
-                <FolderOpen size={15} color={C.bg} strokeWidth={2.2} />
+                <FolderOpen size={15} color={C.text} strokeWidth={2.2} />
                 <Text style={styles.setBtnText}>Set folder</Text>
               </TouchableOpacity>
             </View>
@@ -653,10 +657,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: C.accent,
+    backgroundColor: C.surfaceHi,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
   },
-  setBtnText: {color: C.bg, fontWeight: '800', fontSize: 13},
+  setBtnText: {color: C.text, fontWeight: '700', fontSize: 13},
 });

@@ -20,6 +20,8 @@ import {BottomNav, type Tab} from './src/components/BottomNav';
 import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
+import {UpdateModal} from './src/components/UpdateModal';
+import {checkUpdate} from './src/update';
 import {
   TrackActionSheet,
   type SheetContext,
@@ -87,6 +89,10 @@ function Shell() {
     // Reads the setting each tick rather than closing over it, so changing
     // crossfade takes effect without restarting the watcher.
     startCrossfadeWatcher(() => readSettings().crossfadeDuration);
+    // Silent update check on launch — the popup only appears if a newer release
+    // is actually out. Delayed a little so it never competes with cold start.
+    const u = setTimeout(checkUpdate, 3500);
+    return () => clearTimeout(u);
   }, []);
 
   const play = useCallback(async (track: Track, context?: Track[]) => {
@@ -432,6 +438,8 @@ function Shell() {
           onOpenArtist={openArtistCredit}
         />
       )}
+
+      <UpdateModal />
     </SafeAreaView>
   );
 }

@@ -7,7 +7,11 @@ import com.facebook.react.uimanager.ViewManager
 
 class BackendPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
-        listOf(BackendModule(reactContext), AudioModule(reactContext))
+        listOf(
+            BackendModule(reactContext),
+            AudioModule(reactContext),
+            UpdateModule(reactContext),
+        )
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
         emptyList()

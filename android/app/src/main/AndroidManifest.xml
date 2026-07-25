@@ -3,6 +3,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- In-app update: download the release APK and launch the system installer.
+         The user still confirms the install; this only lets us start it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Audio keeps playing when the app is backgrounded or the screen is off.
          That requires a foreground service (typed mediaPlayback on API 34+), a
          wake lock, and — on API 33+ — permission to post its notification, which
@@ -39,5 +43,18 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- Serves the downloaded update APK to the system installer as a
+           content:// URI (a file:// URI throws FileUriExposedException on
+           API 24+). -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+      </provider>
     </application>
 </manifest>

@@ -26,8 +26,6 @@ import React, {
 import {
   ActivityIndicator,
   Animated,
-  Dimensions,
-  Easing,
   Image,
   Modal,
   PanResponder,
@@ -62,7 +60,7 @@ import {
   RepeatMode,
   seekTo,
   setRepeat,
-  shuffleQueue,
+  setShuffle,
   skipNext,
   skipPrevious,
   sourceTrackFor,
@@ -185,33 +183,24 @@ export function PlayerScreen({
   // Artwork follows the finger, then leaves and re-enters on a change.
   const slide = useRef(new Animated.Value(0)).current;
 
-  // The player slides up/down under our own control (Modal animationType is
-  // "none"), so the swipe-down and the chevron button share ONE motion — the
-  // swipe just hands off to the same close animation the button plays, which is
-  // what makes them feel identical and smooth.
-  const SHEET_H = Dimensions.get('window').height;
-  const sheetY = useRef(new Animated.Value(SHEET_H)).current;
+  // Drag-down feedback ONLY. The Modal keeps RN's built-in "slide" for the
+  // actual open/close (which never flashes white — driving the exit ourselves
+  // with animationType "none" did, and it also stopped the swipe working). So
+  // sheetY just tracks the finger; on commit we let the built-in slide play.
+  const sheetY = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (visible) {
-      sheetY.setValue(SHEET_H);
-      Animated.timing(sheetY, {
-        toValue: 0,
-        duration: 300,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
+      sheetY.setValue(0);
     }
-  }, [visible, sheetY, SHEET_H]);
+  }, [visible, sheetY]);
 
-  // Animate the sheet fully down, THEN unmount — button and swipe both call this.
-  const close = useCallback(() => {
-    Animated.timing(sheetY, {
-      toValue: SHEET_H,
-      duration: 240,
-      easing: Easing.in(Easing.cubic),
+  const springBack = useCallback(() => {
+    Animated.spring(sheetY, {
+      toValue: 0,
       useNativeDriver: true,
-    }).start(() => onClose());
-  }, [sheetY, SHEET_H, onClose]);
+      bounciness: 4,
+    }).start();
+  }, [sheetY]);
 
   const dismissPan = useMemo(
     () =>
@@ -224,20 +213,16 @@ export function PlayerScreen({
           }
         },
         onPanResponderRelease: (_e, g) => {
-          // Past the threshold (or a fast flick) → hand off to the SAME close
-          // animation the button plays. Short of it → spring back up.
-          if (g.dy > 130 || g.vy > 0.8) {
-            close();
+          // Past the threshold (or a flick) → close via the built-in slide.
+          if (g.dy > 120 || g.vy > 0.8) {
+            onClose();
           } else {
-            Animated.spring(sheetY, {
-              toValue: 0,
-              useNativeDriver: true,
-              bounciness: 4,
-            }).start();
+            springBack();
           }
         },
+        onPanResponderTerminate: springBack,
       }),
-    [sheetY, close],
+    [sheetY, onClose, springBack],
   );
 
   const commit = useCallback(
@@ -261,15 +246,39 @@ export function PlayerScreen({
     [slide],
   );
 
+  // The artwork owns TWO gestures: swipe LEFT/RIGHT to change song, and swipe
+  // DOWN to dismiss — so the down-swipe works from the big artwork, not only the
+  // little header. The axis is locked on the first clear movement.
+  const artAxis = useRef<'h' | 'v' | null>(null);
   const pan = useMemo(
     () =>
       PanResponder.create({
-        // Claim the gesture only once it's clearly horizontal, so a vertical
-        // drag still belongs to the scroll/dismiss behaviour.
         onMoveShouldSetPanResponder: (_e, g) =>
-          Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderMove: (_e, g) => slide.setValue(g.dx * 0.55),
+          (Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4) ||
+          (g.dy > 8 && g.dy > Math.abs(g.dx) * 1.4),
+        onPanResponderGrant: () => {
+          artAxis.current = null;
+        },
+        onPanResponderMove: (_e, g) => {
+          if (!artAxis.current) {
+            artAxis.current =
+              Math.abs(g.dx) > Math.abs(g.dy) ? 'h' : 'v';
+          }
+          if (artAxis.current === 'h') {
+            slide.setValue(g.dx * 0.55);
+          } else if (g.dy > 0) {
+            sheetY.setValue(g.dy);
+          }
+        },
         onPanResponderRelease: (_e, g) => {
+          if (artAxis.current === 'v') {
+            if (g.dy > 120 || g.vy > 0.8) {
+              onClose();
+            } else {
+              springBack();
+            }
+            return;
+          }
           if (g.dx <= -SWIPE_COMMIT) {
             commit('next');
           } else if (g.dx >= SWIPE_COMMIT) {
@@ -282,8 +291,12 @@ export function PlayerScreen({
             }).start();
           }
         },
+        onPanResponderTerminate: () => {
+          springBack();
+          Animated.spring(slide, {toValue: 0, useNativeDriver: true}).start();
+        },
       }),
-    [slide, commit],
+    [slide, sheetY, commit, onClose, springBack],
   );
 
   /**
@@ -304,16 +317,18 @@ export function PlayerScreen({
   const shuffleLock = useRef(0);
   const onShuffle = useCallback(() => {
     const now = Date.now();
-    if (now - shuffleLock.current < 1200) {
+    if (now - shuffleLock.current < 800) {
       return;
     }
     shuffleLock.current = now;
-    shuffleQueue()
-      .then(() => {
-        setShuffled(v => !v);
-        toast('Shuffled what comes next');
-      })
-      .catch(() => {});
+    // A real toggle: flip the state, then make the queue match it. OFF restores
+    // the original order; ON shuffles. The icon follows `shuffled`.
+    setShuffled(prev => {
+      const next = !prev;
+      setShuffle(next).catch(() => {});
+      toast(next ? 'Shuffle on' : 'Shuffle off');
+      return next;
+    });
   }, []);
 
   const download = useCallback(async () => {
@@ -343,8 +358,8 @@ export function PlayerScreen({
   return (
     <Modal
       visible={visible}
-      animationType="none"
-      onRequestClose={close}
+      animationType="slide"
+      onRequestClose={onClose}
       statusBarTranslucent>
       <Animated.View
         style={[
@@ -355,7 +370,7 @@ export function PlayerScreen({
         {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
         <View style={styles.topBar} {...dismissPan.panHandlers}>
-          <TouchableOpacity onPress={close} hitSlop={14} style={styles.iconBtn}>
+          <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
             <ChevronDown size={26} color={C.text} />
           </TouchableOpacity>
           <Text style={styles.context} numberOfLines={1}>

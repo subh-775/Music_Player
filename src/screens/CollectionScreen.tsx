@@ -49,7 +49,7 @@ import {
 import {DownloadRow} from '../components/DownloadRow';
 import {
   State,
-  shuffleQueue,
+  setShuffle,
   togglePlay,
   useActiveTrack,
   usePlaybackState,
@@ -252,12 +252,12 @@ export function CollectionScreen({
       return;
     }
     if (playingHere) {
-      await shuffleQueue().catch(() => {});
+      await setShuffle(true).catch(() => {});
       toast('Shuffled what comes next');
     } else {
       onPlay(tracks[Math.floor(Math.random() * tracks.length)], tracks);
-      // Give the queue a beat to build before reshuffling its tail.
-      setTimeout(() => shuffleQueue().catch(() => {}), 600);
+      // Give the queue a beat to build before shuffling its tail.
+      setTimeout(() => setShuffle(true).catch(() => {}), 600);
     }
     setShuffled(true);
   }, [onPlay, tracks, playingHere]);

@@ -66,6 +66,21 @@ jobs:
         working-directory: android
         run: |
           if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
+            # Derive versionName/versionCode from the tag (v1.2.3 -> 1.2.3), so
+            # the installed app reports the release version and the in-app
+            # updater compares correctly. A non-tag manual release build keeps
+            # the gradle defaults.
+            case "$GITHUB_REF_NAME" in
+              v*)
+                VER="${GITHUB_REF_NAME#v}"
+                MA="$(echo "$VER" | cut -d. -f1)"; MA="${MA:-0}"
+                MI="$(echo "$VER" | cut -d. -f2)"; MI="${MI:-0}"
+                PA="$(echo "$VER" | cut -d. -f3)"; PA="${PA:-0}"
+                export APP_VERSION_NAME="$VER"
+                export APP_VERSION_CODE="$(( MA * 10000 + MI * 100 + PA ))"
+                echo "Building release $APP_VERSION_NAME (code $APP_VERSION_CODE)"
+                ;;
+            esac
             ./gradlew assembleRelease --no-daemon --stacktrace
           else
             ./gradlew assembleDebug --no-daemon --stacktrace

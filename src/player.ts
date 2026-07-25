@@ -20,6 +20,7 @@ import TrackPlayer, {
   RepeatMode,
   State,
   usePlaybackState,
+  type Track as RNTPTrack,
 } from 'react-native-track-player';
 import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
 import {currentQuality, readSettings} from './store';
@@ -177,6 +178,10 @@ export async function setupPlayer(): Promise<boolean> {
       if (cfActive) {
         await handoffCrossfade();
       } else {
+        // Defensive: if an overlap player somehow survived (a fade that never
+        // handed off), silence it NOW so it can't keep playing a second,
+        // "wrong" song over the top of the queue's real next track.
+        endCrossfade();
         fadeInIfNeeded();
       }
       // Effects die with the audio session; re-attach for the new one.
@@ -394,20 +399,45 @@ export async function skipPrevious(): Promise<void> {
   }
 }
 
-/** Shuffle everything after the current track, leaving what's playing alone. */
-export async function shuffleQueue(): Promise<void> {
+/**
+ * Shuffle is a real TOGGLE, not a re-roll on every tap.
+ *
+ * ON  → remember the upcoming order, then shuffle it.
+ * OFF → put the remembered order back.
+ *
+ * Turning it off restoring the order is what makes it a toggle (Spotify's is);
+ * the old version shuffled again on every press, which both read as "still on"
+ * and left songs playing in an order the user never chose.
+ */
+let preShuffleUpcoming: RNTPTrack[] | null = null;
+
+export async function setShuffle(on: boolean): Promise<void> {
   const queue = await TrackPlayer.getQueue();
   const index = await TrackPlayer.getActiveTrackIndex();
-  if (queue.length < 3 || index == null) {
+  if (index == null) {
     return;
   }
   const rest = queue.slice(index + 1);
-  for (let i = rest.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [rest[i], rest[j]] = [rest[j], rest[i]];
+  if (on) {
+    if (rest.length < 2) {
+      return;
+    }
+    preShuffleUpcoming = rest; // remember so OFF can restore it
+    const shuffled = [...rest];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    await TrackPlayer.removeUpcomingTracks();
+    await TrackPlayer.add(shuffled);
+  } else {
+    if (!preShuffleUpcoming) {
+      return;
+    }
+    await TrackPlayer.removeUpcomingTracks();
+    await TrackPlayer.add(preShuffleUpcoming);
+    preShuffleUpcoming = null;
   }
-  await TrackPlayer.removeUpcomingTracks();
-  await TrackPlayer.add(rest);
 }
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {

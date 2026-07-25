@@ -86,8 +86,13 @@ android {
         applicationId "com.musicplayer"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Derived from the git tag by CI (APP_VERSION_NAME / APP_VERSION_CODE),
+        // so a `vX.Y.Z` release reports X.Y.Z. This is what the in-app updater
+        // compares against GitHub's latest tag — if these stay constant, every
+        // release looks identical and the updater loops forever offering the
+        // same one. Local/dev builds fall back to the defaults below.
+        versionCode(System.getenv("APP_VERSION_CODE") ? System.getenv("APP_VERSION_CODE").toInteger() : 1)
+        versionName(System.getenv("APP_VERSION_NAME") ?: "1.0.0")
 
         ndk {
             // Must match reactNativeArchitectures in gradle.properties.

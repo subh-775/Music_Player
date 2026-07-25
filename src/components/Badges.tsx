@@ -67,8 +67,8 @@ export function QualityBadge({
   if (!kbps) {
     return null;
   }
-  // Just the number — no pill behind it, per the request.
-  return <Text style={[styles.text, styles.qualityText]}>{kbps}</Text>;
+  // Number WITH its unit — no pill behind it.
+  return <Text style={[styles.text, styles.qualityText]}>{kbps} kbps</Text>;
 }
 
 const styles = StyleSheet.create({
