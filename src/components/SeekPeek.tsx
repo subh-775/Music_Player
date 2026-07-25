@@ -12,6 +12,7 @@ import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
 import {ChevronLeft, ChevronRight} from 'lucide-react-native';
 import {C} from '../theme';
+import {readSettings} from '../store';
 
 export function SeekPeek({
   side,
@@ -35,6 +36,10 @@ export function SeekPeek({
   }, [side, bloom]);
 
   useEffect(() => {
+    if (readSettings().reduceAnimations) {
+      chevrons.forEach(c => c.setValue(1)); // static arrows, no chase loop
+      return;
+    }
     // One continuous chase, looping for as long as the disc is up.
     const loop = Animated.loop(
       Animated.stagger(

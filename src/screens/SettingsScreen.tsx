@@ -15,7 +15,10 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ExternalLink,
   FolderOpen,
+  HardDrive,
+  RefreshCw,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
@@ -280,6 +283,17 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     }
   }, []);
 
+  /** Clear the custom folder — downloads go back to the default location. */
+  const useDefaultFolder = useCallback(async () => {
+    try {
+      const res = await setDownloadsDir('');
+      setDownloads(d => ({...(d ?? {}), ...res}));
+      toast('Using the default download folder');
+    } catch {
+      toast('Could not reset the folder');
+    }
+  }, []);
+
   const doReset = useCallback(() => {
     resetSettings();
     setResetOpen(false);
@@ -377,6 +391,19 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     );
   }
 
+  const updateStatusText =
+    update.phase === 'checking'
+      ? 'Checking…'
+      : update.phase === 'found'
+      ? `Version ${update.info?.version} available`
+      : update.phase === 'downloading'
+      ? `Downloading… ${update.pct}%`
+      : update.phase === 'failed'
+      ? 'Check failed — tap to retry'
+      : update.phase === 'current'
+      ? "You're up to date."
+      : 'Check whether a new version is available';
+
   return (
     <View style={styles.wrap}>
       <View style={[styles.bar, styles.barElevated]}>
@@ -465,21 +492,20 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
             )}
             {Object.entries(sources)
               .filter(([, v]) => v.type === 'audio')
-              .map(([name, s]) => {
+              .map(([name]) => {
                 // Same tints as the track badges, so "which source is this"
                 // reads the same everywhere.
-                const tint = SOURCE_META[name]?.tint;
+                const tint = SOURCE_META[name]?.tint || C.sub;
                 return name === 'youtube' ? (
                   <View key={name} style={styles.row}>
+                    <View style={[styles.dot, {backgroundColor: tint}]} />
                     <View style={styles.rowText}>
-                      <Text style={[styles.rowLabel, !!tint && {color: tint}]}>
-                        YouTube
-                      </Text>
+                      <Text style={styles.rowLabel}>YouTube</Text>
                       <Text style={styles.rowHint}>
                         {ytBusy
                           ? 'Checking this device…'
                           : yt?.supported
-                          ? 'Adds YouTube as a search source. No sign-in needed.'
+                          ? 'Adds YouTube as a search and download source. No sign-in needed.'
                           : 'Not available on this device.'}
                       </Text>
                     </View>
@@ -491,52 +517,86 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                   </View>
                 ) : (
                   <View key={name} style={styles.row}>
+                    <View style={[styles.dot, {backgroundColor: tint}]} />
                     <View style={styles.rowText}>
-                      <Text style={[styles.rowLabel, !!tint && {color: tint}]}>
+                      <Text style={styles.rowLabel}>
                         {SOURCE_META[name]?.label ||
                           (name === 'jiosaavn' ? 'JioSaavn' : 'SoundCloud')}
                       </Text>
-                      {!!s.quality && (
-                        <Text style={styles.rowHint}>{s.quality}</Text>
-                      )}
+                      <Text style={styles.rowHint}>
+                        {name === 'jiosaavn'
+                          ? 'High-quality tracks and albums'
+                          : 'Remixes, sets and independent uploads'}
+                      </Text>
                     </View>
-                    <Text style={styles.rowValue}>
-                      {s.status === 'ready' ? 'On' : s.status}
-                    </Text>
+                    {/* Always on — these two need no setup, so the switch is a
+                        frozen ON, not a status word. */}
+                    <Toggle value disabled onChange={() => {}} />
                   </View>
                 );
               })}
           </Section>
 
           <Section title="Storage">
+            <Text style={styles.folderPath}>Where your downloaded songs are saved</Text>
             <View style={styles.row}>
+              <HardDrive size={20} color={C.text} strokeWidth={1.9} />
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>Download folder</Text>
+                <Text style={styles.rowLabel}>Downloads folder</Text>
                 <Text style={styles.rowHint} numberOfLines={2}>
                   {folder ||
                     (downloads?.using_fallback
                       ? 'Using private app storage'
                       : 'Not available yet')}
                 </Text>
+                <View style={styles.btnRow}>
+                  <TouchableOpacity
+                    style={styles.setBtn}
+                    onPress={pickDownloadFolder}
+                    activeOpacity={0.85}>
+                    <FolderOpen size={14} color={C.text} strokeWidth={2.2} />
+                    <Text style={styles.setBtnText}>Choose folder</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.ghostBtn}
+                    onPress={useDefaultFolder}
+                    activeOpacity={0.7}>
+                    <Text style={styles.ghostBtnText}>Use default</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              <TouchableOpacity
-                style={styles.setBtn}
-                onPress={pickDownloadFolder}
-                activeOpacity={0.85}>
-                <FolderOpen size={15} color={C.text} strokeWidth={2.2} />
-                <Text style={styles.setBtnText}>Set folder</Text>
-              </TouchableOpacity>
             </View>
           </Section>
 
-          <Section title="About">
-            <Row label="Version" value={appVersion || '—'} />
-            <NavRow label="Check for updates" onPress={checkUpdates} />
-            <NavRow label="Tips & shortcuts" onPress={() => setPanel('tips')} />
-            <Row
-              label="Project on GitHub"
-              onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}
-            />
+          <Section title="About & help">
+            <NavRow label="Shortcuts" onPress={() => setPanel('tips')} />
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
+              <Text style={[styles.rowLabel, styles.rowText]}>Documentation</Text>
+              <ExternalLink size={18} color={C.faint} />
+            </TouchableOpacity>
+          </Section>
+
+          <Section title="Updates">
+            <View style={styles.row}>
+              <RefreshCw size={19} color={C.sub} strokeWidth={2} />
+              <View style={styles.rowText}>
+                <View style={styles.updateHead}>
+                  <Text style={styles.rowLabel}>Installed</Text>
+                  <Text style={styles.rowValue}>{appVersion || '—'}</Text>
+                </View>
+                <Text style={styles.rowHint}>{updateStatusText}</Text>
+                <TouchableOpacity
+                  style={[styles.setBtn, styles.checkBtn]}
+                  onPress={checkUpdates}
+                  activeOpacity={0.85}>
+                  <RefreshCw size={14} color={C.text} strokeWidth={2.2} />
+                  <Text style={styles.setBtnText}>Check again</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </Section>
 
           <TouchableOpacity
@@ -653,6 +713,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
+  dot: {width: 8, height: 8, borderRadius: 4},
+  btnRow: {flexDirection: 'row', gap: 10, marginTop: 12},
   setBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -665,4 +727,12 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   setBtnText: {color: C.text, fontWeight: '700', fontSize: 13},
+  ghostBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  ghostBtnText: {color: C.sub, fontWeight: '700', fontSize: 13},
+  updateHead: {flexDirection: 'row', justifyContent: 'space-between'},
+  checkBtn: {alignSelf: 'flex-start', marginTop: 12},
 });

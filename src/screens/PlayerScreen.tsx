@@ -359,6 +359,11 @@ export function PlayerScreen({
     <Modal
       visible={visible}
       animationType="slide"
+      // Transparent so that when the swipe drags the sheet DOWN, the space it
+      // vacates reveals the app behind (Home) instead of the modal window's own
+      // white background. The sheet itself is opaque (styles.wrap), so a fully
+      // open player still covers everything.
+      transparent
       onRequestClose={onClose}
       statusBarTranslucent>
       <Animated.View

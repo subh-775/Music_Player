@@ -26,7 +26,7 @@ import {
 import {Menu} from 'lucide-react-native';
 import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
-import {TrackPlayer, sourceTrackFor} from '../player';
+import {Event, TrackPlayer, sourceTrackFor} from '../player';
 
 const ROW_H = 60;
 
@@ -58,15 +58,20 @@ export function QueuePane() {
 
   useEffect(() => {
     refresh();
-    // The queue changes on track advance and on shuffle; a light poll keeps
-    // this honest without wiring a listener per event type. Paused mid-drag so
-    // a refresh can't reshuffle the list under the finger.
-    const t = setInterval(() => {
-      if (dragFrom === null && Date.now() > settleUntil.current) {
-        refresh();
-      }
-    }, 1000);
-    return () => clearInterval(t);
+    // Event-driven, NOT polled. The old 1s poll repainted the list every second
+    // from the engine — which is what made a just-dropped reorder appear to take
+    // a beat to "settle". Now we only refresh when the engine actually advances
+    // a track (or radio tops up, which lands on the same event), and never
+    // mid-drag or within the settle window after a drop.
+    const sub = TrackPlayer.addEventListener(
+      Event.PlaybackActiveTrackChanged,
+      () => {
+        if (dragFrom === null && Date.now() > settleUntil.current) {
+          refresh();
+        }
+      },
+    );
+    return () => sub.remove();
   }, [refresh, dragFrom]);
 
   const jump = useCallback(
