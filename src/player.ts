@@ -308,18 +308,22 @@ export async function playTrack(
 
   queueSource = items.map(x => x.t);
 
+  cancelCrossfade(); // and guarantee full volume for the fresh track
   await TrackPlayer.reset();
   // Add the CHOSEN track (and everything after it) FIRST, so the engine's
   // active track is the one you tapped from the very first frame. Adding the
   // whole list and then skip(startAt) briefly made the mini player show track 0
   // — its artwork, title and slide — before jumping to your song.
   await TrackPlayer.add(items.slice(startAt).map(x => x.q));
-  await TrackPlayer.play();
   if (startAt > 0) {
     // Prepend the earlier tracks so Previous still works. Inserting before
     // index 0 shifts the active track to startAt without ever surfacing track 0.
     await TrackPlayer.add(items.slice(0, startAt).map(x => x.q), 0);
   }
+  // Play only once the queue is FULLY built — starting mid-rebuild left a brief
+  // window where a swipe (next/previous) acted on a half-formed queue and could
+  // land on the wrong song.
+  await TrackPlayer.play();
 
   // Recorded at play-START, before enrichment runs. remember() replaces an
   // existing entry rather than appending, so the cleaned-up version wins later.
@@ -560,13 +564,14 @@ let getCrossfadeSeconds: () => number = () => 0;
  * flow into it. Restores full volume so the chosen track isn't left quiet.
  */
 function cancelCrossfade(): void {
-  if (!cfActive) {
-    return;
-  }
   cfActive = false;
   didFadeOut = false;
   fadeGen++; // abort any in-flight RNTP ramp
   endCrossfade();
+  // ALWAYS restore full volume — a fade-down that never reached its handoff
+  // (an app backgrounded mid-fade, the setting toggled off, a pause on the last
+  // second) used to leave the engine stuck at ~4% volume, which is exactly the
+  // "next song is suddenly really quiet" report.
   TrackPlayer.setVolume(1).catch(() => {});
 }
 

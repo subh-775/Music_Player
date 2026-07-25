@@ -248,12 +248,24 @@ function Shell() {
         setSettingsOpen(false);
         return true;
       }
-      if (artist) {
-        setArtist(null);
-        return true;
-      }
       if (importUrl) {
         setImportUrl(null);
+        return true;
+      }
+      // Artist and album/playlist overlays stack in either order (open an album
+      // FROM an artist, or an artist from an album), so back must dismiss the one
+      // actually on TOP — by z-order — not a fixed priority. Otherwise back closed
+      // the screen underneath and left the visible one stuck.
+      if (artist && collection) {
+        if (artistZ >= collectionZ) {
+          setArtist(null);
+        } else {
+          setCollection(null);
+        }
+        return true;
+      }
+      if (artist) {
+        setArtist(null);
         return true;
       }
       if (collection) {
@@ -284,8 +296,10 @@ function Shell() {
     sheetTrack,
     settingsOpen,
     artist,
+    artistZ,
     importUrl,
     collection,
+    collectionZ,
     tab,
   ]);
 

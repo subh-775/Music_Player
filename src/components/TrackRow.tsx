@@ -95,11 +95,11 @@ export function TrackRow({
 
   return (
     <View style={styles.swipeWrap} {...pan.panHandlers}>
-      {/* Revealed behind the row as it slides — the green ground + icon say
-          what releasing will do, the way Spotify's swipe does. */}
+      {/* Revealed behind the row as it slides — a SOLID green ground with a
+          white icon, so releasing reads clearly (the faint tint washed out). */}
       <View style={styles.queueHintBg} pointerEvents="none">
         <View style={styles.queueHint}>
-          <ListPlus size={20} color={C.accent} />
+          <ListPlus size={22} color="#ffffff" strokeWidth={2.4} />
         </View>
       </View>
 
@@ -162,11 +162,11 @@ const styles = StyleSheet.create({
   swipeWrap: {justifyContent: 'center'},
   queueHintBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(29,185,84,0.16)',
+    backgroundColor: C.accent,
   },
   queueHint: {
     position: 'absolute',
-    left: S.gutter,
+    left: S.gutter + 8,
     top: 0,
     bottom: 0,
     justifyContent: 'center',

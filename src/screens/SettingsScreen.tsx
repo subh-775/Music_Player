@@ -203,7 +203,9 @@ function NavRow({
 }
 
 export function SettingsScreen({onClose}: {onClose: () => void}) {
-  const [panel, setPanel] = useState<'equalizer' | 'tips' | null>(null);
+  const [panel, setPanel] = useState<'equalizer' | 'tips' | 'playback' | null>(
+    null,
+  );
   const [resetOpen, setResetOpen] = useState(false);
   const {settings} = useStore();
   const [sources, setSources] = useState<Record<string, SourceStatus>>({});
@@ -322,10 +324,60 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   if (panel === 'tips') {
     return <TipsScreen onClose={() => setPanel(null)} />;
   }
+  if (panel === 'playback') {
+    return (
+      <View style={styles.wrap}>
+        <View style={[styles.bar, styles.barElevated]}>
+          <TouchableOpacity
+            onPress={() => setPanel(null)}
+            hitSlop={12}
+            style={styles.back}>
+            <ChevronLeft size={28} color={C.text} />
+          </TouchableOpacity>
+          <Text style={styles.barTitle}>Playback</Text>
+        </View>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}>
+          <Section title="Listening controls">
+            <ToggleRow
+              label="Autoplay"
+              hint="Similar songs keep playing when your queue ends."
+              value={settings.autoplay}
+              onChange={v => writeSetting('autoplay', v)}
+            />
+            <ToggleRow
+              label="Normalize volume"
+              hint="Set the same loudness level for all tracks."
+              value={settings.normalizeVolume}
+              onChange={v => {
+                writeSetting('normalizeVolume', v);
+                applyAudioEffects();
+              }}
+            />
+            <ToggleRow
+              label="Reduce animations"
+              hint="Turn off non-essential motion around the app."
+              value={settings.reduceAnimations}
+              onChange={v => writeSetting('reduceAnimations', v)}
+            />
+          </Section>
+
+          <Section title="Track transitions">
+            <CrossfadeStepper
+              value={settings.crossfadeDuration}
+              onChange={secs => writeSetting('crossfadeDuration', secs)}
+            />
+          </Section>
+          <View style={styles.tail} />
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.bar}>
+      <View style={[styles.bar, styles.barElevated]}>
         <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.back}>
           <ChevronLeft size={28} color={C.text} />
         </TouchableOpacity>
@@ -381,16 +433,16 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
             />
           </Section>
 
-          <Section title="Playback">
-            <ToggleRow
-              label="Autoplay"
-              hint="Keep playing similar songs when the queue ends"
-              value={settings.autoplay}
-              onChange={v => writeSetting('autoplay', v)}
+          <Section title="Player">
+            <NavRow
+              label="Playback"
+              value={
+                settings.crossfadeDuration > 0
+                  ? `Crossfade ${settings.crossfadeDuration}s`
+                  : undefined
+              }
+              onPress={() => setPanel('playback')}
             />
-          </Section>
-
-          <Section title="Sound">
             <NavRow
               label="Equalizer"
               value={
@@ -400,19 +452,6 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                   : 'Off'
               }
               onPress={() => setPanel('equalizer')}
-            />
-            <CrossfadeStepper
-              value={settings.crossfadeDuration}
-              onChange={secs => writeSetting('crossfadeDuration', secs)}
-            />
-            <ToggleRow
-              label="Normalize volume"
-              hint="Even out loudness between songs"
-              value={settings.normalizeVolume}
-              onChange={v => {
-                writeSetting('normalizeVolume', v);
-                applyAudioEffects();
-              }}
             />
           </Section>
 
@@ -533,6 +572,20 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   back: {padding: 4},
+  // A softly elevated header — a lift off the black body that reads like the
+  // subtle grey gradient on Spotify's own sub-screen bars, without pulling in a
+  // gradient dependency.
+  barElevated: {
+    backgroundColor: C.surface,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 5,
+  },
   barTitle: {...T.screenTitle, color: C.text, fontSize: 22},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   // Enough tail room that the last row clears the mini player + bottom nav —
