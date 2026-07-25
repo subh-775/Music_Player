@@ -1,21 +1,26 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  Alert,
   Animated,
+  BackHandler,
   Linking,
   NativeModules,
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Check, ChevronLeft, ChevronRight} from 'lucide-react-native';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  FolderOpen,
+} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
   appVersion,
-  backendPort,
   getDownloadsInfo,
   getSourcesStatus,
   getYouTubeExperimental,
@@ -27,6 +32,8 @@ import {
 import {resetSettings, useStore, writeSetting} from '../store';
 import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
+import {TipsScreen} from './TipsScreen';
+import {ConfirmModal} from '../components/ConfirmModal';
 import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
@@ -105,89 +112,74 @@ function ToggleRow({
 }
 
 const CROSSFADE_MAX = 12;
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 /**
- * The crossfade control: a draggable bar from 0 to 12s, like the WebView build.
- * Snaps to whole seconds; 0 reads as Off.
+ * The crossfade control: a plain −/+ stepper (0–12s), 0 reads as Off.
+ *
+ * Replaced the draggable bar — precise dragging on a thin track was fiddly to
+ * land on an exact second. Two big taps are exact and comfortable one-handed.
+ * The number pops on each change so the press registers.
  */
-function CrossfadeRow({
+function CrossfadeStepper({
   value,
   onChange,
 }: {
   value: number;
   onChange: (secs: number) => void;
 }) {
-  // Animated fill/knob (transform-only) driven straight from the gesture; the
-  // seconds label updates on whole-second changes; settings commit on release.
-  const widthRef = useRef(1);
-  const t = useRef(new Animated.Value(clamp01(value / CROSSFADE_MAX))).current;
-  const [label, setLabel] = useState(value);
-  const draggingRef = useRef(false);
-  const changeRef = useRef(onChange);
-  changeRef.current = onChange;
+  const pop = useRef(new Animated.Value(1)).current;
+  const first = useRef(true);
 
   useEffect(() => {
-    if (!draggingRef.current) {
-      t.setValue(clamp01(value / CROSSFADE_MAX));
-      setLabel(value);
+    if (first.current) {
+      first.current = false;
+      return;
     }
-  }, [value, t]);
+    pop.setValue(1.28);
+    Animated.spring(pop, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 5,
+      tension: 140,
+    }).start();
+  }, [value, pop]);
 
-  const apply = useCallback(
-    (x: number) => {
-      const tt = clamp01(x / widthRef.current);
-      t.setValue(tt);
-      const secs = Math.round(tt * CROSSFADE_MAX);
-      setLabel(prev => (prev === secs ? prev : secs));
-      return secs;
-    },
-    [t],
-  );
-
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: e => {
-        draggingRef.current = true;
-        apply(e.nativeEvent.locationX);
-      },
-      onPanResponderMove: e => apply(e.nativeEvent.locationX),
-      onPanResponderRelease: e => {
-        const secs = apply(e.nativeEvent.locationX);
-        draggingRef.current = false;
-        changeRef.current(secs);
-      },
-      onPanResponderTerminate: () => {
-        draggingRef.current = false;
-      },
-    }),
-  ).current;
-
-  // Percentage interpolation — the track width is dynamic, so this avoids
-  // measuring it. Still no React re-render per frame.
-  const pct = t.interpolate({inputRange: [0, 1], outputRange: ['0%', '100%']});
-  const fillStyle = {width: pct};
-  const knobStyle = {left: pct};
+  const step = (delta: number) => {
+    const next = Math.max(0, Math.min(CROSSFADE_MAX, value + delta));
+    if (next !== value) {
+      onChange(next);
+    }
+  };
+  const atMin = value <= 0;
+  const atMax = value >= CROSSFADE_MAX;
 
   return (
     <View style={styles.row}>
       <View style={styles.rowText}>
         <Text style={styles.rowLabel}>Crossfade</Text>
-        <View
-          style={styles.fadeTrackArea}
-          onLayout={e => {
-            widthRef.current = Math.max(1, e.nativeEvent.layout.width);
-          }}
-          {...pan.panHandlers}>
-          <View style={styles.fadeTrack} />
-          <Animated.View style={[styles.fadeFill, fillStyle]} />
-          <Animated.View style={[styles.fadeKnob, knobStyle]} />
-        </View>
+        <Text style={styles.rowHint}>Overlap the end of one song into the next</Text>
       </View>
-      <Text style={styles.rowValue}>{label > 0 ? `${label}s` : 'Off'}</Text>
+      <View style={styles.stepper}>
+        <TouchableOpacity
+          onPress={() => step(-1)}
+          disabled={atMin}
+          hitSlop={8}
+          activeOpacity={0.6}
+          style={styles.stepBtn}>
+          <ChevronsLeft size={22} color={atMin ? C.faint : C.text} />
+        </TouchableOpacity>
+        <Animated.Text style={[styles.stepValue, {transform: [{scale: pop}]}]}>
+          {value > 0 ? `${value}s` : 'Off'}
+        </Animated.Text>
+        <TouchableOpacity
+          onPress={() => step(1)}
+          disabled={atMax}
+          hitSlop={8}
+          activeOpacity={0.6}
+          style={styles.stepBtn}>
+          <ChevronsRight size={22} color={atMax ? C.faint : C.text} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -211,7 +203,8 @@ function NavRow({
 }
 
 export function SettingsScreen({onClose}: {onClose: () => void}) {
-  const [panel, setPanel] = useState<'equalizer' | null>(null);
+  const [panel, setPanel] = useState<'equalizer' | 'tips' | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
   const {settings} = useStore();
   const [sources, setSources] = useState<Record<string, SourceStatus>>({});
   const [downloads, setDownloads] = useState<DownloadsInfo | null>(null);
@@ -220,6 +213,23 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   );
   const [ytBusy, setYtBusy] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
+
+  // A sub-panel (Equalizer, Tips) must catch the hardware back itself and
+  // return to Settings — NOT fall through to the app-level handler, which would
+  // close Settings entirely and drop you on Home. Registered after the app's
+  // handler, so it runs first; when no panel is open it declines and the app's
+  // handler closes Settings as before.
+  useEffect(() => {
+    const onBack = () => {
+      if (panel) {
+        setPanel(null);
+        return true;
+      }
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [panel]);
 
   useEffect(() => {
     (async () => {
@@ -287,14 +297,20 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     }
   }, []);
 
-  const confirmReset = useCallback(() => {
-    Alert.alert(
-      'Reset all settings?',
-      "Everything goes back to defaults. Your library isn't touched.",
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {text: 'Reset', style: 'destructive', onPress: resetSettings},
-      ],
+  const doReset = useCallback(() => {
+    resetSettings();
+    setResetOpen(false);
+    toast('Settings reset to defaults');
+  }, []);
+
+  // Dummy for now: once a tag ships, this checks GitHub releases and offers the
+  // update in-app, the way the WebView build does. Until then it just confirms
+  // the installed version.
+  const checkUpdates = useCallback(() => {
+    toast(
+      appVersion
+        ? `You're on the latest version (${appVersion})`
+        : "You're on the latest version",
     );
   }, []);
 
@@ -302,6 +318,9 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   // not an inline expander — the list stays scannable.
   if (panel === 'equalizer') {
     return <EqualizerScreen onClose={() => setPanel(null)} />;
+  }
+  if (panel === 'tips') {
+    return <TipsScreen onClose={() => setPanel(null)} />;
   }
 
   return (
@@ -382,7 +401,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
               }
               onPress={() => setPanel('equalizer')}
             />
-            <CrossfadeRow
+            <CrossfadeStepper
               value={settings.crossfadeDuration}
               onChange={secs => writeSetting('crossfadeDuration', secs)}
             />
@@ -447,19 +466,30 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           </Section>
 
           <Section title="Storage">
-            <NavRow
-              label="Download folder"
-              value={downloads?.using_fallback ? 'Private' : undefined}
-              onPress={pickDownloadFolder}
-            />
-            <Text style={styles.folderPath} numberOfLines={2}>
-              {folder || 'Not available yet'}
-            </Text>
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Download folder</Text>
+                <Text style={styles.rowHint} numberOfLines={2}>
+                  {folder ||
+                    (downloads?.using_fallback
+                      ? 'Using private app storage'
+                      : 'Not available yet')}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.setBtn}
+                onPress={pickDownloadFolder}
+                activeOpacity={0.85}>
+                <FolderOpen size={15} color={C.bg} strokeWidth={2.2} />
+                <Text style={styles.setBtnText}>Set folder</Text>
+              </TouchableOpacity>
+            </View>
           </Section>
 
           <Section title="About">
             <Row label="Version" value={appVersion || '—'} />
-            <Row label="Engine" value={`ExoPlayer · :${backendPort}`} />
+            <NavRow label="Check for updates" onPress={checkUpdates} />
+            <NavRow label="Tips & shortcuts" onPress={() => setPanel('tips')} />
             <Row
               label="Project on GitHub"
               onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}
@@ -469,7 +499,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           <TouchableOpacity
             style={styles.reset}
             activeOpacity={0.7}
-            onPress={confirmReset}>
+            onPress={() => setResetOpen(true)}>
             <Text style={styles.resetText}>Reset all settings</Text>
             <Text style={styles.rowHint}>
               Puts everything back to defaults. Your library isn&apos;t touched.
@@ -478,6 +508,16 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
 
           <View style={styles.tail} />
         </ScrollView>
+
+        <ConfirmModal
+          visible={resetOpen}
+          title="Reset all settings?"
+          message="Everything goes back to defaults. Your library isn't touched."
+          confirmLabel="Reset"
+          danger
+          onConfirm={doReset}
+          onCancel={() => setResetOpen(false)}
+        />
     </View>
   );
 }
@@ -546,35 +586,24 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     marginTop: -6,
   },
-  fadeTrackArea: {
-    // 44px touch target (Fitts'), while the bar still reads as 4px.
-    height: 44,
-    justifyContent: 'center',
-    marginTop: 4,
-    marginRight: 4,
+  stepper: {flexDirection: 'row', alignItems: 'center', gap: 2},
+  stepBtn: {padding: 6, borderRadius: 999},
+  stepValue: {
+    color: C.text,
+    fontSize: 15,
+    fontWeight: '700',
+    minWidth: 46,
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
   },
-  fadeTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  fadeFill: {
-    position: 'absolute',
-    height: 4,
-    borderRadius: 2,
+  setBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: C.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
-  fadeKnob: {
-    position: 'absolute',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginLeft: -8,
-    backgroundColor: C.accentBright,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
-    shadowOffset: {width: 0, height: 1},
-    elevation: 3,
-  },
+  setBtnText: {color: C.bg, fontWeight: '800', fontSize: 13},
 });

@@ -26,6 +26,8 @@ import React, {
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
+  Easing,
   Image,
   Modal,
   PanResponder,
@@ -136,6 +138,24 @@ export function PlayerScreen({
 
   const doubleTapSeek = useCallback(
     (side: 1 | -1) => {
+      const target = position + side * 10;
+      // Dashing PAST the ends changes the song — and a track change from a
+      // deliberate gesture should always PLAY, even if you were paused. (Seeking
+      // WITHIN a song leaves play/pause alone, so scrubbing a paused song stays
+      // paused.) skipNext/skipPrevious both resume.
+      if (side === 1 && duration > 0 && target >= duration - 0.5) {
+        setSeekFlash(null);
+        tapRef.current = null;
+        skipNext();
+        return;
+      }
+      if (side === -1 && position <= 0.5) {
+        setSeekFlash(null);
+        tapRef.current = null;
+        skipPrevious();
+        return;
+      }
+
       const now = Date.now();
       const prev = tapRef.current;
       const stacked =
@@ -150,7 +170,7 @@ export function PlayerScreen({
       }
       flashTimer.current = setTimeout(() => setSeekFlash(null), 800);
     },
-    [position],
+    [position, duration],
   );
 
   useEffect(
@@ -165,14 +185,33 @@ export function PlayerScreen({
   // Artwork follows the finger, then leaves and re-enters on a change.
   const slide = useRef(new Animated.Value(0)).current;
 
-  // Drag the header down to dismiss. Past a threshold it closes; short of it,
-  // the sheet springs back. Reset to 0 whenever the player (re)opens.
-  const sheetY = useRef(new Animated.Value(0)).current;
+  // The player slides up/down under our own control (Modal animationType is
+  // "none"), so the swipe-down and the chevron button share ONE motion — the
+  // swipe just hands off to the same close animation the button plays, which is
+  // what makes them feel identical and smooth.
+  const SHEET_H = Dimensions.get('window').height;
+  const sheetY = useRef(new Animated.Value(SHEET_H)).current;
   useEffect(() => {
     if (visible) {
-      sheetY.setValue(0);
+      sheetY.setValue(SHEET_H);
+      Animated.timing(sheetY, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
     }
-  }, [visible, sheetY]);
+  }, [visible, sheetY, SHEET_H]);
+
+  // Animate the sheet fully down, THEN unmount — button and swipe both call this.
+  const close = useCallback(() => {
+    Animated.timing(sheetY, {
+      toValue: SHEET_H,
+      duration: 240,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => onClose());
+  }, [sheetY, SHEET_H, onClose]);
 
   const dismissPan = useMemo(
     () =>
@@ -185,15 +224,10 @@ export function PlayerScreen({
           }
         },
         onPanResponderRelease: (_e, g) => {
-          if (g.dy > 130) {
-            Animated.timing(sheetY, {
-              toValue: 700,
-              duration: 180,
-              useNativeDriver: true,
-            }).start(() => {
-              sheetY.setValue(0);
-              onClose();
-            });
+          // Past the threshold (or a fast flick) → hand off to the SAME close
+          // animation the button plays. Short of it → spring back up.
+          if (g.dy > 130 || g.vy > 0.8) {
+            close();
           } else {
             Animated.spring(sheetY, {
               toValue: 0,
@@ -203,7 +237,7 @@ export function PlayerScreen({
           }
         },
       }),
-    [sheetY, onClose],
+    [sheetY, close],
   );
 
   const commit = useCallback(
@@ -265,7 +299,15 @@ export function PlayerScreen({
     setRepeat(next).catch(() => {});
   }, [repeat]);
 
+  // Guard against mashing: one shuffle + one toast per ~1.2s, so a rapid series
+  // of taps doesn't spam the notice or re-toggle the icon on every press.
+  const shuffleLock = useRef(0);
   const onShuffle = useCallback(() => {
+    const now = Date.now();
+    if (now - shuffleLock.current < 1200) {
+      return;
+    }
+    shuffleLock.current = now;
     shuffleQueue()
       .then(() => {
         setShuffled(v => !v);
@@ -301,8 +343,8 @@ export function PlayerScreen({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      onRequestClose={onClose}
+      animationType="none"
+      onRequestClose={close}
       statusBarTranslucent>
       <Animated.View
         style={[
@@ -313,7 +355,7 @@ export function PlayerScreen({
         {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
         <View style={styles.topBar} {...dismissPan.panHandlers}>
-          <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
+          <TouchableOpacity onPress={close} hitSlop={14} style={styles.iconBtn}>
             <ChevronDown size={26} color={C.text} />
           </TouchableOpacity>
           <Text style={styles.context} numberOfLines={1}>

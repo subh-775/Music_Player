@@ -71,6 +71,7 @@ export function Greeting() {
 const styles = StyleSheet.create({
   wrap: {flex: 1, minWidth: 0},
   line: {flexDirection: 'row', alignItems: 'baseline'},
-  good: {fontSize: 33, fontWeight: '900', color: C.text, letterSpacing: -1.1},
-  word: {fontSize: 33, fontWeight: '900', letterSpacing: -1.1},
+  // lineHeight gives the 'g' descender room — Android crops it otherwise.
+  good: {fontSize: 32, lineHeight: 41, fontWeight: '900', color: C.text, letterSpacing: -1.1},
+  word: {fontSize: 32, lineHeight: 41, fontWeight: '900', letterSpacing: -1.1},
 });

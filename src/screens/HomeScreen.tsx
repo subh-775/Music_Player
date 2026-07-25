@@ -1,6 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   ScrollView,
@@ -13,6 +12,7 @@ import {Settings as SettingsIcon} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
 import {Greeting} from '../components/Greeting';
+import {Splash} from '../components/Splash';
 import {useRecentlyPlayed} from '../recentlyPlayed';
 import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
 import {createStore, asArray, useStoreValue} from '../storage';
@@ -70,12 +70,7 @@ export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
   }, [load]);
 
   if (phase === 'boot') {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color={C.accent} size="large" />
-        <Text style={styles.centerText}>Starting the music engine…</Text>
-      </View>
-    );
+    return <Splash />;
   }
 
   if (phase === 'error') {
@@ -228,7 +223,6 @@ const styles = StyleSheet.create({
   cardTitle: {...T.body, color: C.text, marginTop: 8, lineHeight: 18},
   cardSub: {...T.sub, color: C.sub, marginTop: 2},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14},
-  centerText: {color: C.sub, fontSize: 14},
   errText: {
     color: C.danger,
     fontSize: 13.5,

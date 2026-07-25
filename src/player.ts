@@ -47,6 +47,12 @@ let available: boolean | null = null;
  */
 let queueSource: Track[] = [];
 
+// How many tracks the user has queued (via "add to queue") since the current
+// song started. Add-to-queue inserts right after the current track and after
+// each other, so several adds keep their order and all play SOON — not at the
+// bottom of a long album/playlist. Reset whenever the active track changes.
+let queuedAhead = 0;
+
 /** The full Track behind an engine queue item, or null if it isn't ours. */
 export function sourceTrackFor(
   active: {title?: string | null; artist?: string | null} | null | undefined,
@@ -148,6 +154,9 @@ export async function setupPlayer(): Promise<boolean> {
     // goes into Recently Played AS IT STARTS, so Home updates live. Manual
     // playTrack() also records (first write wins on order; remember() de-dupes).
     TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async e => {
+      // The "play this soon" window is relative to the current song — a new song
+      // starts a fresh one, so anything queued now goes right after it again.
+      queuedAhead = 0;
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
@@ -216,17 +225,26 @@ export async function restoreSession(): Promise<boolean> {
   }
   try {
     queueSource = items.map(x => x.t);
-    await TrackPlayer.reset();
-    await TrackPlayer.add(items.map(x => x.q!));
     const idx = Math.max(0, Math.min(items.length - 1, s.index));
-    if (idx > 0) {
-      await TrackPlayer.skip(idx);
-    }
+
+    await TrackPlayer.reset();
+    // Add the track you LEFT ON first (index 0) and seek it, so the mini player
+    // shows the right song at the right timestamp the instant the engine is up —
+    // instead of waiting for the whole queue to rebuild and skip into place.
+    await TrackPlayer.add([
+      items[idx].q!,
+      ...items.slice(idx + 1).map(x => x.q!),
+    ]);
     if (s.position > 0) {
       await TrackPlayer.seekTo(s.position);
     }
-    // Left paused — see above.
     applyAudioEffects();
+    // The earlier tracks come back afterward, prepended so Previous still works;
+    // this shifts the active index to idx without ever showing track 0.
+    if (idx > 0) {
+      await TrackPlayer.add(items.slice(0, idx).map(x => x.q!), 0);
+    }
+    // Left paused — see above.
     return true;
   } catch {
     return false;
@@ -291,11 +309,17 @@ export async function playTrack(
   queueSource = items.map(x => x.t);
 
   await TrackPlayer.reset();
-  await TrackPlayer.add(items.map(x => x.q));
-  if (startAt > 0) {
-    await TrackPlayer.skip(startAt);
-  }
+  // Add the CHOSEN track (and everything after it) FIRST, so the engine's
+  // active track is the one you tapped from the very first frame. Adding the
+  // whole list and then skip(startAt) briefly made the mini player show track 0
+  // — its artwork, title and slide — before jumping to your song.
+  await TrackPlayer.add(items.slice(startAt).map(x => x.q));
   await TrackPlayer.play();
+  if (startAt > 0) {
+    // Prepend the earlier tracks so Previous still works. Inserting before
+    // index 0 shifts the active track to startAt without ever surfacing track 0.
+    await TrackPlayer.add(items.slice(0, startAt).map(x => x.q), 0);
+  }
 
   // Recorded at play-START, before enrichment runs. remember() replaces an
   // existing entry rather than appending, so the cleaned-up version wins later.
@@ -320,17 +344,20 @@ export async function addToQueue(track: Track): Promise<void> {
   if (!item) {
     throw new Error('This track has no playable source.');
   }
-  // A song the user queues goes BEFORE the autoplay-radio tail — "add to
-  // queue" means "play this soon", not "after eight songs you didn't pick".
-  // The position comes from the ENGINE's queue (the truth), since the JS-side
-  // pool can drift after manual reorders.
+  // "Add to queue" means "play this soon", not "after 40 songs you didn't
+  // pick". Insert right after the current track (and after anything else queued
+  // since it started), so it jumps ahead of the rest of the album/playlist —
+  // the way Spotify's queue works. Positions come from the ENGINE queue (the
+  // truth); the JS pool can drift after a manual reorder.
   const queue = await TrackPlayer.getQueue();
-  const firstAuto = queue.findIndex(it => sourceTrackFor(it)?._autoplay);
-  if (firstAuto >= 0) {
-    await TrackPlayer.add([item], firstAuto);
+  const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
+  const at = idx >= 0 ? Math.min(idx + 1 + queuedAhead, queue.length) : queue.length;
+  if (at < queue.length) {
+    await TrackPlayer.add([item], at);
   } else {
     await TrackPlayer.add([item]);
   }
+  queuedAhead++;
   queueSource = [...queueSource, track];
 }
 

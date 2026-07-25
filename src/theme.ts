@@ -34,9 +34,22 @@ export const TYPE_SCALE = 1.02;
 export const fs = (size: number): number =>
   Math.round(size * TYPE_SCALE * 2) / 2;
 
+// lineHeight is explicit on the title styles: Android crops the descender of a
+// big bold letter (the 'g' in "Good morning" / "Settings") when a line is left
+// to its default height, so every title gets ~1.3× breathing room.
 export const T = {
-  screenTitle: {fontSize: fs(26), fontWeight: '800' as const, letterSpacing: -0.5},
-  rowTitle: {fontSize: fs(17), fontWeight: '700' as const, letterSpacing: -0.2},
+  screenTitle: {
+    fontSize: fs(26),
+    lineHeight: fs(34),
+    fontWeight: '800' as const,
+    letterSpacing: -0.5,
+  },
+  rowTitle: {
+    fontSize: fs(17),
+    lineHeight: fs(23),
+    fontWeight: '700' as const,
+    letterSpacing: -0.2,
+  },
   body: {fontSize: fs(14.5), fontWeight: '600' as const},
   sub: {fontSize: fs(12.5), fontWeight: '500' as const},
 };
