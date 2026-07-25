@@ -13,8 +13,11 @@ import {
   ActivityIndicator,
   Animated,
   Image,
+  Modal,
+  NativeModules,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -23,7 +26,10 @@ import {
   CheckSquare,
   ChevronLeft,
   Heart,
+  ImagePlus,
+  MoreVertical,
   Pause,
+  Pencil,
   Play,
   Shuffle,
   Square,
@@ -55,8 +61,14 @@ import {
   usePlaybackState,
 } from '../player';
 import {useLikes} from '../store';
-import {usePlaylists} from '../playlists';
+import {
+  deletePlaylist,
+  renamePlaylist,
+  setPlaylistImage,
+  usePlaylists,
+} from '../playlists';
 import {getLocalLibrary} from '../backend';
+import {ConfirmModal} from '../components/ConfirmModal';
 
 export function CollectionScreen({
   collection,
@@ -79,6 +91,12 @@ export function CollectionScreen({
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(() => isSaved(collection));
   const [shuffled, setShuffled] = useState(false);
+  // Own-playlist management, mirrored from the library's long-press sheet so a
+  // playlist is editable from inside as well as from its row.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameText, setRenameText] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   /**
    * LIVE tracks, not the snapshot the screen was opened with.
@@ -125,6 +143,23 @@ export function CollectionScreen({
     }
   }, [collection, likes, playlists, localTracks]);
   const runtime = useMemo(() => formatTotalDuration(tracks), [tracks]);
+
+  // A user playlist stays editable from inside, not only from its library row:
+  // reflect the LIVE name and cover so a rename or new picture shows without
+  // backing out, and expose the manage menu (rename / cover / delete).
+  const isOwnPlaylist = collection.kind === 'userPlaylist';
+  const playlistId = collection.id.replace(/^pl:/, '');
+  const livePlaylist = isOwnPlaylist
+    ? playlists.find(p => p.id === playlistId)
+    : undefined;
+  const displayName = livePlaylist?.name ?? collection.name;
+  const shownCollection = useMemo(
+    () =>
+      livePlaylist
+        ? {...collection, name: livePlaylist.name, image: livePlaylist.image}
+        : collection,
+    [collection, livePlaylist],
+  );
 
   // Whether THIS collection is what's sounding right now — that's what decides
   // if the big green button means pause/resume or "start from the top".
@@ -242,6 +277,41 @@ export function CollectionScreen({
     }
   }, [tracks]);
 
+  const changeCover = useCallback(async () => {
+    setMenuOpen(false);
+    const native = NativeModules.Backend as {pickImage?: () => Promise<string>};
+    if (typeof native.pickImage !== 'function') {
+      toast('Changing the cover needs the newest APK.');
+      return;
+    }
+    try {
+      const uri = await native.pickImage();
+      if (uri) {
+        setPlaylistImage(playlistId, uri);
+        toast('Cover updated');
+      }
+    } catch {
+      toast('Could not use that image');
+    }
+  }, [playlistId]);
+
+  const submitRename = useCallback(() => {
+    const clean = renameText.trim();
+    if (clean) {
+      renamePlaylist(playlistId, clean);
+      toast('Playlist renamed');
+    }
+    setRenaming(false);
+    setRenameText('');
+  }, [renameText, playlistId]);
+
+  const doDelete = useCallback(() => {
+    setConfirmDelete(false);
+    deletePlaylist(playlistId);
+    toast(`Deleted ${displayName}`);
+    onClose();
+  }, [playlistId, displayName, onClose]);
+
   /**
    * Shuffle reorders what comes NEXT without touching the current song when
    * this collection is already playing; otherwise it starts playback from a
@@ -305,9 +375,19 @@ export function CollectionScreen({
             </TouchableOpacity>
           </>
         ) : (
-          <Text style={styles.barTitle} numberOfLines={1}>
-            {collection.name}
-          </Text>
+          <>
+            <Text style={styles.barTitle} numberOfLines={1}>
+              {displayName}
+            </Text>
+            {isOwnPlaylist && (
+              <TouchableOpacity
+                onPress={() => setMenuOpen(true)}
+                hitSlop={12}
+                style={styles.barBtn}>
+                <MoreVertical size={22} color={C.text} />
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </View>
 
@@ -325,10 +405,10 @@ export function CollectionScreen({
           <View style={styles.header}>
             <Animated.View
               style={{transform: [{scale: artScale}], opacity: artOpacity}}>
-              <CollectionArt collection={collection} size={168} />
+              <CollectionArt collection={shownCollection} size={168} />
             </Animated.View>
             <Text style={styles.name} numberOfLines={2}>
-              {collection.name}
+              {displayName}
             </Text>
             <Text style={styles.sub}>
               {collectionSubtitle(collection)}
@@ -370,7 +450,12 @@ export function CollectionScreen({
                       />
                     </TouchableOpacity>
                   )}
-                  {collection.kind === 'album' ? (
+                  {/* Download-all: every album and playlist can be taken
+                      offline in one tap. A record keeps its fixed order so it
+                      gets no shuffle; a playlist gets both. */}
+                  {(collection.kind === 'album' ||
+                    collection.kind === 'userPlaylist' ||
+                    collection.kind === 'sourcePlaylist') && (
                     <TouchableOpacity
                       activeOpacity={0.7}
                       hitSlop={10}
@@ -381,7 +466,8 @@ export function CollectionScreen({
                         color={tracks.length ? C.text : C.faint}
                       />
                     </TouchableOpacity>
-                  ) : (
+                  )}
+                  {collection.kind !== 'album' && (
                     <TouchableOpacity
                       activeOpacity={0.7}
                       onPress={shuffle}
@@ -469,6 +555,108 @@ export function CollectionScreen({
           );
         }}
       />
+
+      {/* Manage this playlist — same options as the library's long-press sheet,
+          reachable from inside the playlist too. */}
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMenuOpen(false)}>
+        <TouchableOpacity
+          style={styles.sheetScrim}
+          activeOpacity={1}
+          onPress={() => setMenuOpen(false)}
+        />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle} numberOfLines={1}>
+            {displayName}
+          </Text>
+          <TouchableOpacity
+            style={styles.sheetRow}
+            activeOpacity={0.7}
+            onPress={() => {
+              setRenameText(displayName);
+              setMenuOpen(false);
+              setRenaming(true);
+            }}>
+            <Pencil size={20} color={C.sub} />
+            <Text style={styles.sheetLabel}>Rename</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetRow}
+            activeOpacity={0.7}
+            onPress={changeCover}>
+            <ImagePlus size={20} color={C.sub} />
+            <Text style={styles.sheetLabel}>Change cover</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetRow}
+            activeOpacity={0.7}
+            onPress={() => {
+              setMenuOpen(false);
+              setConfirmDelete(true);
+            }}>
+            <Trash2 size={20} color={C.danger} />
+            <Text style={[styles.sheetLabel, styles.sheetDanger]}>
+              Delete playlist
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Rename dialog. */}
+      <Modal
+        visible={renaming}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenaming(false)}>
+        <View style={styles.dialogScrim}>
+          <View style={styles.dialog}>
+            <Text style={styles.dialogTitle}>Rename playlist</Text>
+            <TextInput
+              value={renameText}
+              onChangeText={setRenameText}
+              placeholder="New name"
+              placeholderTextColor={C.faint}
+              style={styles.input}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={submitRename}
+            />
+            <View style={styles.dialogRow}>
+              <TouchableOpacity
+                onPress={() => setRenaming(false)}
+                style={styles.dialogBtn}>
+                <Text style={styles.dialogCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={submitRename}
+                disabled={!renameText.trim()}
+                style={styles.dialogBtn}>
+                <Text
+                  style={[
+                    styles.dialogOk,
+                    !renameText.trim() && styles.dialogDisabled,
+                  ]}>
+                  Save
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <ConfirmModal
+        visible={confirmDelete}
+        title={`Delete "${displayName}"?`}
+        message="The songs themselves are not touched."
+        confirmLabel="Delete"
+        danger
+        onConfirm={doDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </View>
   );
 }
@@ -529,4 +717,62 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   loadingBox: {alignItems: 'center', paddingTop: 26},
+  sheetScrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
+  sheet: {
+    backgroundColor: C.surfaceHi,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: 26,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginTop: 8,
+  },
+  sheetTitle: {
+    ...T.rowTitle,
+    color: C.text,
+    paddingHorizontal: S.gutter,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: S.gutter,
+    paddingVertical: 14,
+  },
+  sheetLabel: {fontSize: 15, color: C.text},
+  sheetDanger: {color: C.danger},
+  dialogScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  dialog: {
+    width: '100%',
+    borderRadius: 14,
+    backgroundColor: C.surfaceHi,
+    padding: 20,
+  },
+  dialogTitle: {...T.rowTitle, color: C.text, marginBottom: 14},
+  input: {
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    color: C.text,
+    fontSize: 16,
+    paddingVertical: 8,
+  },
+  dialogRow: {flexDirection: 'row', justifyContent: 'flex-end', marginTop: 18},
+  dialogBtn: {paddingHorizontal: 14, paddingVertical: 8},
+  dialogCancel: {color: C.sub, fontSize: 14, fontWeight: '700'},
+  dialogOk: {color: C.accent, fontSize: 14, fontWeight: '700'},
+  dialogDisabled: {color: C.faint},
 });
