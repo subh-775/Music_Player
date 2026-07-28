@@ -321,6 +321,14 @@ export function CollectionScreen({
     if (!tracks.length) {
       return;
     }
+    const next = !shuffled;
+    setShuffled(next);
+    if (!next) {
+      // Toggling OFF: put the upcoming tracks back in their original order.
+      await setShuffle(false).catch(() => {});
+      toast('Shuffle off');
+      return;
+    }
     if (playingHere) {
       await setShuffle(true).catch(() => {});
       toast('Shuffled what comes next');
@@ -329,8 +337,7 @@ export function CollectionScreen({
       // Give the queue a beat to build before shuffling its tail.
       setTimeout(() => setShuffle(true).catch(() => {}), 600);
     }
-    setShuffled(true);
-  }, [onPlay, tracks, playingHere]);
+  }, [onPlay, tracks, playingHere, shuffled]);
 
   /** The green button: pause/resume when this collection is playing, start it
    *  otherwise — never a dead control. */

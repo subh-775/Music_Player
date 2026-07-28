@@ -1,6 +1,8 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
+  Animated,
   BackHandler,
+  Easing,
   Linking,
   NativeModules,
   ScrollView,
@@ -40,7 +42,7 @@ import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
 import {SOURCE_META} from '../components/Badges';
-import {checkUpdate, updateSupported, useUpdate} from '../update';
+import {checkUpdate, useUpdate} from '../update';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
@@ -301,34 +303,31 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   }, []);
 
   // Real check: asks GitHub for the latest release. A newer one raises the
-  // in-app update popup (UpdateModal); "up to date" just toasts. The manualCheck
-  // ref keeps the launch-time silent check from toasting on its own.
+  // in-app update popup (UpdateModal); the RESULT of a manual check shows inline
+  // in the row (updateStatusText) — no toasts, so spamming the button can't pile
+  // up a stack of notifications. The spinning icon is the whole feedback.
   const update = useUpdate();
-  const manualCheck = useRef(false);
-  const checkUpdates = useCallback(() => {
-    if (!updateSupported) {
-      toast('Updating needs the newest APK.');
-      return;
-    }
-    manualCheck.current = true;
-    toast('Checking for updates…');
-    checkUpdate();
-  }, []);
+  const checking = update.phase === 'checking';
+  const spin = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!manualCheck.current) {
+    if (!checking) {
+      spin.stopAnimation();
+      spin.setValue(0);
       return;
     }
-    if (update.phase === 'current') {
-      manualCheck.current = false;
-      toast(
-        appVersion
-          ? `You're on the latest version (${appVersion})`
-          : "You're on the latest version",
-      );
-    } else if (update.phase === 'found') {
-      manualCheck.current = false; // the popup takes over
-    }
-  }, [update.phase]);
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 800,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [checking, spin]);
+  const spinDeg = spin.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
+  const checkUpdates = useCallback(() => checkUpdate(), []);
 
   // Anything with more than a switch's worth of choice gets its OWN screen,
   // not an inline expander — the list stays scannable.
@@ -401,7 +400,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
       : update.phase === 'failed'
       ? 'Check failed — tap to retry'
       : update.phase === 'current'
-      ? "You're up to date."
+      ? 'No update available'
       : 'Check whether a new version is available';
 
   return (
@@ -591,9 +590,14 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                 <TouchableOpacity
                   style={[styles.setBtn, styles.checkBtn]}
                   onPress={checkUpdates}
+                  disabled={checking}
                   activeOpacity={0.85}>
-                  <RefreshCw size={14} color={C.text} strokeWidth={2.2} />
-                  <Text style={styles.setBtnText}>Check again</Text>
+                  <Animated.View style={{transform: [{rotate: spinDeg}]}}>
+                    <RefreshCw size={14} color={C.text} strokeWidth={2.2} />
+                  </Animated.View>
+                  <Text style={styles.setBtnText}>
+                    {checking ? 'Checking…' : 'Check again'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>

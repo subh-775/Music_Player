@@ -95,11 +95,12 @@ export function TrackRow({
 
   return (
     <View style={styles.swipeWrap} {...pan.panHandlers}>
-      {/* Revealed behind the row as it slides — a SOLID green ground with a
-          white icon, so releasing reads clearly (the faint tint washed out). */}
+      {/* Revealed behind the row as it slides. A soft translucent green, not a
+          solid slab — a slightly-draggy tap barely shows it, and a real swipe
+          still reads clearly against the accent-tinted icon. */}
       <View style={styles.queueHintBg} pointerEvents="none">
         <View style={styles.queueHint}>
-          <ListPlus size={22} color="#ffffff" strokeWidth={2.4} />
+          <ListPlus size={22} color={C.accentBright} strokeWidth={2.4} />
         </View>
       </View>
 
@@ -162,7 +163,7 @@ const styles = StyleSheet.create({
   swipeWrap: {justifyContent: 'center'},
   queueHintBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: C.accent,
+    backgroundColor: 'rgba(29,185,84,0.16)',
   },
   queueHint: {
     position: 'absolute',

@@ -66,7 +66,9 @@ function ensureRegistered() {
 /** Kick a silent check. Safe to call repeatedly (launch + opening Settings). */
 export function checkUpdate(): void {
   ensureRegistered();
-  if (!updateSupported || state.phase === 'downloading') {
+  // Ignore a re-tap while a check or download is already in flight — that
+  // repeat was what stacked a pile of "checking…" toasts.
+  if (!updateSupported || state.phase === 'checking' || state.phase === 'downloading') {
     return;
   }
   state = {...state, phase: 'checking'};

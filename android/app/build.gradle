@@ -61,7 +61,7 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -120,8 +120,14 @@ android {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug
+            // R8 shrinks/obfuscates the Java/Kotlin and strips unused resources —
+            // the bulk of the APK is RN + androidx + kotlin-stdlib, and most of it
+            // is dead weight for this app. Keep rules for the reflection-heavy
+            // bits (RNTP internals, NewPipe/Rhino, Chaquopy) live in
+            // proguard-rules.pro. VERIFY a release build boots before tagging.
             minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            shrinkResources enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             buildConfigField "int", "BACKEND_PORT", "8770"
         }
     }

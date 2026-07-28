@@ -21,7 +21,6 @@ import {
   MousePointerClick,
   Move,
   Pin,
-  Repeat,
   Undo2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -82,11 +81,6 @@ const GROUPS: {title: string; tips: Tip[]}[] = [
         title: 'Hold a song',
         body: 'Opens more options — add to a playlist, go to the artist or album.',
       },
-      {
-        Icon: Repeat,
-        title: 'Drag the grip in Queue',
-        body: 'Reorders what plays next; drop it where you want it.',
-      },
     ],
   },
   {
@@ -130,7 +124,7 @@ export function TipsScreen({onClose}: {onClose: () => void}) {
             {g.tips.map(t => (
               <View key={t.title} style={styles.tip}>
                 <View style={styles.chip}>
-                  <t.Icon size={19} color={C.accent} strokeWidth={2} />
+                  <t.Icon size={20} color={C.text} strokeWidth={2} />
                 </View>
                 <View style={styles.tipText}>
                   <Text style={styles.tipTitle}>{t.title}</Text>
@@ -173,8 +167,6 @@ const styles = StyleSheet.create({
   chip: {
     width: 38,
     height: 38,
-    borderRadius: 10,
-    backgroundColor: C.surfaceHi,
     alignItems: 'center',
     justifyContent: 'center',
   },

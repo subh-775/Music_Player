@@ -325,9 +325,12 @@ export async function playTrack(
     // index 0 shifts the active track to startAt without ever surfacing track 0.
     await TrackPlayer.add(items.slice(0, startAt).map(x => x.q), 0);
   }
-  // Play only once the queue is FULLY built — starting mid-rebuild left a brief
-  // window where a swipe (next/previous) acted on a half-formed queue and could
-  // land on the wrong song.
+  // Start silent so the first frames can't blast before the output settles; the
+  // PlaybackActiveTrackChanged handler ramps it back up. Play only once the
+  // queue is FULLY built — starting mid-rebuild left a brief window where a
+  // swipe (next/previous) acted on a half-formed queue and could land on the
+  // wrong song.
+  await TrackPlayer.setVolume(0);
   await TrackPlayer.play();
 
   // Recorded at play-START, before enrichment runs. remember() replaces an
@@ -639,17 +642,17 @@ function crossfadeSpanRef(): number {
  * natural end under crossfade); a manual skip must NOT get an unwanted fade.
  */
 async function fadeInIfNeeded(): Promise<void> {
-  if (!didFadeOut) {
-    // Make sure volume is full for a normal advance.
-    try {
-      await TrackPlayer.setVolume(1);
-    } catch {}
-    return;
-  }
-  didFadeOut = false;
   const gen = ++fadeGen;
-  const seconds = Math.min(crossfadeSpanRef(), 3) || 2;
-  const steps = 12;
+  const didFade = didFadeOut;
+  didFadeOut = false;
+  // A crossfaded end fades the incoming track up over the full span. A plain
+  // start (fresh play or a normal advance) gets a SHORT ~250ms ramp instead of
+  // snapping to full — that quarter second covers the first few milliseconds
+  // that some outputs, Bluetooth especially, play at full level before their
+  // absolute-volume settles. That momentary blast was the "opens loud for a
+  // split second then drops to normal" report.
+  const seconds = didFade ? Math.min(crossfadeSpanRef(), 3) || 2 : 0.25;
+  const steps = didFade ? 12 : 6;
   try {
     await TrackPlayer.setVolume(0);
     for (let i = 1; i <= steps; i++) {
