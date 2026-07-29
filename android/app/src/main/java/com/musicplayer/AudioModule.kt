@@ -394,12 +394,122 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         cfPlayer = null
     }
 
+    // ─── Main player volume, ramped NATIVELY ────────────────────────────────
+    //
+    // This exists because the JS version of it was the "volume drops on track
+    // change and never recovers" bug. JS ran the ramp as a loop of
+    // setTimeout+setVolume; Android throttles (and eventually freezes) RN's JS
+    // timers once the app is backgrounded or the screen locks, so the loop
+    // stalled PART WAY DOWN and the volume simply stayed there. Reopening the
+    // app thawed the thread and the ramp continued — which is precisely the
+    // "it gradually ramps back up by itself when I reopen" symptom.
+    //
+    // A Handler on the main looper is not throttled that way: the process is
+    // alive because RNTP holds a mediaPlayback foreground service, so this runs
+    // to completion with the screen off.
+    //
+    // Every ramp is also SELF-RESTORING: once it reaches the floor it schedules
+    // a hard reset back to 1.0. Nothing — a frozen JS thread, a killed bridge, a
+    // crossfade whose handoff never arrives — can leave the player stuck quiet.
+    private var volRamp: Runnable? = null
+    private var volRestore: Runnable? = null
+    private val volHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Set ExoPlayer's volume by reflection. Main looper only (see exoPlayer()).
+     *
+     * isAccessible is not optional here: ExoPlayer's concrete class
+     * (ExoPlayerImpl) is package-private, and invoking even a PUBLIC method on
+     * an instance of a non-public class throws IllegalAccessException without
+     * it — the method would resolve fine and then fail at the call.
+     */
+    private fun setExoVolume(v: Float): Boolean {
+        val exo = PlaybackSession.exoPlayer() ?: return false
+        return try {
+            val m = exo.javaClass.getMethod("setVolume", Float::class.javaPrimitiveType)
+            m.isAccessible = true
+            m.invoke(exo, v.coerceIn(0f, 1f))
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "setVolume failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun cancelVolWork() {
+        volRamp?.let { volHandler.removeCallbacks(it) }
+        volRestore?.let { volHandler.removeCallbacks(it) }
+        volRamp = null
+        volRestore = null
+    }
+
+    /**
+     * Fade the playing track down over [durationMs], then restore full volume
+     * shortly after — by which point the queue has advanced to the next track,
+     * so the incoming song is never the one left quiet.
+     */
+    @ReactMethod
+    fun fadeOutPlayer(durationMs: Int, promise: Promise) {
+        volHandler.post {
+            cancelVolWork()
+            val steps = 16
+            val stepMs = (durationMs / steps).coerceAtLeast(30).toLong()
+            var i = 0
+            val ramp = object : Runnable {
+                override fun run() {
+                    i++
+                    val v = (1f - i.toFloat() / steps).coerceAtLeast(FADE_FLOOR)
+                    setExoVolume(v)
+                    if (i < steps) {
+                        volHandler.postDelayed(this, stepMs)
+                    } else {
+                        volRamp = null
+                    }
+                }
+            }
+            volRamp = ramp
+            volHandler.postDelayed(ramp, stepMs)
+
+            // Fail-safe. The fade is timed to land on the track boundary, so a
+            // second past it the next song is playing and must be at full level.
+            val restore = Runnable {
+                volRamp?.let { volHandler.removeCallbacks(it) }
+                volRamp = null
+                volRestore = null
+                setExoVolume(1f)
+            }
+            volRestore = restore
+            volHandler.postDelayed(restore, durationMs.toLong() + RESTORE_GRACE_MS)
+            promise.resolve(true)
+        }
+    }
+
+    /** Cancel any ramp and put the player back to full volume, immediately. */
+    @ReactMethod
+    fun restorePlayerVolume(promise: Promise) {
+        volHandler.post {
+            cancelVolWork()
+            promise.resolve(setExoVolume(1f))
+        }
+    }
+
     override fun onCatalystInstanceDestroy() {
         release()
         stopCfInternal()
+        // The bridge is going away — make sure we are not leaving the player
+        // faded down with nothing left alive to restore it.
+        volHandler.post {
+            cancelVolWork()
+            setExoVolume(1f)
+        }
     }
 
     companion object {
         private const val TAG = "AudioModule"
+        /** Never ramp fully to 0 — ExoPlayer at exactly 0 on some devices drops
+         *  the output path, which clicks audibly when it comes back. */
+        private const val FADE_FLOOR = 0.04f
+        /** How long after a fade ends before volume is forced back to full. */
+        private const val RESTORE_GRACE_MS = 1500L
     }
 }

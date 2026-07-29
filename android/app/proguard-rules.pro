@@ -23,6 +23,21 @@
     protected *** exoPlayer;
 }
 
+# AudioModule drives the player's volume by reflection (the background-safe
+# fade — see the note there). getAudioSessionId/setVolume/getVolume are looked
+# up BY NAME on the ExoPlayer instance, so R8 must not rename or strip them, or
+# every fade silently no-ops in release only.
+-keepclassmembers class * implements com.google.android.exoplayer2.Player {
+    public int getAudioSessionId();
+    public void setVolume(float);
+    public float getVolume();
+}
+-keepclassmembers class * implements androidx.media3.common.Player {
+    public int getAudioSessionId();
+    public void setVolume(float);
+    public float getVolume();
+}
+
 # Our own code is tiny; keep it whole so the native modules and every
 # @ReactMethod resolve by name from JS. Nothing to gain shrinking it, and one
 # renamed bridge method is a release-only crash.

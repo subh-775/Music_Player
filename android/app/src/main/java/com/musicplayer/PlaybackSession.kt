@@ -66,11 +66,33 @@ object PlaybackSession {
     }
 
     private fun lookup(): Int {
-        val service = MusicServiceRef.instance ?: return -1
+        val exo = exoPlayer() ?: return -1
+        return try {
+            val m = exo.javaClass.getMethod("getAudioSessionId")
+            m.isAccessible = true // ExoPlayerImpl is package-private (see AudioModule)
+            val id = m.invoke(exo) as? Int ?: return -1
+            cached = id
+            id
+        } catch (e: Exception) {
+            Log.w(TAG, "audio session lookup failed: ${e.message}")
+            -1
+        }
+    }
+
+    /**
+     * The live ExoPlayer instance, or null when nothing is playing yet.
+     *
+     * MUST be called on the main looper — ExoPlayer enforces thread confinement
+     * on every accessor, so a caller that touches the returned object off-thread
+     * gets an IllegalStateException. [AudioModule]'s volume ramp posts to the
+     * main handler for exactly this reason.
+     */
+    fun exoPlayer(): Any? {
+        val service = MusicServiceRef.instance ?: return null
         return try {
             val playerField = service.javaClass.getDeclaredField("player")
             playerField.isAccessible = true
-            val player = playerField.get(service) ?: return -1
+            val player = playerField.get(service) ?: return null
 
             // exoPlayer lives on the superclass (BaseAudioPlayer), so walk up
             // rather than assuming which class in the chain declares it.
@@ -79,21 +101,16 @@ object PlaybackSession {
                 try {
                     val f = klass.getDeclaredField("exoPlayer")
                     f.isAccessible = true
-                    val exo = f.get(player) ?: return -1
-                    val id = exo.javaClass
-                        .getMethod("getAudioSessionId")
-                        .invoke(exo) as? Int ?: return -1
-                    cached = id
-                    return id
+                    return f.get(player)
                 } catch (_: NoSuchFieldException) {
                     klass = klass.superclass
                 }
             }
             Log.w(TAG, "exoPlayer field not found on ${player.javaClass.name}")
-            -1
+            null
         } catch (e: Exception) {
-            Log.w(TAG, "audio session lookup failed: ${e.message}")
-            -1
+            Log.w(TAG, "exoPlayer lookup failed: ${e.message}")
+            null
         }
     }
 

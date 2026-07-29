@@ -12,7 +12,8 @@
  * everything here is guarded and `isAvailable()` reports the truth instead of
  * the app crashing.
  */
-import {useEffect, useState} from 'react';
+import {useEffect, useState, useSyncExternalStore} from 'react';
+import {AppState} from 'react-native';
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
@@ -31,6 +32,8 @@ import {
   crossfadePosition,
   crossfadeSupported,
   endCrossfade,
+  fadeOutPlayer,
+  restorePlayerVolume,
 } from './audioEffects';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
@@ -158,6 +161,9 @@ export async function setupPlayer(): Promise<boolean> {
       // The "play this soon" window is relative to the current song — a new song
       // starts a fresh one, so anything queued now goes right after it again.
       queuedAhead = 0;
+      // The engine is authoritative — reconcile the optimistic mirror with what
+      // actually started, and keep the queue snapshot warm for the next gesture.
+      publishTrack(e.track ?? null);
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
@@ -166,6 +172,7 @@ export async function setupPlayer(): Promise<boolean> {
       // reopen lands on the right song even if the app was killed mid-track.
       try {
         const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+        await refreshEngineMirror(idx);
         saveResume(
           {track: src, position: 0, queue: queueSource, index: idx},
           true,
@@ -182,7 +189,7 @@ export async function setupPlayer(): Promise<boolean> {
         // handed off), silence it NOW so it can't keep playing a second,
         // "wrong" song over the top of the queue's real next track.
         endCrossfade();
-        fadeInIfNeeded();
+        restoreFullVolume();
       }
       // Effects die with the audio session; re-attach for the new one.
       applyAudioEffects();
@@ -190,6 +197,12 @@ export async function setupPlayer(): Promise<boolean> {
 
     ready = true;
     available = true;
+    // If the engine came back with a queue already loaded (the service outlived
+    // the JS context), adopt it now rather than showing nothing until the next
+    // track change.
+    refreshEngineMirror()
+      .then(() => publishTrack(engineQueue[activeIndex] ?? null))
+      .catch(() => {});
     return true;
   } catch {
     // Old APK without the native engine, or the player is already initialised.
@@ -249,6 +262,12 @@ export async function restoreSession(): Promise<boolean> {
     if (idx > 0) {
       await TrackPlayer.add(items.slice(0, idx).map(x => x.q!), 0);
     }
+    // Seed the now-playing mirror. A restored session is left PAUSED, so no
+    // track-change event fires — without this the mini player would sit blank
+    // until the user pressed play (RNTP's own hook self-seeded on mount; ours
+    // has to be told).
+    await refreshEngineMirror();
+    publishTrack(engineQueue[activeIndex] ?? null);
     // Left paused — see above.
     return true;
   } catch {
@@ -325,12 +344,20 @@ export async function playTrack(
     // index 0 shifts the active track to startAt without ever surfacing track 0.
     await TrackPlayer.add(items.slice(0, startAt).map(x => x.q), 0);
   }
-  // Start silent so the first frames can't blast before the output settles; the
-  // PlaybackActiveTrackChanged handler ramps it back up. Play only once the
-  // queue is FULLY built — starting mid-rebuild left a brief window where a
-  // swipe (next/previous) acted on a half-formed queue and could land on the
-  // wrong song.
-  await TrackPlayer.setVolume(0);
+  // Full volume, always. Starting silent and ramping up in JS (a previous
+  // attempt at softening a Bluetooth start-of-track blip) is what left tracks
+  // stuck quiet whenever the ramp was interrupted — never trade a guaranteed
+  // silence bug for a cosmetic one. Play only once the queue is FULLY built —
+  // starting mid-rebuild left a brief window where a swipe (next/previous)
+  // acted on a half-formed queue and could land on the wrong song.
+  await TrackPlayer.setVolume(1);
+  // Publish the tapped track immediately — the queue is built, so this IS what
+  // is about to sound; waiting for the engine event showed the old song's title
+  // for a beat. Also seeds the mirror so an instant swipe skips from the right
+  // place rather than from a stale index.
+  engineQueue = items.map(x => x.q as RNTPTrack);
+  activeIndex = startAt;
+  publishTrack(engineQueue[startAt] ?? null);
   await TrackPlayer.play();
 
   // Recorded at play-START, before enrichment runs. remember() replaces an
@@ -373,15 +400,77 @@ export async function addToQueue(track: Track): Promise<void> {
   queueSource = [...queueSource, track];
 }
 
+/**
+ * Optimistic now-playing.
+ *
+ * RNTP's own useActiveTrack only updates when the native
+ * PlaybackActiveTrackChanged event arrives — which is AFTER ExoPlayer has
+ * actually transitioned and after a bridge hop. Binding the UI straight to it
+ * is why swiping to the next song showed the PREVIOUS title for a beat.
+ *
+ * The reference build has no such lag because it sets the current track
+ * synchronously from the queue the moment the gesture commits
+ * (`setCurrentTrack(nextTrack)` in playNext) and lets the audio catch up. Same
+ * thing here: a mirror of the engine queue, kept warm by the track-change
+ * event, so a skip can publish the committed track with no await at all. The
+ * native event still lands afterwards and reconciles — it can only ever agree.
+ */
+let engineQueue: RNTPTrack[] = [];
+let activeIndex = 0;
+let trackSnapshot: RNTPTrack | null = null;
+const trackListeners = new Set<() => void>();
+
+function publishTrack(t: RNTPTrack | null): void {
+  trackSnapshot = t;
+  trackListeners.forEach(l => l());
+}
+
+/** Re-read the engine's queue and index so the mirror is warm before a gesture. */
+async function refreshEngineMirror(index?: number): Promise<void> {
+  try {
+    engineQueue = await TrackPlayer.getQueue();
+    activeIndex = index ?? (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+  } catch {
+    /* engine not up — the next event refreshes it */
+  }
+}
+
+/** Move the mirror by one and publish immediately. Returns false at the ends. */
+function publishStep(delta: 1 | -1): boolean {
+  const next = engineQueue[activeIndex + delta];
+  if (!next) {
+    return false;
+  }
+  activeIndex += delta;
+  publishTrack(next);
+  return true;
+}
+
+/** The track the UI should show: optimistic on gesture, reconciled by the
+ *  engine event. Drop-in replacement for RNTP's useActiveTrack. */
+export function useActiveTrack(): RNTPTrack | null {
+  return useSyncExternalStore(
+    l => {
+      trackListeners.add(l);
+      return () => trackListeners.delete(l);
+    },
+    () => trackSnapshot,
+  );
+}
+
 /** Skips always resume playback: changing song while paused and getting
  *  silence reads as the skip having failed. */
 export async function skipNext(): Promise<void> {
   cancelCrossfade(); // a manual skip isn't a crossfade — kill any overlap
+  publishStep(1); // show the committed track NOW, before the engine catches up
   try {
     await TrackPlayer.skipToNext();
     await TrackPlayer.play();
   } catch {
-    /* end of queue */
+    // The skip didn't happen (queue changed under us) — take the optimistic
+    // title back rather than leaving the UI showing a song that never started.
+    await refreshEngineMirror();
+    publishTrack(engineQueue[activeIndex] ?? null);
   }
 }
 
@@ -395,10 +484,14 @@ export async function skipPrevious(): Promise<void> {
       await TrackPlayer.seekTo(0);
       return;
     }
+    // Only publish once we know this is a real track change, not a restart.
+    publishStep(-1);
     await TrackPlayer.skipToPrevious();
     await TrackPlayer.play();
   } catch {
     await TrackPlayer.seekTo(0);
+    await refreshEngineMirror();
+    publishTrack(engineQueue[activeIndex] ?? null);
   }
 }
 
@@ -581,15 +674,13 @@ async function prefetchNext(): Promise<void> {
  */
 let fadeTimer: ReturnType<typeof setInterval> | null = null;
 let fadedFor = '';
-let didFadeOut = false; // the last advance faded down — so fade the next one UP
-// Bumped whenever a new fade starts. Any in-flight ramp checks this and bails
-// the instant a newer one begins, so the outgoing fade-down and the incoming
-// fade-up can never fight over setVolume (which left the next song stuck quiet).
-let fadeGen = 0;
 // True while the native overlap player is running toward a handoff — a REAL
 // crossfade (two songs audible at once) rather than the fade-down/up fallback.
+//
+// There is no `fadeGen` generation counter any more: it existed to let one JS
+// ramp abort another mid-flight. Ramps are native now and the native side owns
+// its own cancellation, so a counter here would guard nothing.
 let cfActive = false;
-let getCrossfadeSeconds: () => number = () => 0;
 
 /**
  * Tear down a running crossfade WITHOUT the handoff seek — for a manual skip or
@@ -598,13 +689,11 @@ let getCrossfadeSeconds: () => number = () => 0;
  */
 function cancelCrossfade(): void {
   cfActive = false;
-  didFadeOut = false;
-  fadeGen++; // abort any in-flight RNTP ramp
   endCrossfade();
-  // ALWAYS restore full volume — a fade-down that never reached its handoff
-  // (an app backgrounded mid-fade, the setting toggled off, a pause on the last
-  // second) used to leave the engine stuck at ~4% volume, which is exactly the
-  // "next song is suddenly really quiet" report.
+  // ALWAYS restore full volume, natively — a fade-down that never reached its
+  // handoff (backgrounded mid-fade, the setting toggled off, a pause on the
+  // last second) must not leave the engine stuck quiet.
+  restorePlayerVolume();
   TrackPlayer.setVolume(1).catch(() => {});
 }
 
@@ -616,7 +705,6 @@ function cancelCrossfade(): void {
  */
 async function handoffCrossfade(): Promise<void> {
   cfActive = false;
-  fadeGen++; // no stray RNTP ramp during the handoff
   try {
     const pos = await crossfadePosition();
     if (pos > 0.5) {
@@ -631,49 +719,28 @@ async function handoffCrossfade(): Promise<void> {
   await endCrossfade();
 }
 
-/** Current crossfade span; readable outside the watcher (the fade-in half). */
-function crossfadeSpanRef(): number {
-  return getCrossfadeSeconds();
-}
-
 /**
- * Fade the incoming track up from quiet — the OTHER half of the transition,
- * run on track change. Only when the outgoing track actually faded out (a
- * natural end under crossfade); a manual skip must NOT get an unwanted fade.
+ * Put the incoming track at FULL volume on every track change.
+ *
+ * This used to be a JS ramp (setVolume in a setTimeout loop) and that was the
+ * "volume drops on auto-advance and stays low" bug: Android throttles RN's JS
+ * timers once the app is backgrounded or the screen locks, so the loop stalled
+ * part way and the volume simply stayed there — then crept back up when
+ * reopening the app thawed the thread.
+ *
+ * The reference build (WebView) never touches volume on a normal transition,
+ * and that is the behaviour restored here: one idempotent assertion of full
+ * volume, no timers, plus the native restore so it holds even if the bridge is
+ * frozen. Fading is now exclusively the native crossfade's job.
  */
-async function fadeInIfNeeded(): Promise<void> {
-  const gen = ++fadeGen;
-  const didFade = didFadeOut;
-  didFadeOut = false;
-  // A crossfaded end fades the incoming track up over the full span. A plain
-  // start (fresh play or a normal advance) gets a SHORT ~250ms ramp instead of
-  // snapping to full — that quarter second covers the first few milliseconds
-  // that some outputs, Bluetooth especially, play at full level before their
-  // absolute-volume settles. That momentary blast was the "opens loud for a
-  // split second then drops to normal" report.
-  const seconds = didFade ? Math.min(crossfadeSpanRef(), 3) || 2 : 0.25;
-  const steps = didFade ? 12 : 6;
+async function restoreFullVolume(): Promise<void> {
+  restorePlayerVolume(); // cancels any native ramp, then sets 1.0
   try {
-    await TrackPlayer.setVolume(0);
-    for (let i = 1; i <= steps; i++) {
-      if (gen !== fadeGen) {
-        return; // a newer fade took over — stop ramping
-      }
-      await TrackPlayer.setVolume(i / steps);
-      await new Promise(r => setTimeout(r, (seconds * 1000) / steps));
-    }
-    if (gen === fadeGen) {
-      await TrackPlayer.setVolume(1);
-    }
-  } catch {
-    try {
-      await TrackPlayer.setVolume(1);
-    } catch {}
-  }
+    await TrackPlayer.setVolume(1);
+  } catch {}
 }
 
 export function startCrossfadeWatcher(getSeconds: () => number): void {
-  getCrossfadeSeconds = getSeconds;
   if (fadeTimer) {
     return;
   }
@@ -698,7 +765,13 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     } catch {}
 
     const span = getSeconds();
-    if (span <= 0) {
+    // Crossfade only while the app is actually on screen. The handoff that ends
+    // an overlap (seek RNTP to the overlap position, then cut it) is JS work,
+    // and JS is exactly what Android stops running in the background — a fade
+    // started there would hand off to nobody, leaving the overlap player and
+    // RNTP both audible. Backgrounded, tracks change the plain way: untouched
+    // volume, which is what the WebView build did on every transition anyway.
+    if (span <= 0 || AppState.currentState !== 'active') {
       return;
     }
     try {
@@ -712,16 +785,14 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
 
       if (remaining <= span && fadedFor !== key) {
         fadedFor = key;
-        // Ramp the outgoing track DOWN over its final `span` seconds. Do NOT
-        // restore volume here — that was the bug: the song jumped back to full
-        // volume right before ending, so the fade was inaudible. The incoming
-        // track is faded back up by fadeInIfNeeded() on the track change.
-        didFadeOut = true;
+        // Ramp the outgoing track DOWN over its final `span` seconds. The
+        // incoming track is put back to full by restoreFullVolume() on the
+        // track change (and by the native ramp's own fail-safe).
 
         // Real crossfade: start the SECOND stream on the incoming track, rising,
         // so it overlaps this fade-down. Only if the build supports it and the
-        // next track's stream URL is known; otherwise this degrades to the plain
-        // fade-down/up handled by fadeInIfNeeded on the track change.
+        // next track's stream URL is known; otherwise this degrades to a plain
+        // fade-down with full volume restored on the track change.
         if (crossfadeSupported && !cfActive && active != null) {
           try {
             const q = await TrackPlayer.getQueue();
@@ -740,24 +811,14 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
           }
         }
 
-        const gen = ++fadeGen;
-        const steps = 12;
-        for (let i = 1; i <= steps; i++) {
-          if (gen !== fadeGen) {
-            break; // the track changed and fade-in took over
-          }
-          await TrackPlayer.setVolume(Math.max(0.04, 1 - i / steps));
-          await new Promise(r => setTimeout(r, (span * 1000) / steps));
-        }
+        // The ramp itself runs NATIVELY (Handler, not a JS timer) so it cannot
+        // stall half way down when the app is backgrounded, and it restores
+        // full volume by itself once the boundary passes.
+        fadeOutPlayer(Math.round(span * 1000));
       } else if (remaining > span + 1 && fadedFor === key) {
         // Seeked backwards out of the fade zone — cancel it and go back to full.
         fadedFor = '';
-        didFadeOut = false;
-        fadeGen++; // abort any in-flight fade-down
-        cancelCrossfade(); // and drop any overlap that had started
-        try {
-          await TrackPlayer.setVolume(1);
-        } catch {}
+        cancelCrossfade(); // drops the overlap AND restores volume natively
       }
     } catch {
       /* engine not up */
@@ -796,4 +857,6 @@ export function useIsPlaying(): boolean {
 export {TrackPlayer, State, Event, RepeatMode};
 // Re-exported so screens import playback from one module rather than reaching
 // into the library directly — which is what lets the guards above stay honest.
-export {useActiveTrack, usePlaybackState, useProgress} from 'react-native-track-player';
+// NOTE: useActiveTrack is OURS (defined above), not RNTP's — it publishes
+// optimistically on a committed gesture instead of waiting for the engine event.
+export {usePlaybackState, useProgress} from 'react-native-track-player';

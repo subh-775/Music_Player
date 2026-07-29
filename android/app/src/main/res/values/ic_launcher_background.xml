@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- The app's own surface colour, so the icon reads as part of the product.
+       The light-blue mark needs a dark ground; on white it washes out. -->
+  <color name="ic_launcher_background">#121212</color>
+</resources>

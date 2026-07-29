@@ -17,6 +17,8 @@ type AudioNative = {
   startCrossfade?: (url: string, durationMs: number) => Promise<boolean>;
   crossfadePosition?: () => Promise<number>;
   stopCrossfade?: () => Promise<boolean>;
+  fadeOutPlayer?: (durationMs: number) => Promise<boolean>;
+  restorePlayerVolume?: () => Promise<boolean>;
 };
 
 export type EqCapabilities = {
@@ -64,6 +66,35 @@ export async function endCrossfade(): Promise<void> {
     await native.stopCrossfade?.();
   } catch {
     /* nothing playing — fine */
+  }
+}
+
+/**
+ * Volume ramps run NATIVELY, never as a JS timer loop.
+ *
+ * The JS version stalled the moment Android throttled RN's timers (backgrounded
+ * app / locked screen), leaving the player stuck at whatever level the ramp had
+ * reached — the "volume drops on track change and never recovers" bug. The
+ * native ramp runs on a Handler that keeps ticking with the screen off, and
+ * restores full volume by itself if anything interrupts it.
+ */
+export const nativeVolumeRamp = typeof native.fadeOutPlayer === 'function';
+
+/** Fade the playing track down over `durationMs` (native; self-restoring). */
+export async function fadeOutPlayer(durationMs: number): Promise<void> {
+  try {
+    await native.fadeOutPlayer?.(durationMs);
+  } catch {
+    /* older APK without the native ramp — no fade, full volume, still correct */
+  }
+}
+
+/** Cancel any ramp and put the player back to full volume immediately. */
+export async function restorePlayerVolume(): Promise<void> {
+  try {
+    await native.restorePlayerVolume?.();
+  } catch {
+    /* nothing to restore */
   }
 }
 
