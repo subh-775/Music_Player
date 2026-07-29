@@ -40,7 +40,7 @@ Ranked. Root causes shared where noted.
 
 | # | Sev | Defect | Notes |
 |---|---|---|---|
-| **D1** | 🟠 Major | **Queue drag-reorder is gone.** | Removed in v1.0.2 because the JS `PanResponder` implementation fought the parent `ScrollView`, re-rendered every frame and left rows overlapping. **Must be restored** with drag handle, live preview, and persistence into the real playback queue. → **Sprint 2**, on a native gesture/reorder implementation, not a JS PanResponder. |
+| ~~D1~~ | ✅ | ~~Queue drag-reorder is gone.~~ | **Fixed in Sprint 2** — see below. |
 | **D4** | 🟡 Minor | `RemoteDuck` can **resume playback the user deliberately paused**. | `playbackService.ts` calls `TrackPlayer.play()` whenever a duck event arrives with `paused === false`. A notification chime after a manual pause can therefore un-pause. The WebView build never had this: Chromium owned ducking. **Not yet fixed** — audio-focus changes are risky blind; wants device confirmation first. |
 | **D7** | 🟡 Minor | Crossfade is now **foreground-only** by design. | Its handoff (seek RNTP to the overlap position, then cut the overlap) is JS work, and JS doesn't run backgrounded — a fade started there would hand off to nobody, leaving overlap + RNTP both audible. Backgrounded transitions now use untouched volume, which is what the reference build did *always*. Revisit only if a fully-native crossfade is wanted. |
 | **D8** | ⚪ Watch | R8 shrinking enabled in v1.0.2 is **unverified on device**. | Reflection-heavy stack (RNTP internals, NewPipe/Rhino, Chaquopy). Keep rules are in `proguard-rules.pro`, extended this sprint for the new `setVolume` reflection. A release build must be smoke-tested before tagging. |
@@ -94,13 +94,52 @@ depend on the JS thread running.**
 
 ---
 
-## Next sprint (Sprint 2)
+## Sprint 2 — D1: queue drag-reorder restored
 
-- **D1: restore queue drag-reorder**, natively. The JS `PanResponder` inside a
-  `ScrollView` is the known-bad approach — it caused the lag/overlap that got it
-  removed. Plan: a proper native draggable list, with the reorder committed to
-  the real RNTP queue (`remove` + `add(index)`), optimistic list state, and the
-  drag handle back.
-- **D4**, if device testing confirms the un-pause.
+**Root cause of the original lag/overlap:** the old implementation called
+`setDragOver(...)` on **every pan frame**, so each finger movement re-rendered
+the entire list to recompute which rows should slide. Row `React.memo` didn't
+help — the `shift` prop genuinely changed for many rows at once. The overlapping
+rows came from the same place: React repainting rows mid-gesture underneath a
+floating dragged row.
+
+**Fix — no per-frame React work at all:**
+- One `Animated.Value` follows the finger (`setValue`, never `setState`).
+- Every other row's offset is an **interpolation** of that value: a step
+  function with a ±14px transition band, so rows slide out of the way as the
+  dragged item crosses their midpoint. React renders **twice per gesture** —
+  once on drag start, once on drop.
+- Responders are cached per index in a `Map`, so the re-render on drag start
+  can't hand the live gesture a new responder object (the old "snapped back"
+  bug).
+
+**Correctness improvements over the original:**
+- **Only upcoming tracks are draggable.** The playing track is pinned under a
+  "Now playing" header and nothing can be dropped above it. RNTP's `remove()`
+  maps to ExoPlayer's `removeMediaItem`, so a reorder able to touch the active
+  row could **stop playback mid-drag**. Also matches the reference build, whose
+  `queue` is upcoming-only. `moveQueueItem()` re-checks this server-side.
+- Queue mutation moved out of the screen into `player.ts` (`moveQueueItem`),
+  next to the rest of the queue logic, and it refreshes the engine mirror so the
+  optimistic now-playing store stays consistent after a reorder.
+- Append vs insert: after `remove(from)` the queue is one shorter, so a drop
+  into the last slot must `add([item])` (append), not `add([item], to)` —
+  inserting "before" a non-existent index.
+- The **"Recommended for you" divider was removed from the list** and became a
+  per-row label. A section header made rows non-uniform in height, which would
+  have put every drop below it one slot out (`dy / ROW_H` and the step midpoints
+  both assume a constant row height). Caught in self-review, not on device.
+
+**Deferred:** auto-scroll when dragging to the top/bottom edge of a long queue.
+Reordering within a screenful works; dragging a track across a 50-item queue
+still needs manual scrolling between drags.
+
+---
+
+## Next sprint (Sprint 3)
+
+- **D4**, if device testing confirms the un-pause after a notification chime.
+- Auto-scroll on edge-drag in the queue (above).
 - Re-audit lock-screen/notification parity against the WebView's
   `dispatchTransport` optimistic-flip trick.
+- **D8:** get a release (R8) build smoke-tested.

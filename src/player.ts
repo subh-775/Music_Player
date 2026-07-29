@@ -401,6 +401,45 @@ export async function addToQueue(track: Track): Promise<void> {
 }
 
 /**
+ * Move a queued track. Both indices are ENGINE indices.
+ *
+ * Only tracks AFTER the active one can move. RNTP maps remove() onto
+ * ExoPlayer's removeMediaItem, and removing the item that is currently playing
+ * tears down playback — so a reorder that could touch the active row would stop
+ * the music mid-drag. The queue UI only offers the upcoming tracks for exactly
+ * this reason; this guard is the backstop.
+ */
+export async function moveQueueItem(from: number, to: number): Promise<boolean> {
+  if (from === to) {
+    return true;
+  }
+  try {
+    const activeIdx = await TrackPlayer.getActiveTrackIndex();
+    if (activeIdx == null || from <= activeIdx || to <= activeIdx) {
+      return false;
+    }
+    const q = await TrackPlayer.getQueue();
+    const item = q[from];
+    if (!item) {
+      return false;
+    }
+    await TrackPlayer.remove([from]);
+    // `to` indexes the queue as it is AFTER the removal (length n-1), which is
+    // the same convention as splice. The last slot has no element to insert
+    // before, so it has to be an append rather than an insert.
+    if (to >= q.length - 1) {
+      await TrackPlayer.add([item]);
+    } else {
+      await TrackPlayer.add([item], to);
+    }
+    await refreshEngineMirror();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Optimistic now-playing.
  *
  * RNTP's own useActiveTrack only updates when the native

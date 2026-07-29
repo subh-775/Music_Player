@@ -16,6 +16,7 @@ import {
 import {
   ChevronLeft,
   ChevronsLeftRight,
+  GripVertical,
   Hand,
   ListMusic,
   MousePointerClick,
@@ -80,6 +81,11 @@ const GROUPS: {title: string; tips: Tip[]}[] = [
         Icon: Hand,
         title: 'Hold a song',
         body: 'Opens more options — add to a playlist, go to the artist or album.',
+      },
+      {
+        Icon: GripVertical,
+        title: 'Drag the grip in Queue',
+        body: 'Reorders what plays next. The song playing now stays put.',
       },
     ],
   },
