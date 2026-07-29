@@ -41,7 +41,7 @@ Ranked. Root causes shared where noted.
 | # | Sev | Defect | Notes |
 |---|---|---|---|
 | ~~D1~~ | ✅ | ~~Queue drag-reorder is gone.~~ | **Fixed in Sprint 2** — see below. |
-| **D4** | 🟡 Minor | `RemoteDuck` can **resume playback the user deliberately paused**. | `playbackService.ts` calls `TrackPlayer.play()` whenever a duck event arrives with `paused === false`. A notification chime after a manual pause can therefore un-pause. The WebView build never had this: Chromium owned ducking. **Not yet fixed** — audio-focus changes are risky blind; wants device confirmation first. |
+| ~~D4~~ | ✅ | ~~`RemoteDuck` can resume playback the user deliberately paused.~~ | **Fixed in Sprint 3** — ducking now resumes only what ducking paused. |
 | **D7** | 🟡 Minor | Crossfade is now **foreground-only** by design. | Its handoff (seek RNTP to the overlap position, then cut the overlap) is JS work, and JS doesn't run backgrounded — a fade started there would hand off to nobody, leaving overlap + RNTP both audible. Backgrounded transitions now use untouched volume, which is what the reference build did *always*. Revisit only if a fully-native crossfade is wanted. |
 | **D8** | ⚪ Watch | R8 shrinking enabled in v1.0.2 is **unverified on device**. | Reflection-heavy stack (RNTP internals, NewPipe/Rhino, Chaquopy). Keep rules are in `proguard-rules.pro`, extended this sprint for the new `setVolume` reflection. A release build must be smoke-tested before tagging. |
 
@@ -136,10 +136,39 @@ still needs manual scrolling between drags.
 
 ---
 
-## Next sprint (Sprint 3)
+## Sprint 3 — D4 + queue auto-scroll
 
-- **D4**, if device testing confirms the un-pause after a notification chime.
-- Auto-scroll on edge-drag in the queue (above).
-- Re-audit lock-screen/notification parity against the WebView's
-  `dispatchTransport` optimistic-flip trick.
-- **D8:** get a release (R8) build smoke-tested.
+**D4: ducking could resume a pause the user made.** `RemoteDuck` called
+`play()` on any `paused === false`, regardless of who paused or why — and audio
+focus is lost/regained constantly (chime, navigation prompt, call ending). The
+reference build never had this because Chromium owned focus and only resumed the
+element it had paused itself.
+- Ducking now records whether **it** caused the pause, and resumes only then. A
+  transient loss is only claimed as ours if we were actually playing.
+- A **permanent** focus loss never auto-resumes.
+- Any explicit transport — remote play/pause/stop, or the in-app play/pause —
+  clears the flag; the user's intent outranks what ducking remembered. Flag
+  lives in `duckState.ts` because both the service and the player need it and
+  importing either from the other would be a cycle.
+
+**Queue auto-scroll** (deferred from Sprint 2): dragging into the top/bottom
+72px scrolls the list. The drop index is computed from the row's total travel
+*through the list* (finger delta **+** content scrolled under it) — using the
+finger delta alone would make the row drift away from the finger and land every
+post-scroll drop short by the scrolled amount. The list is wrapped in a View
+that measures itself, since `measureInWindow` is on `View`, not `ScrollView`.
+
+---
+
+## Remaining
+
+Nothing left in code. One item needs **your device/CI**:
+
+- **D8 — the R8 (minify + resource-shrink) release build is still unverified.**
+  There is no Android SDK or JDK in the dev environment here, so `assembleRelease`
+  cannot be run locally; CI is the only place it can be proven. Keep rules cover
+  RNTP internals, NewPipe/Rhino, Chaquopy, `com.musicplayer.**`, and the
+  ExoPlayer `setVolume`/`getVolume` reflection added in Sprint 1. **Run a
+  `workflow_dispatch` → `release` build and confirm it boots, plays, and resolves
+  YouTube before tagging.** If anything breaks there, the fix is a keep rule, not
+  a revert.
