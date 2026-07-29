@@ -35,6 +35,7 @@ import {
   fadeOutPlayer,
   restorePlayerVolume,
 } from './audioEffects';
+import {setPausedByDuck} from './duckState';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
 
@@ -260,7 +261,10 @@ export async function restoreSession(): Promise<boolean> {
     // The earlier tracks come back afterward, prepended so Previous still works;
     // this shifts the active index to idx without ever showing track 0.
     if (idx > 0) {
-      await TrackPlayer.add(items.slice(0, idx).map(x => x.q!), 0);
+      await TrackPlayer.add(
+        items.slice(0, idx).map(x => x.q!),
+        0,
+      );
     }
     // Seed the now-playing mirror. A restored session is left PAUSED, so no
     // track-change event fires — without this the mini player would sit blank
@@ -342,7 +346,10 @@ export async function playTrack(
   if (startAt > 0) {
     // Prepend the earlier tracks so Previous still works. Inserting before
     // index 0 shifts the active track to startAt without ever surfacing track 0.
-    await TrackPlayer.add(items.slice(0, startAt).map(x => x.q), 0);
+    await TrackPlayer.add(
+      items.slice(0, startAt).map(x => x.q),
+      0,
+    );
   }
   // Full volume, always. Starting silent and ramping up in JS (a previous
   // attempt at softening a Bluetooth start-of-track blip) is what left tracks
@@ -390,7 +397,8 @@ export async function addToQueue(track: Track): Promise<void> {
   // truth); the JS pool can drift after a manual reorder.
   const queue = await TrackPlayer.getQueue();
   const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
-  const at = idx >= 0 ? Math.min(idx + 1 + queuedAhead, queue.length) : queue.length;
+  const at =
+    idx >= 0 ? Math.min(idx + 1 + queuedAhead, queue.length) : queue.length;
   if (at < queue.length) {
     await TrackPlayer.add([item], at);
   } else {
@@ -409,7 +417,10 @@ export async function addToQueue(track: Track): Promise<void> {
  * the music mid-drag. The queue UI only offers the upcoming tracks for exactly
  * this reason; this guard is the backstop.
  */
-export async function moveQueueItem(from: number, to: number): Promise<boolean> {
+export async function moveQueueItem(
+  from: number,
+  to: number,
+): Promise<boolean> {
   if (from === to) {
     return true;
   }
@@ -593,6 +604,9 @@ export async function togglePlay(): Promise<void> {
     state === State.Playing ||
     state === State.Buffering ||
     state === State.Loading;
+  // The user just made the call, so ducking no longer owns this pause — without
+  // this, a focus regain later could resume music they had stopped by hand.
+  setPausedByDuck(false);
   if (active) {
     cancelCrossfade(); // pausing must silence the overlap player too
     await TrackPlayer.pause();
@@ -637,7 +651,8 @@ async function topUpFromRadio(): Promise<void> {
   if (!queue.length || index == null || queue.length - index > 2) {
     return;
   }
-  const seed = sourceTrackFor(queue[index]) ?? queueSource[queueSource.length - 1];
+  const seed =
+    sourceTrackFor(queue[index]) ?? queueSource[queueSource.length - 1];
   if (!seed) {
     return;
   }
@@ -648,7 +663,10 @@ async function topUpFromRadio(): Promise<void> {
       await getRadio(cleanText(seed.title), cleanText(seed.artist))
     )
       .map(raw => normalizeTrack(raw))
-      .filter((t): t is Track => !!t && isPlayableTrack(t) && !seen.has(getTrackId(t)))
+      .filter(
+        (t): t is Track =>
+          !!t && isPlayableTrack(t) && !seen.has(getTrackId(t)),
+      )
       .slice(0, 8)
       .map(t => ({...t, _autoplay: true}));
     const items = picks

@@ -8,12 +8,35 @@
  * Deliberately device-agnostic: we respond to the standard remote events every
  * headset and car stereo emits, with no per-device mapping.
  */
-import TrackPlayer, {Event} from 'react-native-track-player';
+import TrackPlayer, {Event, State} from 'react-native-track-player';
+import {setPausedByDuck, wasPausedByDuck} from './duckState';
 
+/**
+ * Did WE pause because we lost audio focus, or did the user?
+ *
+ * Without this distinction the duck handler resumed on ANY focus regain — so a
+ * notification chime arriving after you had deliberately pressed pause started
+ * the music back up on its own. Only playback that ducking interrupted may be
+ * resumed by ducking ending; anything the user paused stays paused.
+ *
+ * This mirrors what the reference build got for free: there, Chromium owned
+ * audio focus and only ever resumed the media element it had paused itself.
+ */
 module.exports = async function playbackService() {
-  TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
-  TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
-  TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.reset());
+  // An explicit transport command settles who owns the pause: whatever the user
+  // (or their headset) just asked for outranks anything ducking remembered.
+  TrackPlayer.addEventListener(Event.RemotePlay, () => {
+    setPausedByDuck(false);
+    TrackPlayer.play();
+  });
+  TrackPlayer.addEventListener(Event.RemotePause, () => {
+    setPausedByDuck(false);
+    TrackPlayer.pause();
+  });
+  TrackPlayer.addEventListener(Event.RemoteStop, () => {
+    setPausedByDuck(false);
+    TrackPlayer.reset();
+  });
   TrackPlayer.addEventListener(Event.RemoteSeek, ({position}) =>
     TrackPlayer.seekTo(position),
   );
@@ -42,16 +65,36 @@ module.exports = async function playbackService() {
     }
   });
 
-  // Pause on unplug/disconnect rather than blasting audio out of the speaker.
-  TrackPlayer.addEventListener(Event.RemoteDuck, async ({paused, permanent}) => {
-    if (permanent) {
-      await TrackPlayer.pause();
-      return;
-    }
-    if (paused) {
-      await TrackPlayer.pause();
-    } else {
-      await TrackPlayer.play();
-    }
-  });
+  // Audio focus changed — a call, another player, a notification chime.
+  TrackPlayer.addEventListener(
+    Event.RemoteDuck,
+    async ({paused, permanent}) => {
+      if (permanent) {
+        // Focus is gone for good (another app took over). Never auto-resume.
+        setPausedByDuck(false);
+        await TrackPlayer.pause();
+        return;
+      }
+      if (paused) {
+        // Transient loss. Only remember it as ours if we were actually playing —
+        // otherwise a duck arriving while already paused would later "resume"
+        // music the user had stopped.
+        const {state} = await TrackPlayer.getPlaybackState();
+        const wasPlaying =
+          state === State.Playing ||
+          state === State.Buffering ||
+          state === State.Loading;
+        if (wasPlaying) {
+          setPausedByDuck(true);
+          await TrackPlayer.pause();
+        }
+        return;
+      }
+      // Focus regained: resume ONLY what ducking paused.
+      if (wasPausedByDuck()) {
+        setPausedByDuck(false);
+        await TrackPlayer.play();
+      }
+    },
+  );
 };

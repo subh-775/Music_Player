@@ -54,6 +54,77 @@ export function QueuePane() {
 
   const dragY = useRef(new Animated.Value(0)).current;
   const dragDy = useRef(0);
+
+  // Auto-scroll while dragging against the top/bottom edge, so a track can be
+  // moved further than one screenful without letting go. Driven by a plain
+  // interval rather than per-frame work: the finger is usually parked in the
+  // edge band, so there is nothing to recompute between ticks.
+  const scroller = useRef<ScrollView>(null);
+  const frame = useRef<View>(null);
+  const scrollY = useRef(0);
+  const viewTop = useRef(0);
+  const viewH = useRef(0);
+  const contentH = useRef(0);
+  const edgeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fingerY = useRef(0);
+  /** Scroll offset when the drag began, so auto-scrolling can be added in. */
+  const scrollAtGrant = useRef(0);
+  /** The dragged row's total travel through the LIST: finger + scrolled-under. */
+  const dragOffset = useRef(0);
+
+  /**
+   * Push the current travel into the animation value.
+   *
+   * Auto-scroll moves the content beneath the finger, and the dragged row lives
+   * in that content — so without adding the scroll delta the row would drift
+   * away from the finger and, worse, the drop index (travel / ROW_H) would be
+   * short by however far the list had scrolled.
+   */
+  const applyDrag = useCallback(() => {
+    const v = dragDy.current + (scrollY.current - scrollAtGrant.current);
+    dragOffset.current = v;
+    dragY.setValue(v);
+  }, [dragY]);
+
+  const stopEdgeScroll = useCallback(() => {
+    if (edgeTimer.current) {
+      clearInterval(edgeTimer.current);
+      edgeTimer.current = null;
+    }
+  }, []);
+
+  /** Start/stop the edge scroll based on where the finger currently is. */
+  const updateEdgeScroll = useCallback(() => {
+    const EDGE = 72; // px band at each end that triggers scrolling
+    const STEP = 14; // px per tick (~16ms) — brisk but controllable
+    const localY = fingerY.current - viewTop.current;
+    const dir = localY < EDGE ? -1 : localY > viewH.current - EDGE ? 1 : 0;
+    if (dir === 0) {
+      stopEdgeScroll();
+      return;
+    }
+    if (edgeTimer.current) {
+      return; // already scrolling this way; the tick reads dir fresh
+    }
+    edgeTimer.current = setInterval(() => {
+      const localNow = fingerY.current - viewTop.current;
+      const d = localNow < EDGE ? -1 : localNow > viewH.current - EDGE ? 1 : 0;
+      if (d === 0) {
+        stopEdgeScroll();
+        return;
+      }
+      const max = Math.max(0, contentH.current - viewH.current);
+      const next = Math.max(0, Math.min(max, scrollY.current + d * STEP));
+      if (next === scrollY.current) {
+        return; // already at the end — nothing to do but keep waiting
+      }
+      scrollY.current = next;
+      scroller.current?.scrollTo({y: next, animated: false});
+      applyDrag(); // the row must keep up with the content moving under it
+    }, 16);
+  }, [stopEdgeScroll, applyDrag]);
+
+  useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
   // A drop writes the new order straight into `queue`; the engine round-trip
   // that follows must not be allowed to paint the old order back over it.
   const settleUntil = useRef(0);
@@ -129,7 +200,10 @@ export function QueuePane() {
         next.splice(activeIdx + 1 + toJ, 0, moved);
         return next;
       });
-      const ok = await moveQueueItem(activeIdx + 1 + fromJ, activeIdx + 1 + toJ);
+      const ok = await moveQueueItem(
+        activeIdx + 1 + fromJ,
+        activeIdx + 1 + toJ,
+      );
       if (!ok) {
         settleUntil.current = 0;
         refresh(); // engine refused — show the truth rather than a lie
@@ -159,22 +233,28 @@ export function QueuePane() {
           onMoveShouldSetPanResponder: () => true,
           // The ScrollView must not steal the gesture once the grip has it.
           onPanResponderTerminationRequest: () => false,
-          onPanResponderGrant: () => {
+          onPanResponderGrant: (_e, g) => {
             dragY.setValue(0);
             dragDy.current = 0;
+            dragOffset.current = 0;
+            scrollAtGrant.current = scrollY.current;
+            fingerY.current = g.y0;
             setDragFrom(index);
           },
           // setValue, NOT setState — this moves the row without re-rendering.
           onPanResponderMove: (_e, g) => {
             dragDy.current = g.dy;
-            dragY.setValue(g.dy);
+            fingerY.current = g.moveY;
+            applyDrag();
+            updateEdgeScroll();
           },
           onPanResponderRelease: () => {
+            stopEdgeScroll();
             const to = Math.max(
               0,
               Math.min(
                 upcomingLen.current - 1,
-                index + Math.round(dragDy.current / ROW_H),
+                index + Math.round(dragOffset.current / ROW_H),
               ),
             );
             setDragFrom(null);
@@ -182,6 +262,7 @@ export function QueuePane() {
             commitRef.current(index, to);
           },
           onPanResponderTerminate: () => {
+            stopEdgeScroll();
             setDragFrom(null);
             dragY.setValue(0);
           },
@@ -190,7 +271,7 @@ export function QueuePane() {
       }
       return r.panHandlers;
     },
-    [dragY],
+    [dragY, applyDrag, updateEdgeScroll, stopEdgeScroll],
   );
 
   if (!queue.length) {
@@ -206,39 +287,59 @@ export function QueuePane() {
   const nowPlaying = active == null ? null : queue[active];
 
   return (
-    <ScrollView
+    <View
       style={styles.wrap}
-      contentContainerStyle={styles.body}
-      scrollEnabled={dragFrom === null}
-      showsVerticalScrollIndicator={false}>
-      {!!nowPlaying && (
-        <>
-          <Text style={styles.section}>Now playing</Text>
-          <Row track={nowPlaying} activeRow />
-        </>
-      )}
+      ref={frame}
+      onLayout={e => {
+        viewH.current = e.nativeEvent.layout.height;
+        // Page-space top of the list, so gestureState.moveY (which is in page
+        // space) can be turned into a position within the list.
+        frame.current?.measureInWindow((_x, y) => {
+          viewTop.current = y;
+        });
+      }}>
+      <ScrollView
+        ref={scroller}
+        style={styles.wrap}
+        contentContainerStyle={styles.body}
+        scrollEnabled={dragFrom === null}
+        scrollEventThrottle={16}
+        onScroll={e => {
+          scrollY.current = e.nativeEvent.contentOffset.y;
+        }}
+        onContentSizeChange={(_w, h) => {
+          contentH.current = h;
+        }}
+        showsVerticalScrollIndicator={false}>
+        {!!nowPlaying && (
+          <>
+            <Text style={styles.section}>Now playing</Text>
+            <Row track={nowPlaying} activeRow />
+          </>
+        )}
 
-      {upcoming.length > 0 && (
-        <Text style={styles.section}>Next up · hold the grip to reorder</Text>
-      )}
+        {upcoming.length > 0 && (
+          <Text style={styles.section}>Next up · hold the grip to reorder</Text>
+        )}
 
-      {upcoming.map((t, j) => (
-        <Row
-          key={String(t.id ?? t.url ?? j)}
-          track={t}
-          onPress={() => jump(activeIdx + 1 + j)}
-          grip={gripHandlers(j)}
-          offset={offsetFor(j, dragFrom, dragY)}
-          lifted={dragFrom === j}
-          // Radio picks are marked on the row itself rather than with a section
-          // divider. A divider would make the list rows non-uniform in height,
-          // and the drag maths (dy / ROW_H, and the step midpoints) depends on
-          // every row being exactly ROW_H tall — an inserted header would put
-          // every drop below it one slot out.
-          recommended={firstRecommended >= 0 && j >= firstRecommended}
-        />
-      ))}
-    </ScrollView>
+        {upcoming.map((t, j) => (
+          <Row
+            key={String(t.id ?? t.url ?? j)}
+            track={t}
+            onPress={() => jump(activeIdx + 1 + j)}
+            grip={gripHandlers(j)}
+            offset={offsetFor(j, dragFrom, dragY)}
+            lifted={dragFrom === j}
+            // Radio picks are marked on the row itself rather than with a section
+            // divider. A divider would make the list rows non-uniform in height,
+            // and the drag maths (dy / ROW_H, and the step midpoints) depends on
+            // every row being exactly ROW_H tall — an inserted header would put
+            // every drop below it one slot out.
+            recommended={firstRecommended >= 0 && j >= firstRecommended}
+          />
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -374,5 +475,10 @@ const styles = StyleSheet.create({
   rec: {color: C.faint},
   grip: {paddingHorizontal: 14, paddingVertical: 18},
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40},
-  emptyText: {color: C.faint, fontSize: 13, textAlign: 'center', lineHeight: 19},
+  emptyText: {
+    color: C.faint,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
 });
