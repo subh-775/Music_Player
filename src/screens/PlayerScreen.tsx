@@ -26,6 +26,8 @@ import React, {
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
+  Easing,
   Image,
   Modal,
   PanResponder,
@@ -69,7 +71,7 @@ import {
   useIsPlaying,
   useProgress,
 } from '../player';
-import {useLike} from '../store';
+import {readSettings, useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
 import {toward, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
@@ -78,6 +80,9 @@ import {SeekPeek} from '../components/SeekPeek';
 import {QueuePane} from './QueueScreen';
 import {Toaster} from '../components/Toaster';
 import {toast} from '../toast';
+
+/** Full sheet travel for the open/close slide. */
+const SCREEN_H = Dimensions.get('window').height;
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
 
@@ -183,24 +188,71 @@ export function PlayerScreen({
   // Artwork follows the finger, then leaves and re-enters on a change.
   const slide = useRef(new Animated.Value(0)).current;
 
-  // Drag-down feedback ONLY. The Modal keeps RN's built-in "slide" for the
-  // actual open/close (which never flashes white — driving the exit ourselves
-  // with animationType "none" did, and it also stopped the swipe working). So
-  // sheetY just tracks the finger; on commit we let the built-in slide play.
-  const sheetY = useRef(new Animated.Value(0)).current;
+  /**
+   * The sheet's own position. The Modal no longer animates itself.
+   *
+   * With `animationType="slide"`, releasing a drag called onClose() and the
+   * Modal restarted its OWN slide from the top — ignoring where the finger had
+   * dragged to. That restart is the hitch: the sheet jumped back up and then
+   * slid away. Now the drag, the fling and the button all move this one value,
+   * so a dismiss simply carries on from wherever the sheet already is.
+   *
+   * Safe to drive ourselves only because the Modal is `transparent`; an opaque
+   * one showed white behind the translated content.
+   */
+  const sheetY = useRef(new Animated.Value(SCREEN_H)).current;
+
   useEffect(() => {
-    if (visible) {
-      sheetY.setValue(0);
+    if (!visible) {
+      return;
     }
+    if (readSettings().reduceAnimations) {
+      sheetY.setValue(0);
+      return;
+    }
+    sheetY.setValue(SCREEN_H);
+    Animated.timing(sheetY, {
+      toValue: 0,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
   }, [visible, sheetY]);
 
   const springBack = useCallback(() => {
+    if (readSettings().reduceAnimations) {
+      sheetY.setValue(0);
+      return;
+    }
     Animated.spring(sheetY, {
       toValue: 0,
       useNativeDriver: true,
       bounciness: 4,
     }).start();
   }, [sheetY]);
+
+  /** Slide the rest of the way out, THEN unmount — no restart, no jump. */
+  const close = useCallback(
+    (velocity = 0) => {
+      if (readSettings().reduceAnimations) {
+        onClose();
+        return;
+      }
+      Animated.timing(sheetY, {
+        toValue: SCREEN_H,
+        // A firm flick finishes quicker than a slow drag, so the sheet keeps
+        // the speed the finger gave it instead of always taking the same time.
+        duration: velocity > 1.5 ? 150 : 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({finished}) => {
+        if (finished) {
+          onClose();
+        }
+      });
+    },
+    [sheetY, onClose],
+  );
 
   const dismissPan = useMemo(
     () =>
@@ -213,16 +265,15 @@ export function PlayerScreen({
           }
         },
         onPanResponderRelease: (_e, g) => {
-          // Past the threshold (or a flick) → close via the built-in slide.
           if (g.dy > 120 || g.vy > 0.8) {
-            onClose();
+            close(g.vy);
           } else {
             springBack();
           }
         },
         onPanResponderTerminate: springBack,
       }),
-    [sheetY, onClose, springBack],
+    [sheetY, close, springBack],
   );
 
   const commit = useCallback(
@@ -358,13 +409,13 @@ export function PlayerScreen({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType="none"
       // Transparent so that when the swipe drags the sheet DOWN, the space it
       // vacates reveals the app behind (Home) instead of the modal window's own
       // white background. The sheet itself is opaque (styles.wrap), so a fully
       // open player still covers everything.
       transparent
-      onRequestClose={onClose}
+      onRequestClose={() => close()}
       statusBarTranslucent>
       <Animated.View
         style={[
@@ -375,7 +426,10 @@ export function PlayerScreen({
         {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
         <View style={styles.topBar} {...dismissPan.panHandlers}>
-          <TouchableOpacity onPress={onClose} hitSlop={14} style={styles.iconBtn}>
+          <TouchableOpacity
+            onPress={() => close()}
+            hitSlop={14}
+            style={styles.iconBtn}>
             <ChevronDown size={26} color={C.text} />
           </TouchableOpacity>
           <Text style={styles.context} numberOfLines={1}>

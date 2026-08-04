@@ -41,6 +41,16 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     private var loudness: LoudnessEnhancer? = null
     private var attachedSession = -1
 
+    /**
+     * Why the effects are not working, in the user's own words.
+     *
+     * Every failure path here used to `promise.resolve(false)` and say nothing,
+     * so an equalizer that silently did nothing was indistinguishable from one
+     * that was working — with no way to tell which without a USB cable. This is
+     * surfaced through getDiagnostics() on the Settings > Diagnostics screen.
+     */
+    @Volatile private var lastError: String = ""
+
     /** Our 8 reference frequencies, in Hz. Must match src/eq.ts EQ_BANDS. */
     private val refFreqs = intArrayOf(60, 150, 400, 1000, 2400, 6000, 12000, 16000)
 
@@ -55,8 +65,20 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         // Cheap and idempotent; the service may not have existed the first
         // time this ran, so it's retried rather than bound once at startup.
         MusicServiceRef.ensureBound(ctx)
+        if (MusicServiceRef.instance == null) {
+            lastError = "Playback service not bound yet — play something first."
+            return false
+        }
         val session = PlaybackSession.currentId()
-        if (session <= 0) return false
+        if (session <= 0) {
+            // -1 means the reflection into RNTP/KotlinAudio came back empty.
+            // In a release build that almost always means a keep rule stopped
+            // matching after a dependency upgrade, so say so plainly.
+            lastError =
+                "No audio session (id=$session). Nothing has played yet, or the " +
+                    "player's internals could not be reached."
+            return false
+        }
         if (equalizer != null && attachedSession == session) return true
 
         release()
@@ -66,14 +88,43 @@ class AudioModule(private val ctx: ReactApplicationContext) :
             equalizer = Equalizer(0, session).apply { enabled = false }
             loudness = LoudnessEnhancer(session).apply { enabled = false }
             attachedSession = session
+            lastError = ""
             Log.i(TAG, "effects attached to audio session $session")
             true
         } catch (e: Exception) {
             // Some devices refuse effects on a fast-path/offloaded session.
+            lastError = "Device refused audio effects: ${e.message}"
             Log.w(TAG, "could not attach audio effects: ${e.message}")
             release()
             false
         }
+    }
+
+    /**
+     * Everything needed to explain a non-working equalizer, without a cable.
+     * Rendered by the in-app Diagnostics screen.
+     */
+    @ReactMethod
+    fun getDiagnostics(promise: Promise) {
+        val map = com.facebook.react.bridge.Arguments.createMap()
+        try {
+            val bound = MusicServiceRef.instance != null
+            val session = PlaybackSession.currentId()
+            map.putBoolean("serviceBound", bound)
+            map.putInt("audioSession", session)
+            map.putBoolean("effectsAttached", equalizer != null)
+            map.putInt("attachedSession", attachedSession)
+            map.putBoolean("eqEnabled", equalizer?.enabled == true)
+            map.putInt("bands", equalizer?.numberOfBands?.toInt() ?: 0)
+            map.putBoolean("loudnessEnabled", loudness?.enabled == true)
+            // Proves whether the volume reflection still resolves — the same
+            // path the crossfade fade depends on.
+            map.putBoolean("playerReachable", PlaybackSession.exoPlayer() != null)
+            map.putString("lastError", lastError)
+        } catch (e: Exception) {
+            map.putString("lastError", "diagnostics failed: ${e.message}")
+        }
+        promise.resolve(map)
     }
 
     private fun release() {
@@ -470,12 +521,21 @@ class AudioModule(private val ctx: ReactApplicationContext) :
             volRamp = ramp
             volHandler.postDelayed(ramp, stepMs)
 
-            // Fail-safe. The fade is timed to land on the track boundary, so a
-            // second past it the next song is playing and must be at full level.
+            // Fail-safe ONLY. It must not race the crossfade handoff: while the
+            // overlap player is still sounding, snapping RNTP back to full
+            // volume plays the incoming track twice at once, slightly offset —
+            // the "I hear two sounds for a second" clash. So this waits well
+            // past any overlap, and the handoff (which cancels it via
+            // restorePlayerVolume) is what normally restores volume.
             val restore = Runnable {
                 volRamp?.let { volHandler.removeCallbacks(it) }
                 volRamp = null
                 volRestore = null
+                if (cfPlayer != null) {
+                    // An overlap is STILL playing — restoring now would double
+                    // the audio. Cut the overlap first, then come back to full.
+                    stopCfInternal()
+                }
                 setExoVolume(1f)
             }
             volRestore = restore

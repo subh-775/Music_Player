@@ -18,7 +18,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ExternalLink,
-  FolderOpen,
   HardDrive,
   RefreshCw,
 } from 'lucide-react-native';
@@ -296,6 +295,28 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     }
   }, []);
 
+  const openDownloadFolder = useCallback(async () => {
+    const native = NativeModules.Backend as {
+      openFolder?: (p: string) => Promise<boolean>;
+    };
+    const path = folder || downloads?.download_dir || downloads?.path || '';
+    if (typeof native.openFolder !== 'function') {
+      toast('Opening the folder needs the newest APK.');
+      return;
+    }
+    if (!path) {
+      toast('No download folder yet');
+      return;
+    }
+    try {
+      if (!(await native.openFolder(path))) {
+        toast('No file manager on this device');
+      }
+    } catch {
+      toast('Could not open the folder');
+    }
+  }, [folder, downloads]);
+
   const doReset = useCallback(() => {
     resetSettings();
     setResetOpen(false);
@@ -541,7 +562,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
             <View style={styles.row}>
               <HardDrive size={20} color={C.text} strokeWidth={1.9} />
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>Downloads folder</Text>
+                <Text style={styles.rowLabel}>Downloads</Text>
                 <Text style={styles.rowHint} numberOfLines={2}>
                   {folder ||
                     (downloads?.using_fallback
@@ -553,8 +574,13 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                     style={styles.setBtn}
                     onPress={pickDownloadFolder}
                     activeOpacity={0.85}>
-                    <FolderOpen size={14} color={C.text} strokeWidth={2.2} />
-                    <Text style={styles.setBtnText}>Choose folder</Text>
+                    <Text style={styles.setBtnText}>Select</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.ghostBtn}
+                    onPress={openDownloadFolder}
+                    activeOpacity={0.7}>
+                    <Text style={styles.ghostBtnText}>Open folder</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.ghostBtn}

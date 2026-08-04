@@ -50,16 +50,37 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
     @ReactMethod
     fun check(promise: com.facebook.react.bridge.Promise?) {
         Thread {
-            val rel = doCheck()
+            // A failed check and an up-to-date app are DIFFERENT things. This
+            // used to report both as available=false, so a rate-limited or
+            // offline check told the user "you're on the latest version" — and
+            // is why the update popup appeared only sometimes.
+            var error = ""
+            val rel = try {
+                doCheck()
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
+                null
+            }
+            if (rel == null && error.isEmpty()) {
+                error = lastCheckError
+            }
             pending = rel
             val map: WritableMap = Arguments.createMap().apply {
                 putBoolean("available", rel != null)
                 putString("version", rel?.version ?: "")
                 putString("notes", rel?.notes ?: "")
+                putString("error", error)
+                putString("installed", installedVersion())
             }
             emit("mp.update.result", map)
             promise?.resolve(rel != null)
         }.start()
+    }
+
+    private fun installedVersion(): String = try {
+        ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: ""
+    } catch (e: Exception) {
+        ""
     }
 
     @ReactMethod
@@ -72,13 +93,21 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
         Thread { downloadAndInstall(rel) }.start()
     }
 
+    /** Why the last check found nothing, when the reason wasn't "up to date". */
+    @Volatile private var lastCheckError: String = ""
+
     private fun doCheck(): Release? = try {
+        lastCheckError = ""
         val conn = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8000
             readTimeout = 8000
             setRequestProperty("Accept", "application/vnd.github+json")
+            // GitHub rate-limits unauthenticated calls per IP, and answers 403
+            // when a client sends no User-Agent at all.
+            setRequestProperty("User-Agent", "Music_Player")
         }
         if (conn.responseCode != 200) {
+            lastCheckError = "GitHub returned HTTP ${conn.responseCode}"
             null
         } else {
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
@@ -95,15 +124,18 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                     }
                 }
             }
-            val installed = ctx.packageManager
-                .getPackageInfo(ctx.packageName, 0).versionName ?: "0"
-            if (apkUrl.isNotBlank() && isNewer(tag, installed)) {
+            val installed = installedVersion().ifBlank { "0" }
+            if (apkUrl.isBlank()) {
+                lastCheckError = "Release $tag has no .apk attached"
+                null
+            } else if (isNewer(tag, installed)) {
                 Release(tag, apkUrl, json.optString("body"))
             } else {
-                null
+                null // genuinely up to date — NOT an error
             }
         }
     } catch (e: Exception) {
+        lastCheckError = e.message ?: e.javaClass.simpleName
         Log.w(TAG, "update check failed: ${e.message}")
         null
     }

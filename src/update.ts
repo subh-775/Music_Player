@@ -10,6 +10,7 @@
  */
 import {useSyncExternalStore} from 'react';
 import {NativeEventEmitter, NativeModules} from 'react-native';
+import {diag} from './diag';
 
 type UpdaterNative = {
   check?: () => Promise<boolean>;
@@ -20,7 +21,15 @@ const native = (NativeModules.Updater ?? {}) as UpdaterNative;
 
 export const updateSupported = typeof native.check === 'function';
 
-export type UpdateInfo = {available: boolean; version: string; notes: string};
+export type UpdateInfo = {
+  available: boolean;
+  version: string;
+  notes: string;
+  /** Set when the check could not complete — distinct from "up to date". */
+  error?: string;
+  /** The version actually installed, as native sees it. */
+  installed?: string;
+};
 export type UpdatePhase =
   | 'idle'
   | 'checking'
@@ -29,9 +38,14 @@ export type UpdatePhase =
   | 'downloading'
   | 'failed';
 
-type UpdateState = {phase: UpdatePhase; info: UpdateInfo | null; pct: number};
+type UpdateState = {
+  phase: UpdatePhase;
+  info: UpdateInfo | null;
+  pct: number;
+  error: string;
+};
 
-let state: UpdateState = {phase: 'idle', info: null, pct: 0};
+let state: UpdateState = {phase: 'idle', info: null, pct: 0, error: ''};
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -49,12 +63,34 @@ function ensureRegistered() {
   // Never removed — the whole point is that progress lands here no matter what
   // is (or isn't) on screen.
   emitter.addListener('mp.update.result', (res: UpdateInfo) => {
-    state = {...state, info: res, phase: res?.available ? 'found' : 'current'};
+    if (checkTimeout) {
+      clearTimeout(checkTimeout);
+      checkTimeout = null;
+    }
+    // "Couldn't check" is not "you're up to date". Reporting a failed check as
+    // up-to-date is why an offline or rate-limited launch quietly hid a real
+    // update; now it says so and can be retried.
+    const failed = !res?.available && !!res?.error;
+    diag(
+      'update',
+      res?.available
+        ? `update available: ${res.version}`
+        : failed
+        ? `check failed: ${res.error}`
+        : `up to date (${res?.installed || '?'})`,
+    );
+    state = {
+      ...state,
+      info: res,
+      error: res?.error || '',
+      phase: res?.available ? 'found' : failed ? 'failed' : 'current',
+    };
     emit();
   });
   emitter.addListener('mp.update.progress', (p: number) => {
     if (p < 0) {
-      state = {...state, phase: 'failed'};
+      diag('update', 'download failed');
+      state = {...state, phase: 'failed', error: 'Download failed'};
       emit();
       return;
     }
@@ -64,17 +100,41 @@ function ensureRegistered() {
 }
 
 /** Kick a silent check. Safe to call repeatedly (launch + opening Settings). */
+let checkTimeout: ReturnType<typeof setTimeout> | null = null;
+
 export function checkUpdate(): void {
   ensureRegistered();
-  // Ignore a re-tap while a check or download is already in flight — that
-  // repeat was what stacked a pile of "checking…" toasts.
-  if (!updateSupported || state.phase === 'checking' || state.phase === 'downloading') {
+  if (!updateSupported) {
+    diag('update', 'native Updater module missing from this build');
     return;
   }
-  state = {...state, phase: 'checking'};
+  // Ignore a re-tap while a check or download is already in flight — that
+  // repeat was what stacked a pile of "checking…" toasts.
+  if (state.phase === 'checking' || state.phase === 'downloading') {
+    return;
+  }
+  state = {...state, phase: 'checking', error: ''};
   emit();
-  native.check?.().catch(() => {
-    state = {...state, phase: 'idle'};
+  diag('update', 'checking…');
+
+  // A dropped native event must NOT be able to strand us in 'checking'
+  // forever. It could before: the guard above then made every later check a
+  // silent no-op, so the popup simply never appeared again until the app was
+  // restarted — exactly the "worked after clearing cache and reopening" report.
+  if (checkTimeout) {
+    clearTimeout(checkTimeout);
+  }
+  checkTimeout = setTimeout(() => {
+    if (state.phase === 'checking') {
+      diag('update', 'check timed out after 20s');
+      state = {...state, phase: 'failed', error: 'Check timed out'};
+      emit();
+    }
+  }, 20000);
+
+  native.check?.().catch(e => {
+    diag('update', `check threw: ${String(e)}`);
+    state = {...state, phase: 'failed', error: String(e)};
     emit();
   });
 }

@@ -127,7 +127,13 @@ android {
             // proguard-rules.pro. VERIFY a release build boots before tagging.
             minifyEnabled enableProguardInReleaseBuilds
             shrinkResources enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            // proguard-android.txt, NOT the "-optimize" variant. The optimize
+            // profile inlines methods and merges classes, and everything that
+            // makes the equalizer work is REFLECTION into RNTP/KotlinAudio
+            // privates — exactly what those optimizations break, and only ever
+            // at runtime in a release build. The size difference is small; the
+            // failure mode is "the EQ silently does nothing", which is worse.
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             buildConfigField "int", "BACKEND_PORT", "8770"
         }
     }

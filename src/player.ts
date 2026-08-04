@@ -770,10 +770,16 @@ async function handoffCrossfade(): Promise<void> {
       await new Promise(r => setTimeout(r, 250));
     }
   } catch {}
+  // ORDER MATTERS. Cut the overlap BEFORE bringing RNTP back to full: both are
+  // playing the same incoming track a little out of step, so any window where
+  // both are loud is heard as the song doubled over itself. Restoring first and
+  // stopping second (what this used to do, with a 250ms gap between) is exactly
+  // the "sound clashes, I hear it twice for a second" report.
+  await endCrossfade();
   try {
     await TrackPlayer.setVolume(1);
   } catch {}
-  await endCrossfade();
+  restorePlayerVolume(); // cancel the native fail-safe; it has nothing left to do
 }
 
 /**

@@ -9,18 +9,29 @@
 
 # Add any project specific keep options here:
 
-# Audio effects reach the playback session by reflection, because RNTP keeps
-# `MusicService.player` private and KotlinAudio keeps `exoPlayer` protected.
-# Without these, R8 renames the very fields PlaybackSession looks up by name
-# and the equalizer silently stops working in release builds only.
--keepclassmembers class com.doublesymmetry.trackplayer.service.MusicService {
-    private *** player;
-}
--keepclassmembers class com.doublesymmetry.trackplayer.service.MusicService$MusicBinder {
-    *** service;
-}
--keepclassmembers class com.doublesymmetry.kotlinaudio.players.** {
-    protected *** exoPlayer;
+# ── Reflection surface: the equalizer, the loudness enhancer and the volume
+# fade all reach ExoPlayer through RNTP/KotlinAudio privates, BY NAME. Anything
+# R8 renames, removes or inlines here fails only at runtime, only in release,
+# and only as "the effect silently does nothing" — so these are kept whole
+# rather than surgically. The classes are small; the debugging cost is not.
+-keep class com.doublesymmetry.trackplayer.** { *; }
+-keep class com.doublesymmetry.kotlinaudio.** { *; }
+-dontwarn com.doublesymmetry.**
+
+# ExoPlayer / media3 itself: keep the player types and their members intact so
+# getAudioSessionId / setVolume / getVolume still resolve reflectively, and so
+# the optimizer cannot merge the class hierarchy the field walk relies on.
+-keep class com.google.android.exoplayer2.** { *; }
+-keep interface com.google.android.exoplayer2.** { *; }
+-keep class androidx.media3.** { *; }
+-keep interface androidx.media3.** { *; }
+-dontwarn com.google.android.exoplayer2.**
+-dontwarn androidx.media3.**
+
+# Never rename the members we look up by string, wherever they ended up.
+-keepclassmembernames class * {
+    *** exoPlayer;
+    *** player;
 }
 
 # AudioModule drives the player's volume by reflection (the background-safe

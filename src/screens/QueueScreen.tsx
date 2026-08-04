@@ -456,7 +456,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: S.gutter - 4,
     borderRadius: 10,
-    backgroundColor: C.bg,
+    // Transparent: the queue sits over the player's own tinted background, and
+    // an opaque row painted a black slab around every song.
+    backgroundColor: 'transparent',
   },
   rowLifted: {backgroundColor: C.surfaceHi, elevation: 8, zIndex: 5},
   rowMain: {

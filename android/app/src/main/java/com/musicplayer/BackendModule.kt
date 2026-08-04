@@ -128,6 +128,53 @@ class BackendModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Open the downloads folder in whatever file browser the device has.
+     *
+     * There is no universal "show me this directory" intent on Android, so this
+     * tries the documented forms in order and falls back to launching a file
+     * manager. Resolves false when nothing on the device can handle it, so the
+     * UI can say so rather than appearing to do nothing.
+     */
+    @ReactMethod
+    fun openFolder(path: String, promise: Promise) {
+        val activity = currentActivity ?: reactApplicationContext
+        val root = Environment.getExternalStorageDirectory().absolutePath
+        val rel = path.removePrefix(root).trim('/')
+        val candidates = listOf(
+            // DocumentsUI's authority form — the one that actually lands on the
+            // right folder when the device ships a documents provider.
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(
+                    Uri.parse(
+                        "content://com.android.externalstorage.documents/document/primary%3A" +
+                            Uri.encode(rel),
+                    ),
+                    DocumentsContract.Document.MIME_TYPE_DIR,
+                )
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse("file://$path"), "resource/folder")
+            },
+            // Last resort: open a file manager anywhere at all.
+            Intent(Intent.ACTION_VIEW).apply {
+                type = DocumentsContract.Document.MIME_TYPE_DIR
+            },
+        )
+        for (intent in candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(intent)
+                promise.resolve(true)
+                return
+            } catch (_: Exception) {
+                // No app for this form — try the next.
+            }
+        }
+        promise.resolve(false)
+    }
+
+    /**
      * content:// tree URI -> real filesystem path. Same translation the WebView
      * build shipped: the primary volume maps to the external storage root, any
      * other volume to /storage/<volume>.

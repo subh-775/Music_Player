@@ -9,6 +9,7 @@
 import {NativeModules} from 'react-native';
 import {resolveGains} from './eq';
 import {readSettings} from './store';
+import {diag} from './diag';
 
 type AudioNative = {
   getCapabilities?: () => Promise<EqCapabilities>;
@@ -19,7 +20,29 @@ type AudioNative = {
   stopCrossfade?: () => Promise<boolean>;
   fadeOutPlayer?: (durationMs: number) => Promise<boolean>;
   restorePlayerVolume?: () => Promise<boolean>;
+  getDiagnostics?: () => Promise<AudioDiagnostics>;
 };
+
+export type AudioDiagnostics = {
+  serviceBound?: boolean;
+  audioSession?: number;
+  effectsAttached?: boolean;
+  attachedSession?: number;
+  eqEnabled?: boolean;
+  bands?: number;
+  loudnessEnabled?: boolean;
+  playerReachable?: boolean;
+  lastError?: string;
+};
+
+/** Native's own account of why the effects are or aren't working. */
+export async function getAudioDiagnostics(): Promise<AudioDiagnostics | null> {
+  try {
+    return (await native.getDiagnostics?.()) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export type EqCapabilities = {
   available: boolean;
@@ -109,21 +132,36 @@ export async function getEqCapabilities(): Promise<EqCapabilities> {
   }
 }
 
-/** Send the current settings to the native effects. Safe to call often. */
+/**
+ * Send the current settings to the native effects. Safe to call often.
+ *
+ * Failures are logged rather than swallowed. A device CAN legitimately refuse
+ * effects on an offloaded session and playback must continue regardless — but
+ * silently returning false is what made "the EQ does nothing" impossible to
+ * diagnose without a cable.
+ */
 export async function applyAudioEffects(): Promise<void> {
   const settings = readSettings();
   try {
-    await native.setEqualizer?.(
+    const ok = await native.setEqualizer?.(
       !!settings.eqEnabled,
       resolveGains(settings),
     );
-  } catch {
-    // A device can refuse effects on an offloaded session; playback is
-    // unaffected, so this must never surface as an error.
+    if (ok === false) {
+      const d = await getAudioDiagnostics();
+      diag('eq', `setEqualizer refused — ${d?.lastError || 'no reason given'}`);
+    } else if (settings.eqEnabled) {
+      diag('eq', `applied (${resolveGains(settings).join(',')})`);
+    }
+  } catch (e) {
+    diag('eq', `setEqualizer threw: ${String(e)}`);
   }
   try {
-    await native.setNormalize?.(!!settings.normalizeVolume);
-  } catch {
-    /* same */
+    const ok = await native.setNormalize?.(!!settings.normalizeVolume);
+    if (ok === false) {
+      diag('eq', 'setNormalize refused');
+    }
+  } catch (e) {
+    diag('eq', `setNormalize threw: ${String(e)}`);
   }
 }
