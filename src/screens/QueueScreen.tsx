@@ -4,129 +4,48 @@
  * Reads the engine's real queue rather than a copy held in JS, so it can't
  * drift from what will actually play.
  *
- * ## Why the drag is built this way
+ * ## Why this uses Reanimated rather than PanResponder
  *
- * The first version of this called `setDragOver(...)` on every pan frame, so
- * every finger movement re-rendered the whole list to recompute which rows
- * should slide. That is what made it "laggy and stubborn", and it is also where
- * the overlapping rows came from — React repainting rows mid-gesture while an
- * absolute-positioned dragged row floated over them.
+ * Three previous attempts at drag-to-reorder were built on PanResponder +
+ * Animated, and every one of them was reported as laggy. The reason is
+ * structural, not a tuning problem: with PanResponder the gesture is delivered
+ * to the JS thread, so every frame of a drag competes with React renders, the
+ * playback event handlers and the backend fetches this app is doing constantly.
+ * Under load the JS thread simply cannot keep 60fps, and the row visibly trails
+ * the finger no matter how the maths is arranged.
  *
- * There is no per-frame state here at all. ONE `Animated.Value` tracks the
- * finger, and every other row derives its offset from it as an interpolation —
- * a step function with a short transition band, so rows slide out of the way as
- * the dragged item crosses their midpoint. React renders twice per gesture:
- * once when the drag starts, once when it ends.
+ * react-native-gesture-handler + Reanimated run the gesture and the row
+ * transforms on the UI thread as worklets. JS is not in the frame loop at all,
+ * so a busy JS thread cannot make the drag stutter. That is the whole reason
+ * for the dependency, and it is why this one should actually feel right.
  *
  * ## Only upcoming tracks reorder
  *
- * The playing track is pinned at the top and cannot be dragged, and nothing can
- * be dropped above it. RNTP's remove() maps to ExoPlayer's removeMediaItem, and
- * removing the item that is currently playing stops playback — so a queue where
- * the active row was draggable could kill the music mid-drag. This also matches
- * the reference build, whose `queue` array is upcoming-only.
+ * The playing track is pinned above the list and cannot be dragged, and nothing
+ * can be dropped above it. RNTP's remove() maps to ExoPlayer's removeMediaItem,
+ * and removing the item that is currently playing stops playback — a queue
+ * where the active row was draggable could kill the music mid-drag. This also
+ * matches the reference build, whose queue is upcoming-only.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {
-  Animated,
-  Image,
-  PanResponder,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import DraggableFlatList, {
+  ScaleDecorator,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import {Menu} from 'lucide-react-native';
 import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
 import {Event, TrackPlayer, moveQueueItem, sourceTrackFor} from '../player';
 
 const ROW_H = 60;
-/** Half-width of the slide transition, in px. Small = snappy, large = mushy. */
-const BAND = 14;
 
 export function QueuePane() {
   const [queue, setQueue] = useState<RNTPTrack[]>([]);
   const [active, setActive] = useState<number | null>(null);
-  /** Index INTO `upcoming` of the row being dragged, or null. */
-  const [dragFrom, setDragFrom] = useState<number | null>(null);
-
-  const dragY = useRef(new Animated.Value(0)).current;
-  const dragDy = useRef(0);
-
-  // Auto-scroll while dragging against the top/bottom edge, so a track can be
-  // moved further than one screenful without letting go. Driven by a plain
-  // interval rather than per-frame work: the finger is usually parked in the
-  // edge band, so there is nothing to recompute between ticks.
-  const scroller = useRef<ScrollView>(null);
-  const frame = useRef<View>(null);
-  const scrollY = useRef(0);
-  const viewTop = useRef(0);
-  const viewH = useRef(0);
-  const contentH = useRef(0);
-  const edgeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const fingerY = useRef(0);
-  /** Scroll offset when the drag began, so auto-scrolling can be added in. */
-  const scrollAtGrant = useRef(0);
-  /** The dragged row's total travel through the LIST: finger + scrolled-under. */
-  const dragOffset = useRef(0);
-
-  /**
-   * Push the current travel into the animation value.
-   *
-   * Auto-scroll moves the content beneath the finger, and the dragged row lives
-   * in that content — so without adding the scroll delta the row would drift
-   * away from the finger and, worse, the drop index (travel / ROW_H) would be
-   * short by however far the list had scrolled.
-   */
-  const applyDrag = useCallback(() => {
-    const v = dragDy.current + (scrollY.current - scrollAtGrant.current);
-    dragOffset.current = v;
-    dragY.setValue(v);
-  }, [dragY]);
-
-  const stopEdgeScroll = useCallback(() => {
-    if (edgeTimer.current) {
-      clearInterval(edgeTimer.current);
-      edgeTimer.current = null;
-    }
-  }, []);
-
-  /** Start/stop the edge scroll based on where the finger currently is. */
-  const updateEdgeScroll = useCallback(() => {
-    const EDGE = 72; // px band at each end that triggers scrolling
-    const STEP = 14; // px per tick (~16ms) — brisk but controllable
-    const localY = fingerY.current - viewTop.current;
-    const dir = localY < EDGE ? -1 : localY > viewH.current - EDGE ? 1 : 0;
-    if (dir === 0) {
-      stopEdgeScroll();
-      return;
-    }
-    if (edgeTimer.current) {
-      return; // already scrolling this way; the tick reads dir fresh
-    }
-    edgeTimer.current = setInterval(() => {
-      const localNow = fingerY.current - viewTop.current;
-      const d = localNow < EDGE ? -1 : localNow > viewH.current - EDGE ? 1 : 0;
-      if (d === 0) {
-        stopEdgeScroll();
-        return;
-      }
-      const max = Math.max(0, contentH.current - viewH.current);
-      const next = Math.max(0, Math.min(max, scrollY.current + d * STEP));
-      if (next === scrollY.current) {
-        return; // already at the end — nothing to do but keep waiting
-      }
-      scrollY.current = next;
-      scroller.current?.scrollTo({y: next, animated: false});
-      applyDrag(); // the row must keep up with the content moving under it
-    }, 16);
-  }, [stopEdgeScroll, applyDrag]);
-
-  useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
-  // A drop writes the new order straight into `queue`; the engine round-trip
-  // that follows must not be allowed to paint the old order back over it.
+  const dragging = useRef(false);
+  // A drop writes the new order straight into state; the engine round-trip that
+  // follows must not repaint the old order over it.
   const settleUntil = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -144,18 +63,16 @@ export function QueuePane() {
 
   useEffect(() => {
     refresh();
-    // Event-driven, never polled: a timer here was what made a just-dropped
-    // reorder appear to take a beat to settle.
     const sub = TrackPlayer.addEventListener(
       Event.PlaybackActiveTrackChanged,
       () => {
-        if (dragFrom === null && Date.now() > settleUntil.current) {
+        if (!dragging.current && Date.now() > settleUntil.current) {
           refresh();
         }
       },
     );
     return () => sub.remove();
-  }, [refresh, dragFrom]);
+  }, [refresh]);
 
   const jump = useCallback(
     async (engineIndex: number) => {
@@ -173,37 +90,28 @@ export function QueuePane() {
   // -1 when nothing is active yet (a restored queue before the first play), so
   // the whole queue reads as "upcoming" rather than the list rendering blank.
   const activeIdx = active ?? -1;
-  const upcoming = useMemo(
-    () => queue.slice(activeIdx + 1),
-    [queue, activeIdx],
-  );
+  const upcoming = useMemo(() => queue.slice(activeIdx + 1), [queue, activeIdx]);
+  const nowPlaying = active == null ? null : queue[active];
 
-  /** Where the autoplay-radio tail begins, as an index into `upcoming`. */
   const firstRecommended = useMemo(
     () => upcoming.findIndex(t => sourceTrackFor(t)?._autoplay),
     [upcoming],
   );
 
   /**
-   * Commit a reorder. The list is updated optimistically so the row lands under
-   * the finger with no wait, then the engine is brought into line.
+   * A drop landed. The list already shows the new order (the library hands us
+   * the reordered array), so this only has to bring the engine into line.
    */
-  const commitMove = useCallback(
-    async (fromJ: number, toJ: number) => {
-      if (fromJ === toJ || activeIdx < 0) {
+  const onDragEnd = useCallback(
+    async ({from, to, data}: {from: number; to: number; data: RNTPTrack[]}) => {
+      dragging.current = false;
+      if (from === to || activeIdx < 0) {
         return;
       }
       settleUntil.current = Date.now() + 2000;
-      setQueue(prev => {
-        const next = [...prev];
-        const [moved] = next.splice(activeIdx + 1 + fromJ, 1);
-        next.splice(activeIdx + 1 + toJ, 0, moved);
-        return next;
-      });
-      const ok = await moveQueueItem(
-        activeIdx + 1 + fromJ,
-        activeIdx + 1 + toJ,
-      );
+      // Optimistic: keep the played tracks, splice in the reordered tail.
+      setQueue(prev => [...prev.slice(0, activeIdx + 1), ...data]);
+      const ok = await moveQueueItem(activeIdx + 1 + from, activeIdx + 1 + to);
       if (!ok) {
         settleUntil.current = 0;
         refresh(); // engine refused — show the truth rather than a lie
@@ -212,66 +120,22 @@ export function QueuePane() {
     [activeIdx, refresh],
   );
 
-  // Responders must be STABLE across renders: the drag start re-renders, and
-  // handing the row a freshly-built responder mid-gesture orphans the gesture
-  // (the old "I dragged it and it snapped back" bug). One per index, forever,
-  // reading current values through refs.
-  const upcomingLen = useRef(0);
-  upcomingLen.current = upcoming.length;
-  const commitRef = useRef(commitMove);
-  commitRef.current = commitMove;
-  const responders = useRef(
-    new Map<number, ReturnType<typeof PanResponder.create>>(),
-  );
-
-  const gripHandlers = useCallback(
-    (index: number) => {
-      let r = responders.current.get(index);
-      if (!r) {
-        r = PanResponder.create({
-          onStartShouldSetPanResponder: () => true,
-          onMoveShouldSetPanResponder: () => true,
-          // The ScrollView must not steal the gesture once the grip has it.
-          onPanResponderTerminationRequest: () => false,
-          onPanResponderGrant: (_e, g) => {
-            dragY.setValue(0);
-            dragDy.current = 0;
-            dragOffset.current = 0;
-            scrollAtGrant.current = scrollY.current;
-            fingerY.current = g.y0;
-            setDragFrom(index);
-          },
-          // setValue, NOT setState — this moves the row without re-rendering.
-          onPanResponderMove: (_e, g) => {
-            dragDy.current = g.dy;
-            fingerY.current = g.moveY;
-            applyDrag();
-            updateEdgeScroll();
-          },
-          onPanResponderRelease: () => {
-            stopEdgeScroll();
-            const to = Math.max(
-              0,
-              Math.min(
-                upcomingLen.current - 1,
-                index + Math.round(dragOffset.current / ROW_H),
-              ),
-            );
-            setDragFrom(null);
-            dragY.setValue(0);
-            commitRef.current(index, to);
-          },
-          onPanResponderTerminate: () => {
-            stopEdgeScroll();
-            setDragFrom(null);
-            dragY.setValue(0);
-          },
-        });
-        responders.current.set(index, r);
-      }
-      return r.panHandlers;
+  const renderItem = useCallback(
+    ({item, getIndex, drag, isActive}: RenderItemParams<RNTPTrack>) => {
+      const j = getIndex() ?? 0;
+      return (
+        <ScaleDecorator activeScale={1.03}>
+          <Row
+            track={item}
+            onPress={() => jump(activeIdx + 1 + j)}
+            onDrag={drag}
+            lifted={isActive}
+            recommended={firstRecommended >= 0 && j >= firstRecommended}
+          />
+        </ScaleDecorator>
+      );
     },
-    [dragY, applyDrag, updateEdgeScroll, stopEdgeScroll],
+    [jump, activeIdx, firstRecommended],
   );
 
   if (!queue.length) {
@@ -284,127 +148,61 @@ export function QueuePane() {
     );
   }
 
-  const nowPlaying = active == null ? null : queue[active];
-
   return (
-    <View
-      style={styles.wrap}
-      ref={frame}
-      onLayout={e => {
-        viewH.current = e.nativeEvent.layout.height;
-        // Page-space top of the list, so gestureState.moveY (which is in page
-        // space) can be turned into a position within the list.
-        frame.current?.measureInWindow((_x, y) => {
-          viewTop.current = y;
-        });
-      }}>
-      <ScrollView
-        ref={scroller}
-        style={styles.wrap}
+    <View style={styles.wrap}>
+      {!!nowPlaying && (
+        <>
+          <Text style={styles.section}>Now playing</Text>
+          <Row track={nowPlaying} activeRow />
+        </>
+      )}
+
+      {upcoming.length > 0 && (
+        <Text style={styles.section}>Next up · hold the grip to reorder</Text>
+      )}
+
+      <DraggableFlatList
+        data={upcoming}
+        keyExtractor={(t, i) => String(t.id ?? t.url ?? i)}
+        renderItem={renderItem}
+        onDragBegin={() => {
+          dragging.current = true;
+        }}
+        onDragEnd={onDragEnd}
+        // Uniform rows: lets the list place the drop target without measuring,
+        // which is what keeps a long queue smooth.
+        getItemLayout={(_d, i) => ({
+          length: ROW_H,
+          offset: ROW_H * i,
+          index: i,
+        })}
+        activationDistance={12}
+        autoscrollThreshold={72}
+        containerStyle={styles.listBox}
         contentContainerStyle={styles.body}
-        scrollEnabled={dragFrom === null}
-        scrollEventThrottle={16}
-        onScroll={e => {
-          scrollY.current = e.nativeEvent.contentOffset.y;
-        }}
-        onContentSizeChange={(_w, h) => {
-          contentH.current = h;
-        }}
-        showsVerticalScrollIndicator={false}>
-        {!!nowPlaying && (
-          <>
-            <Text style={styles.section}>Now playing</Text>
-            <Row track={nowPlaying} activeRow />
-          </>
-        )}
-
-        {upcoming.length > 0 && (
-          <Text style={styles.section}>Next up · hold the grip to reorder</Text>
-        )}
-
-        {upcoming.map((t, j) => (
-          <Row
-            key={String(t.id ?? t.url ?? j)}
-            track={t}
-            onPress={() => jump(activeIdx + 1 + j)}
-            grip={gripHandlers(j)}
-            offset={offsetFor(j, dragFrom, dragY)}
-            lifted={dragFrom === j}
-            // Radio picks are marked on the row itself rather than with a section
-            // divider. A divider would make the list rows non-uniform in height,
-            // and the drag maths (dy / ROW_H, and the step midpoints) depends on
-            // every row being exactly ROW_H tall — an inserted header would put
-            // every drop below it one slot out.
-            recommended={firstRecommended >= 0 && j >= firstRecommended}
-          />
-        ))}
-      </ScrollView>
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
-}
-
-/**
- * How far row `j` should sit from its resting place, as an Animated node.
- *
- * The dragged row follows the finger 1:1. Every other row is a step: it slides
- * one row-height out of the way once the dragged item has crossed its midpoint.
- * `extrapolate: 'clamp'` is what keeps it a step rather than a slope, and the
- * ±BAND window is the short slide that makes the gap open smoothly.
- */
-function offsetFor(
-  j: number,
-  from: number | null,
-  dragY: Animated.Value,
-): Animated.AnimatedInterpolation<number> | Animated.Value | number {
-  if (from === null) {
-    return 0;
-  }
-  if (j === from) {
-    return dragY; // the picked-up row tracks the finger
-  }
-  if (j > from) {
-    const mid = (j - from) * ROW_H - ROW_H / 2;
-    return dragY.interpolate({
-      inputRange: [mid - BAND, mid + BAND],
-      outputRange: [0, -ROW_H],
-      extrapolate: 'clamp',
-    });
-  }
-  const mid = (j - from) * ROW_H + ROW_H / 2;
-  return dragY.interpolate({
-    inputRange: [mid - BAND, mid + BAND],
-    outputRange: [ROW_H, 0],
-    extrapolate: 'clamp',
-  });
 }
 
 function Row({
   track: t,
   onPress,
-  grip,
-  offset = 0,
+  onDrag,
   lifted = false,
   activeRow = false,
   recommended = false,
 }: {
   track: RNTPTrack;
   onPress?: () => void;
-  grip?: object;
-  offset?: Animated.AnimatedInterpolation<number> | Animated.Value | number;
+  onDrag?: () => void;
   lifted?: boolean;
   activeRow?: boolean;
   recommended?: boolean;
 }) {
   return (
-    <Animated.View
-      style={[
-        styles.row,
-        lifted && styles.rowLifted,
-        {transform: [{translateY: offset}]},
-      ]}
-      // The picked-up row must not swallow touches, or the ScrollView below it
-      // never sees the gesture end cleanly.
-      pointerEvents={lifted ? 'none' : 'auto'}>
+    <View style={[styles.row, lifted && styles.rowLifted]}>
       <TouchableOpacity
         style={styles.rowMain}
         activeOpacity={0.7}
@@ -428,17 +226,24 @@ function Row({
         </View>
       </TouchableOpacity>
 
-      {!!grip && (
-        <View style={styles.grip} {...grip}>
+      {!!onDrag && (
+        // onLongPress, not onPressIn: the list needs to distinguish a scroll
+        // from a drag, and grabbing on first touch would swallow flings.
+        <TouchableOpacity
+          style={styles.grip}
+          onLongPress={onDrag}
+          delayLongPress={120}
+          activeOpacity={0.6}>
           <Menu size={19} color={C.faint} />
-        </View>
+        </TouchableOpacity>
       )}
-    </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {flex: 1},
+  listBox: {flex: 1},
   body: {paddingBottom: 16},
   section: {
     fontSize: 11,
@@ -460,7 +265,7 @@ const styles = StyleSheet.create({
     // an opaque row painted a black slab around every song.
     backgroundColor: 'transparent',
   },
-  rowLifted: {backgroundColor: C.surfaceHi, elevation: 8, zIndex: 5},
+  rowLifted: {backgroundColor: C.surfaceHi, elevation: 8},
   rowMain: {
     flex: 1,
     flexDirection: 'row',
@@ -477,10 +282,5 @@ const styles = StyleSheet.create({
   rec: {color: C.faint},
   grip: {paddingHorizontal: 14, paddingVertical: 18},
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40},
-  emptyText: {
-    color: C.faint,
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 19,
-  },
+  emptyText: {color: C.faint, fontSize: 13, textAlign: 'center', lineHeight: 19},
 });

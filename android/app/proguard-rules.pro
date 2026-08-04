@@ -70,3 +70,11 @@
 
 # Reflection and generic signatures the above rely on.
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
+
+# Reanimated and gesture-handler (the queue's drag). Both ship their own
+# consumer rules, but their native<->JS bridges are reflective and minify is on
+# here, so keep them whole rather than discover a release-only breakage.
+-keep class com.swmansion.reanimated.** { *; }
+-keep class com.swmansion.gesturehandler.** { *; }
+-keep class com.facebook.jni.** { *; }
+-dontwarn com.swmansion.**

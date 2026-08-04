@@ -26,6 +26,7 @@ import {
   TrackActionSheet,
   type SheetContext,
 } from './src/components/TrackActionSheet';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {C} from './src/theme';
 import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
 import {
@@ -446,9 +447,14 @@ function Shell() {
 
 export default function App(): React.JSX.Element {
   return (
-    <ErrorBoundary>
-      <Shell />
-    </ErrorBoundary>
+    // GestureHandlerRootView must wrap everything that uses a gesture handler
+    // (the queue's drag-to-reorder). Without it the handlers mount but never
+    // receive touches, so the drag silently does nothing.
+    <GestureHandlerRootView style={styles.safe}>
+      <ErrorBoundary>
+        <Shell />
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
 
