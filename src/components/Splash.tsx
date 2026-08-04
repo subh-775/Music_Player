@@ -7,7 +7,6 @@
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, Image, StyleSheet, View} from 'react-native';
 import {C} from '../theme';
-import {readSettings} from '../store';
 
 const ICON = require('../assets/app-icon.png');
 
@@ -16,10 +15,6 @@ export function Splash() {
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (readSettings().reduceAnimations) {
-      enter.setValue(1); // static icon — no fade-in, no pulse
-      return;
-    }
     Animated.timing(enter, {
       toValue: 1,
       duration: 420,
@@ -66,5 +61,5 @@ export function Splash() {
 
 const styles = StyleSheet.create({
   wrap: {flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg},
-  icon: {width: 92, height: 92, borderRadius: 21},
+  icon: {width: 132, height: 132, borderRadius: 30},
 });

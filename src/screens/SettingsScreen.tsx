@@ -391,12 +391,6 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                 applyAudioEffects();
               }}
             />
-            <ToggleRow
-              label="Reduce animations"
-              hint="Turn off non-essential motion around the app."
-              value={settings.reduceAnimations}
-              onChange={v => writeSetting('reduceAnimations', v)}
-            />
           </Section>
 
           <Section title="Track transitions">

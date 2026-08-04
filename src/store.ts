@@ -25,7 +25,6 @@ export type Settings = {
   autoplay: boolean;
   crossfadeDuration: number; // seconds; 0 = off
   normalizeVolume: boolean;
-  reduceAnimations: boolean;
   eqEnabled: boolean;
   eqPreset: string;
   eqGains: number[] | null;
@@ -38,7 +37,6 @@ export const DEFAULT_SETTINGS: Settings = {
   autoplay: true,
   crossfadeDuration: 0,
   normalizeVolume: false,
-  reduceAnimations: false,
   // Off by default: an untouched signal path is the one guaranteed to play
   // everywhere, and an effect the user didn't ask for is a bug report.
   eqEnabled: false,

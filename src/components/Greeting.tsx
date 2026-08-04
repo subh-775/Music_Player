@@ -11,7 +11,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
 import {C} from '../theme';
-import {readSettings} from '../store';
 
 function partOfDay(hour: number): {word: string; color: string} {
   if (hour < 12) {
@@ -34,10 +33,6 @@ export function Greeting() {
   }, []);
 
   useEffect(() => {
-    if (readSettings().reduceAnimations) {
-      bloom.setValue(1); // no blush-in when the user asked for less motion
-      return;
-    }
     bloom.setValue(0);
     Animated.timing(bloom, {
       toValue: 1,

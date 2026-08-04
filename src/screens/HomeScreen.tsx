@@ -12,7 +12,6 @@ import {Settings as SettingsIcon} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
 import {Greeting} from '../components/Greeting';
-import {Splash} from '../components/Splash';
 import {useRecentlyPlayed} from '../recentlyPlayed';
 import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
 import {createStore, asArray, useStoreValue} from '../storage';
@@ -31,9 +30,16 @@ type Props = {
   onPickTrack: (item: HomeItem) => void;
   onPlayTrack: (track: Track, context: Track[]) => void;
   onOpenSettings: () => void;
+  /** Home has something to show — the app lifts its splash on this. */
+  onReady?: () => void;
 };
 
-export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
+export function HomeScreen({
+  onPickTrack,
+  onPlayTrack,
+  onOpenSettings,
+  onReady,
+}: Props) {
   const recent = useRecentlyPlayed();
   // Subscribed, so cached rows appear the moment disk hydration finishes even
   // if that lands after first render.
@@ -69,9 +75,13 @@ export function HomeScreen({onPickTrack, onPlayTrack, onOpenSettings}: Props) {
     load();
   }, [load]);
 
-  if (phase === 'boot') {
-    return <Splash />;
-  }
+  // Tell the app the moment there is real content (or a definite failure) —
+  // the splash stays up until then, so Home is never seen mid-load.
+  useEffect(() => {
+    if (phase !== 'boot') {
+      onReady?.();
+    }
+  }, [phase, onReady]);
 
   if (phase === 'error') {
     return (

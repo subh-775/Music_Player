@@ -71,7 +71,7 @@ import {
   useIsPlaying,
   useProgress,
 } from '../player';
-import {readSettings, useLike} from '../store';
+import {useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
 import {toward, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
@@ -206,10 +206,6 @@ export function PlayerScreen({
     if (!visible) {
       return;
     }
-    if (readSettings().reduceAnimations) {
-      sheetY.setValue(0);
-      return;
-    }
     sheetY.setValue(SCREEN_H);
     Animated.timing(sheetY, {
       toValue: 0,
@@ -220,10 +216,6 @@ export function PlayerScreen({
   }, [visible, sheetY]);
 
   const springBack = useCallback(() => {
-    if (readSettings().reduceAnimations) {
-      sheetY.setValue(0);
-      return;
-    }
     Animated.spring(sheetY, {
       toValue: 0,
       useNativeDriver: true,
@@ -234,10 +226,6 @@ export function PlayerScreen({
   /** Slide the rest of the way out, THEN unmount — no restart, no jump. */
   const close = useCallback(
     (velocity = 0) => {
-      if (readSettings().reduceAnimations) {
-        onClose();
-        return;
-      }
       Animated.timing(sheetY, {
         toValue: SCREEN_H,
         // A firm flick finishes quicker than a slow drag, so the sheet keeps

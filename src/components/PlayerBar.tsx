@@ -139,28 +139,33 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
       </TouchableOpacity>
       </View>
 
+      {/* Headphones, like, play — evenly spaced and all on the same optical
+          size. The headphone glyph keeps its slot even when it isn't shown, so
+          the other two don't shuffle sideways the moment a headset connects. */}
       <View style={styles.controls}>
-        {!!output && <Headphones size={18} color={C.accent} />}
+        <View style={styles.ctl}>
+          {!!output && <Headphones size={22} color={C.accent} strokeWidth={2} />}
+        </View>
 
-        <TouchableOpacity onPress={toggle} hitSlop={8} style={styles.ctl}>
+        <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.ctl}>
           <Heart
-            size={21}
-            color={liked ? C.accent : C.sub}
+            size={22}
+            color={liked ? C.accent : C.text}
             fill={liked ? C.accent : 'transparent'}
+            strokeWidth={2}
           />
         </TouchableOpacity>
 
         <TouchableOpacity
           onPress={() => togglePlay()}
-          hitSlop={8}
+          hitSlop={10}
           style={styles.ctl}>
           {playing ? (
-            <Pause size={24} color={C.text} fill={C.text} />
+            <Pause size={26} color={C.text} fill={C.text} />
           ) : (
-            <Play size={24} color={C.text} fill={C.text} />
+            <Play size={26} color={C.text} fill={C.text} style={styles.playNudge} />
           )}
         </TouchableOpacity>
-
       </View>
 
       <View style={styles.progressTrack}>
@@ -199,10 +204,17 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingRight: S.gutter - 8,
+    paddingRight: S.gutter - 10,
   },
-  ctl: {padding: 6},
+  // Fixed-width slots, so the three sit on an even rhythm and nothing shifts
+  // when the headphone glyph appears or disappears.
+  ctl: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playNudge: {marginLeft: 2}, // optical centring for the triangle
   progressTrack: {
     position: 'absolute',
     left: 8,

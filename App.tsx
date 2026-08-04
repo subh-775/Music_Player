@@ -27,6 +27,7 @@ import {
   type SheetContext,
 } from './src/components/TrackActionSheet';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
+import {Splash} from './src/components/Splash';
 import {C} from './src/theme';
 import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
 import {
@@ -72,6 +73,29 @@ function Shell() {
   const [libraryNonce, setLibraryNonce] = useState(0);
   const exitArmedAt = useRef(0);
 
+  /**
+   * One gate for the whole cold start.
+   *
+   * The splash used to live INSIDE HomeScreen, so it only ever covered Home's
+   * own content — the shell, the mini player and its progress bar all arrived
+   * afterwards, which is why the app visibly assembled itself in stages. Now
+   * the real UI mounts underneath the splash and the splash only lifts once
+   * BOTH the engine (session restored, so the mini player is already there)
+   * and Home's first rows are ready. Nothing pops in after that.
+   */
+  const [booted, setBooted] = useState(false);
+  const engineDone = useRef(false);
+  const homeDone = useRef(false);
+  const liftSplash = useCallback(() => {
+    if (engineDone.current && homeDone.current) {
+      setBooted(true);
+    }
+  }, []);
+  const onHomeReady = useCallback(() => {
+    homeDone.current = true;
+    liftSplash();
+  }, [liftSplash]);
+
   useEffect(() => {
     hydrate().then(applyAudioEffects);
     // Boot the engine, then restore the last session so the mini player is
@@ -86,15 +110,27 @@ function Shell() {
           setEngine(true);
         }
       }
+      engineDone.current = true;
+      liftSplash();
     });
+    // Never let a hung backend strand anyone on the splash. Whatever is ready
+    // at this point is what they get.
+    const bootCap = setTimeout(() => {
+      engineDone.current = true;
+      homeDone.current = true;
+      setBooted(true);
+    }, 6000);
     // Reads the setting each tick rather than closing over it, so changing
     // crossfade takes effect without restarting the watcher.
     startCrossfadeWatcher(() => readSettings().crossfadeDuration);
     // Silent update check on launch — the popup only appears if a newer release
     // is actually out. Delayed a little so it never competes with cold start.
     const u = setTimeout(checkUpdate, 3500);
-    return () => clearTimeout(u);
-  }, []);
+    return () => {
+      clearTimeout(u);
+      clearTimeout(bootCap);
+    };
+  }, [liftSplash]);
 
   const play = useCallback(async (track: Track, context?: Track[]) => {
     try {
@@ -329,6 +365,7 @@ function Shell() {
             onPickTrack={pickHomeItem}
             onPlayTrack={play}
             onOpenSettings={() => setSettingsOpen(true)}
+            onReady={onHomeReady}
           />
         </View>
         <View style={tab === 'search' ? styles.tabShown : styles.tabHidden}>
@@ -441,6 +478,15 @@ function Shell() {
       )}
 
       <UpdateModal />
+
+      {/* Above everything, and the real UI is already mounted and painted
+          underneath — so lifting this reveals a finished screen rather than
+          starting the loading the user can watch. */}
+      {!booted && (
+        <View style={styles.splash} pointerEvents="auto">
+          <Splash />
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -461,6 +507,7 @@ export default function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   body: {flex: 1},
+  splash: {...StyleSheet.absoluteFillObject, zIndex: 50, backgroundColor: C.bg},
   tabShown: {...StyleSheet.absoluteFillObject},
   tabHidden: {...StyleSheet.absoluteFillObject, display: 'none'},
 });
