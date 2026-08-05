@@ -1,3 +1,10 @@
 <resources>
-    <string name="app_name">Music Player</string>
+    <!-- NOT "Music Player": that collides with the stock music app on most
+         Android phones, so the launcher, the share sheet and the installer
+         dialog all showed two identically-named entries with no way to tell
+         which was which.
+         The package id stays com.musicplayer on purpose — changing THAT makes
+         every existing install a different app, which breaks the in-app
+         updater and loses everyone's playlists. -->
+    <string name="app_name">Fix_Music</string>
 </resources>

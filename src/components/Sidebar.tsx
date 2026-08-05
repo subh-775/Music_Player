@@ -172,7 +172,7 @@ export function Sidebar({
       <Animated.View
         style={[styles.panel, {transform: [{translateX: x}]}]}
         {...pan.panHandlers}>
-        <Text style={styles.brand}>Music Player</Text>
+        <Text style={styles.brand}>Fix_Music</Text>
 
         <View style={styles.items}>
           {ITEMS.map(item => (
