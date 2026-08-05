@@ -28,6 +28,7 @@ import {
 } from './src/components/TrackActionSheet';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
+import {Sidebar, type SidebarDest} from './src/components/Sidebar';
 import {C} from './src/theme';
 import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
 import {
@@ -67,6 +68,9 @@ function Shell() {
   const [artistChoices, setArtistChoices] = useState<string[]>([]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  /** Which panel Settings should land on when opened from the drawer. */
+  const [settingsPanel, setSettingsPanel] = useState<'tips' | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
@@ -364,7 +368,7 @@ function Shell() {
           <HomeScreen
             onPickTrack={pickHomeItem}
             onPlayTrack={play}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenMenu={() => setDrawerOpen(true)}
             onReady={onHomeReady}
           />
         </View>
@@ -437,7 +441,10 @@ function Shell() {
             Here it stays inside the body, so playback controls remain visible. */}
         {settingsOpen && (
           <View style={StyleSheet.absoluteFill}>
-            <SettingsScreen onClose={() => setSettingsOpen(false)} />
+            <SettingsScreen
+            onClose={() => setSettingsOpen(false)}
+            initialPanel={settingsPanel}
+          />
           </View>
         )}
       </View>
@@ -482,6 +489,23 @@ function Shell() {
       {/* Above everything, and the real UI is already mounted and painted
           underneath — so lifting this reveals a finished screen rather than
           starting the loading the user can watch. */}
+      <Sidebar
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onNavigate={(dest: SidebarDest) => {
+          if (dest === 'settings') {
+            setSettingsPanel(null);
+            setSettingsOpen(true);
+          } else if (dest === 'shortcuts') {
+            setSettingsPanel('tips');
+            setSettingsOpen(true);
+          } else if (dest === 'recents' || dest === 'stats') {
+            // Both live on the Library tab for now — see SPRINT_LOG.
+            setTab('library');
+          }
+        }}
+      />
+
       {!booted && (
         <View style={styles.splash} pointerEvents="auto">
           <Splash />

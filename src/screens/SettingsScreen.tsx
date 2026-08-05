@@ -42,6 +42,13 @@ import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
 import {SOURCE_META} from '../components/Badges';
 import {checkUpdate, useUpdate} from '../update';
+import {
+  cancelSleepTimer,
+  sleepAtEndOfTrack,
+  sleepLabel,
+  startSleepTimer,
+  useSleepTimer,
+} from '../sleepTimer';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
@@ -187,9 +194,16 @@ function NavRow({
   );
 }
 
-export function SettingsScreen({onClose}: {onClose: () => void}) {
+export function SettingsScreen({
+  onClose,
+  initialPanel = null,
+}: {
+  onClose: () => void;
+  /** Opened straight onto a sub-screen (the drawer's "Shortcuts" entry). */
+  initialPanel?: 'equalizer' | 'tips' | 'playback' | null;
+}) {
   const [panel, setPanel] = useState<'equalizer' | 'tips' | 'playback' | null>(
-    null,
+    initialPanel,
   );
   const [resetOpen, setResetOpen] = useState(false);
   const {settings} = useStore();
@@ -200,6 +214,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   );
   const [ytBusy, setYtBusy] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
+  const sleep = useSleepTimer();
 
   // A sub-panel (Equalizer, Tips) must catch the hardware back itself and
   // return to Settings — NOT fall through to the app-level handler, which would
@@ -398,6 +413,44 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
               value={settings.crossfadeDuration}
               onChange={secs => writeSetting('crossfadeDuration', secs)}
             />
+          </Section>
+
+          <Section title="Sleep timer">
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Stop playing</Text>
+                <Text style={styles.rowHint}>
+                  {sleepLabel(sleep)
+                    ? `Music stops in ${sleepLabel(sleep)}`
+                    : 'Fade out and stop after a while'}
+                </Text>
+                <View style={styles.btnRow}>
+                  {[15, 30, 60].map(m => (
+                    <TouchableOpacity
+                      key={m}
+                      style={styles.ghostBtn}
+                      onPress={() => startSleepTimer(m)}
+                      activeOpacity={0.7}>
+                      <Text style={styles.ghostBtnText}>{m}m</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.ghostBtn}
+                    onPress={sleepAtEndOfTrack}
+                    activeOpacity={0.7}>
+                    <Text style={styles.ghostBtnText}>End of track</Text>
+                  </TouchableOpacity>
+                  {sleep.mode !== 'off' && (
+                    <TouchableOpacity
+                      style={styles.ghostBtn}
+                      onPress={cancelSleepTimer}
+                      activeOpacity={0.7}>
+                      <Text style={styles.dangerBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
           </Section>
           <View style={styles.tail} />
         </ScrollView>
@@ -757,6 +810,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   ghostBtnText: {color: C.sub, fontWeight: '700', fontSize: 13},
+  dangerBtnText: {color: C.danger, fontWeight: '700', fontSize: 13},
   updateHead: {flexDirection: 'row', justifyContent: 'space-between'},
   checkBtn: {alignSelf: 'flex-start', marginTop: 12},
 });

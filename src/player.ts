@@ -36,6 +36,7 @@ import {
   restorePlayerVolume,
 } from './audioEffects';
 import {setPausedByDuck} from './duckState';
+import {sleepTimerOnTrackChange} from './sleepTimer';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
 
@@ -165,6 +166,9 @@ export async function setupPlayer(): Promise<boolean> {
       // The engine is authoritative — reconcile the optimistic mirror with what
       // actually started, and keep the queue snapshot warm for the next gesture.
       publishTrack(e.track ?? null);
+      // A native event, so the sleep timer's deadline is honoured even when the
+      // screen has been off long enough for JS timers to be throttled.
+      sleepTimerOnTrackChange();
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
@@ -598,6 +602,17 @@ export async function setRepeat(mode: RepeatMode): Promise<void> {
  * spin-up between tracks would start a SECOND play and leave the button
  * showing the opposite of reality.
  */
+/** Stop playback outright — used by the sleep timer. */
+export async function pausePlayback(): Promise<void> {
+  cancelCrossfade(); // silence any overlap too, or it keeps sounding alone
+  setPausedByDuck(false);
+  try {
+    await TrackPlayer.pause();
+  } catch {
+    /* engine already gone */
+  }
+}
+
 export async function togglePlay(): Promise<void> {
   const {state} = await TrackPlayer.getPlaybackState();
   const active =

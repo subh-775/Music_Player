@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Settings as SettingsIcon} from 'lucide-react-native';
+import {Menu} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
 import {Greeting} from '../components/Greeting';
@@ -29,7 +29,7 @@ const homeCache = createStore<HomeRow[]>('mp.homeRows.v1', [], raw =>
 type Props = {
   onPickTrack: (item: HomeItem) => void;
   onPlayTrack: (track: Track, context: Track[]) => void;
-  onOpenSettings: () => void;
+  onOpenMenu: () => void;
   /** Home has something to show — the app lifts its splash on this. */
   onReady?: () => void;
 };
@@ -37,7 +37,7 @@ type Props = {
 export function HomeScreen({
   onPickTrack,
   onPlayTrack,
-  onOpenSettings,
+  onOpenMenu,
   onReady,
 }: Props) {
   const recent = useRecentlyPlayed();
@@ -103,8 +103,8 @@ export function HomeScreen({
 >
       <View style={styles.header}>
         <Greeting />
-        <TouchableOpacity onPress={onOpenSettings} hitSlop={14} style={styles.gear}>
-          <SettingsIcon size={24} color={C.text} strokeWidth={2.4} />
+        <TouchableOpacity onPress={onOpenMenu} hitSlop={14} style={styles.gear}>
+          <Menu size={25} color={C.text} strokeWidth={2.4} />
         </TouchableOpacity>
       </View>
 
