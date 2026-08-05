@@ -217,6 +217,13 @@ export function SettingsScreen({
   const [panel, setPanel] = useState<'equalizer' | 'tips' | 'playback' | null>(
     initialPanel,
   );
+
+  // Settings stays MOUNTED once opened, so a later "Shortcuts" from the drawer
+  // only changes this prop — without this it did nothing at all, because the
+  // useState initialiser had already run on the first open.
+  useEffect(() => {
+    setPanel(initialPanel);
+  }, [initialPanel]);
   const [resetOpen, setResetOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
   const [cacheBytes, setCacheBytes] = useState<number | null>(null);

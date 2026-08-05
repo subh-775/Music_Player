@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ArrowDownToLine, Heart, ListMusic, Menu} from 'lucide-react-native';
+import {Menu} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
 import {Greeting} from '../components/Greeting';
@@ -17,6 +17,13 @@ import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
 import {createStore, asArray, useStoreValue} from '../storage';
 import {usePlaylists} from '../playlists';
 import {useLikes} from '../store';
+import {CollectionArt} from '../components/CollectionArt';
+import {
+  downloadsCollection,
+  likedCollection,
+  playlistToCollection,
+  type Collection,
+} from '../collections';
 import {useUpdateAvailable} from '../update';
 
 /**
@@ -113,14 +120,19 @@ export function HomeScreen({
       overScrollMode="never"
       bounces={false}
 >
+      {/* Hamburger FIRST: the drawer slides in from the left, so its handle
+          belongs on the left — a right-hand button that opens a left-hand panel
+          reads backwards, and it's the far corner for a right thumb. */}
       <View style={styles.header}>
-        <Greeting />
         <TouchableOpacity onPress={onOpenMenu} hitSlop={14} style={styles.gear}>
           <Menu size={25} color={C.text} strokeWidth={2.4} />
           {/* A waiting update has to stay findable after the popup is
               dismissed — this is the only thing that says so. */}
           {updateWaiting && <View style={styles.dot} />}
         </TouchableOpacity>
+        <View style={styles.headerText}>
+          <Greeting />
+        </View>
       </View>
 
       {/* Quick access. The two things everyone opens most (Liked, Downloaded)
@@ -129,26 +141,22 @@ export function HomeScreen({
           without pushing the content rows off screen. */}
       <View style={styles.quickGrid}>
         <QuickTile
-          label="Liked Songs"
+          collection={likedCollection(likes)}
           sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
-          Icon={Heart}
           onPress={() => onOpenQuick({kind: 'liked'})}
         />
         <QuickTile
-          label="Downloaded"
+          collection={downloadsCollection([])}
           sub="Offline"
-          Icon={ArrowDownToLine}
           onPress={() => onOpenQuick({kind: 'downloads'})}
         />
         {playlists.slice(0, 4).map(p => (
           <QuickTile
             key={p.id}
-            label={p.name}
+            collection={playlistToCollection(p)}
             sub={`${p.tracks?.length ?? 0} song${
               (p.tracks?.length ?? 0) === 1 ? '' : 's'
             }`}
-            image={p.image}
-            Icon={ListMusic}
             onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
           />
         ))}
@@ -195,31 +203,25 @@ export function HomeScreen({
   );
 }
 
+/** The artwork square is CollectionArt, the same component the Library rows
+ *  use — that's what gives Liked its purple heart tile, Downloads its green
+ *  one, and a playlist its cover or 2×2 mosaic. The hand-rolled version here
+ *  had none of that, so every tile came up as an empty grey box. */
 function QuickTile({
-  label,
+  collection,
   sub,
-  image,
-  Icon,
   onPress,
 }: {
-  label: string;
+  collection: Collection;
   sub?: string;
-  image?: string;
-  Icon: typeof Heart;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity style={styles.quick} activeOpacity={0.7} onPress={onPress}>
-      <View style={styles.quickArt}>
-        {image ? (
-          <Image source={{uri: upgradeArtwork(image)}} style={styles.quickImg} />
-        ) : (
-          <Icon size={20} color={C.text} strokeWidth={2.2} />
-        )}
-      </View>
+      <CollectionArt collection={collection} size={56} />
       <View style={styles.quickText}>
         <Text style={styles.quickLabel} numberOfLines={1}>
-          {label}
+          {collection.name}
         </Text>
         {!!sub && (
           <Text style={styles.quickSub} numberOfLines={1}>
@@ -291,6 +293,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   gear: {padding: 2},
+  headerText: {flex: 1, minWidth: 0},
   dot: {
     position: 'absolute',
     top: 0,
@@ -328,14 +331,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: C.surfaceHi,
   },
-  quickArt: {
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.surface,
-  },
-  quickImg: {width: 56, height: 56},
   quickText: {flex: 1, minWidth: 0, paddingHorizontal: 10},
   quickLabel: {color: C.text, fontSize: 13.5, fontWeight: '700'},
   quickSub: {color: C.sub, fontSize: 11, marginTop: 2},

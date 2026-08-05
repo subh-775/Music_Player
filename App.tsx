@@ -400,6 +400,20 @@ function Shell() {
     tab,
   ]);
 
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+
+  const navigateFromDrawer = useCallback((dest: SidebarDest) => {
+    if (dest === 'settings') {
+      setSettingsPanel(null);
+      setSettingsOpen(true);
+    } else if (dest === 'shortcuts') {
+      setSettingsPanel('tips');
+      setSettingsOpen(true);
+    } else {
+      setActivity(dest);
+    }
+  }, []);
+
   const openSheet = useCallback((track: Track, from?: SheetContext) => {
     setSheetTrack(track);
     setSheetFrom(from ?? null);
@@ -553,20 +567,15 @@ function Shell() {
       {/* Above everything, and the real UI is already mounted and painted
           underneath — so lifting this reveals a finished screen rather than
           starting the loading the user can watch. */}
+      {/* Both handlers are stable. Inline arrows here gave the drawer a new
+          onClose on every app re-render, and its open-effect keyed off that —
+          so navigating (a re-render) re-opened the drawer over the page it had
+          just opened. Fixed inside Sidebar too; stable props keep the Modal
+          from re-rendering for nothing either way. */}
       <Sidebar
         visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        onNavigate={(dest: SidebarDest) => {
-          if (dest === 'settings') {
-            setSettingsPanel(null);
-            setSettingsOpen(true);
-          } else if (dest === 'shortcuts') {
-            setSettingsPanel('tips');
-            setSettingsOpen(true);
-          } else {
-            setActivity(dest);
-          }
-        }}
+        onClose={closeDrawer}
+        onNavigate={navigateFromDrawer}
       />
 
       {!booted && (

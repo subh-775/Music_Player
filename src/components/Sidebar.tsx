@@ -99,12 +99,28 @@ export function Sidebar({
     [x, onClose],
   );
 
+  /**
+   * Open when `visible` turns on — and ONLY then.
+   *
+   * This used to depend on `settle`, which depends on `onClose`, which the app
+   * passes as an inline arrow. So every re-render of the app produced a new
+   * `onClose`, a new `settle`, and re-ran this effect — and because `visible`
+   * was still true at that moment, it slammed the panel back open. Tapping a
+   * drawer item navigates (a re-render), so the drawer re-opened on top of the
+   * page it had just opened; tapping again from there stacked a second screen.
+   *
+   * `settle` in a ref keeps the animation callable without making identity
+   * changes an input to "should the drawer open".
+   */
+  const settleRef = useRef(settle);
+  settleRef.current = settle;
+
   useEffect(() => {
     if (visible) {
       x.setValue(-W);
-      settle(true);
+      settleRef.current(true);
     }
-  }, [visible, x, settle]);
+  }, [visible, x]);
 
   // Hardware back closes the drawer before anything else sees it.
   useEffect(() => {
