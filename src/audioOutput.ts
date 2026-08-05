@@ -28,9 +28,10 @@ export async function getAudioOutput(): Promise<string | null> {
  * Poll for the current output device.
  *
  * Polling rather than a route-change listener because the interesting event —
- * a headset connecting — is rare and cheap to miss by a second, whereas a
- * native event subscription is another lifecycle to get wrong. 4s is well
- * under the time it takes to notice.
+ * a headset connecting — is rare, and a native event subscription is another
+ * lifecycle to get wrong. Native tracks connect/disconnect order itself (see
+ * AudioModule.seenAt); this just asks often enough that SWITCHING between two
+ * paired headsets mid-song updates the name while you're still looking at it.
  */
 export function useAudioOutput(): string | null {
   const [name, setName] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function useAudioOutput(): string | null {
       });
     };
     tick();
-    const id = setInterval(tick, 4000);
+    const id = setInterval(tick, 1500);
     return () => {
       alive = false;
       clearInterval(id);

@@ -140,7 +140,18 @@ class BackendModule(reactContext: ReactApplicationContext) :
         val activity = currentActivity ?: reactApplicationContext
         val root = Environment.getExternalStorageDirectory().absolutePath
         val rel = path.removePrefix(root).trim('/')
+        val treeUri = Uri.parse(
+            "content://com.android.externalstorage.documents/document/primary%3A" +
+                Uri.encode(rel),
+        )
         val candidates = listOf(
+            // The directory MIME type is what DocumentsUI and most third-party
+            // file managers actually register for; the generic one below is a
+            // fallback for those that don't.
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(treeUri, "vnd.android.document/directory")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
             // DocumentsUI's authority form — the one that actually lands on the
             // right folder when the device ships a documents provider.
             Intent(Intent.ACTION_VIEW).apply {

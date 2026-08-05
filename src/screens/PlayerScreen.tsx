@@ -54,6 +54,7 @@ import {
   SkipForward,
   Type,
 } from 'lucide-react-native';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {C, T} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
 import {enqueueDownload, isDownloaded, useDownloadedIds} from '../downloads';
@@ -107,8 +108,33 @@ export function PlayerScreen({
 }) {
   const active = useActiveTrack();
   const playing = useIsPlaying();
-  const {position, duration} = useProgress(500);
+  const {position: enginePosition, duration} = useProgress(250);
   const output = useAudioOutput();
+
+  /**
+   * Where the bar should SAY we are.
+   *
+   * useProgress only samples the engine periodically, so after a double-tap
+   * seek the bar sat at the old spot until the next sample landed — the seek
+   * felt like it lagged the tap. A seek now publishes its target immediately
+   * and that value wins until the engine's own reading catches up to it, at
+   * which point the engine is authoritative again.
+   */
+  const [seekEcho, setSeekEcho] = useState<{at: number; to: number} | null>(
+    null,
+  );
+  const position =
+    seekEcho && Math.abs(enginePosition - seekEcho.to) > 1.2 &&
+    Date.now() - seekEcho.at < 1500
+      ? seekEcho.to
+      : enginePosition;
+
+  /** Seek AND move the bar in the same frame. */
+  const seekAndShow = useCallback((to: number) => {
+    const target = Math.max(0, to);
+    setSeekEcho({at: Date.now(), to: target});
+    seekTo(target);
+  }, []);
 
   // The engine's queue item is a reduced shape; the badges, download and like
   // all need the real backend Track behind it.
@@ -165,7 +191,7 @@ export function PlayerScreen({
         prev && prev.side === side && now - prev.t < 900 ? prev.secs + 10 : 10;
       tapRef.current = {t: now, side, secs: stacked};
 
-      seekTo(Math.max(0, position + side * stacked));
+      seekAndShow(position + side * stacked);
       // The disc holds steady while it's up; only the number changes here.
       setSeekFlash({side, secs: stacked});
       if (flashTimer.current) {
@@ -173,7 +199,7 @@ export function PlayerScreen({
       }
       flashTimer.current = setTimeout(() => setSeekFlash(null), 800);
     },
-    [position, duration],
+    [position, duration, seekAndShow],
   );
 
   useEffect(
@@ -405,6 +431,13 @@ export function PlayerScreen({
       transparent
       onRequestClose={() => close()}
       statusBarTranslucent>
+      {/* A GestureHandlerRootView is required INSIDE the Modal.
+          react-native-gesture-handler attaches to the root view of a window,
+          and on Android an RN Modal is its OWN window — so handlers mounted in
+          here never see a touch unless there is a root view in this window too.
+          That is why the queue's drag-to-reorder did nothing: the list was
+          correct, the gestures simply never reached it. */}
+      <GestureHandlerRootView style={styles.ghRoot}>
       <Animated.View
         style={[
           styles.wrap,
@@ -533,7 +566,7 @@ export function PlayerScreen({
             </View>
           </View>
 
-          <Seekbar position={position} duration={duration} onSeek={seekTo} />
+          <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
 
           {/* Pane toggles left, audio output right — above the transport so
               the play controls never shift. */}
@@ -613,6 +646,7 @@ export function PlayerScreen({
             player was closed. Same queue, second outlet. */}
         <Toaster bottom={40} />
       </Animated.View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -786,6 +820,7 @@ function LyricsPane({
 }
 
 const styles = StyleSheet.create({
+  ghRoot: {flex: 1},
   wrap: {flex: 1, backgroundColor: C.bg, paddingTop: 8},
   topBar: {
     flexDirection: 'row',

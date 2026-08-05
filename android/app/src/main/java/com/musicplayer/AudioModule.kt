@@ -243,11 +243,42 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      * speaker/earpiece — the UI shows this line only when sound is going
      * somewhere else, so "speaker" is deliberately reported as nothing.
      */
+    /**
+     * When each output device turned up, keyed by device id.
+     *
+     * Registered lazily on the first query. Android tells us about connects and
+     * disconnects; it does NOT tell us which device media is routed to, so
+     * "most recently connected" is the closest honest proxy — and it is what
+     * makes switching headsets mid-song name the new one.
+     */
+    private val seenAt = HashMap<Int, Long>()
+    private var deviceCallback: android.media.AudioDeviceCallback? = null
+
+    private fun ensureDeviceWatch(am: AudioManager) {
+        if (deviceCallback != null) return
+        val cb = object : android.media.AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) {
+                val now = System.currentTimeMillis()
+                added?.forEach { seenAt[it.id] = now }
+            }
+
+            override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) {
+                removed?.forEach { seenAt.remove(it.id) }
+            }
+        }
+        deviceCallback = cb
+        am.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper()))
+    }
+
     @ReactMethod
     fun getAudioOutput(promise: Promise) {
         try {
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            ensureDeviceWatch(am)
             val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            // Seed anything that was already connected before we started
+            // watching, so the ordering below has a timestamp for every device.
+            outs.forEach { if (!seenAt.containsKey(it.id)) seenAt[it.id] = 0L }
 
             // Rank matters — same lesson the WebView build learned on-device.
             // SCO is the PHONE's own call endpoint and reports the handset's
@@ -263,7 +294,18 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     t == AudioDeviceInfo.TYPE_BLE_HEADSET) 1 else 99
             }
 
-            val routed = outs.filter { rank(it.type) < 99 }.minByOrNull { rank(it.type) }
+            // Among equally-ranked candidates, prefer the one that connected
+            // MOST RECENTLY. getDevices() lists everything currently connected,
+            // not what audio is actually routed to — so with two paired
+            // headsets it kept naming the first one in the list, which is why
+            // switching devices mid-song left the old name on screen.
+            val routed = outs
+                .filter { rank(it.type) < 99 }
+                .sortedWith(
+                    compareBy<AudioDeviceInfo> { rank(it.type) }
+                        .thenByDescending { seenAt[it.id] ?: 0L },
+                )
+                .firstOrNull()
             if (routed == null) {
                 promise.resolve(null) // phone speaker — the UI shows nothing
                 return
@@ -556,6 +598,13 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     override fun onCatalystInstanceDestroy() {
         release()
         stopCfInternal()
+        deviceCallback?.let {
+            try {
+                (ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                    .unregisterAudioDeviceCallback(it)
+            } catch (_: Exception) {}
+        }
+        deviceCallback = null
         // The bridge is going away — make sure we are not leaving the player
         // faded down with nothing left alive to restore it.
         volHandler.post {
