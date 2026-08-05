@@ -172,3 +172,54 @@ Nothing left in code. One item needs **your device/CI**:
   `workflow_dispatch` → `release` build and confirm it boots, plays, and resolves
   YouTube before tagging.** If anything breaks there, the fix is a keep rule, not
   a revert.
+
+---
+
+## Current state (v1.0.4 work, heading to v1.0.5)
+
+Everything below is committed and `tsc`/`eslint` clean. **Nothing here has been
+compiled** — there is no JDK/SDK in the dev environment, so CI is the first
+build. Highest risk is the new gesture stack.
+
+### Landed since v1.0.3
+| Area | Change |
+|---|---|
+| R8 / EQ | Off `proguard-android-optimize.txt` (its inlining broke the EQ's reflection); RNTP/KotlinAudio/ExoPlayer kept whole |
+| Updater | Failure vs up-to-date now distinct; 20s timeout kills the `checking` deadlock; `User-Agent` added (GitHub 403s without one) |
+| Crossfade | Overlap is cut *before* volume is restored — the doubled-audio clash |
+| Queue drag | Reanimated + gesture-handler + draggable-flatlist, **plus** a `GestureHandlerRootView` INSIDE the player Modal (an RN Modal is its own window — without it no gesture ever arrives, silently) |
+| Bluetooth name | `AudioDeviceCallback` timestamps connects; equal-rank devices ordered newest-first |
+| Seek | Optimistic position echo; sampling 500→250ms |
+| Boot | App-level splash overlay; real UI mounts underneath; lifts only when engine **and** Home are ready; 6s cap |
+| Removed | `reduceAnimations` (it was genuinely dead — only 3 minor spots) |
+| New | Sidebar drawer (hamburger replaces gear), sleep timer |
+
+### Remaining queue for v1.0.5
+1. **Home redesign** — decided: Spotify-style 2-col quick-access grid (Liked,
+   Downloads, recent playlists) above the existing horizontal rows, bigger art,
+   real section headers, "Recently played" first.
+2. **Recents + "Your sound" screens** — the drawer routes both to Library as a
+   **stub** right now. Recents = full listen history; Your sound = top artists /
+   songs / minutes, built from local play history (no backend work needed).
+3. **Search revamp** — decided: recent searches on focus; unfocused shows a
+   browse grid of genre cards + a "Your artists" row built only from artists
+   actually listened to. Also: a tapped result must **play immediately** on the
+   best source, with the source chooser moved to the ⋮ menu.
+4. **Smart playlists / auto-mixes** — Discover / On repeat / Recently added from
+   history + the radio endpoint.
+5. **Lyrics** — disable the Lyrics tab when a source has none, with an info icon
+   explaining why; add LRCLIB as a fallback for SoundCloud/YouTube (free, no key,
+   synced).
+6. **Clear cache** — stream cache + artwork + search history, showing reclaimed
+   size. Must never touch downloads/playlists/likes.
+7. **Green dot** on the menu icon while an update is waiting.
+8. **Shuffle icon** state.
+
+### Standing constraints
+- No hardcoding for one device; must work across Android phones.
+- Release is **debug-keystore signed** and the keystore is committed, so the
+  in-app updater's signature chain holds. Swapping to a real keystore forces a
+  reinstall for everyone — do it deliberately, at a version boundary.
+- Verification available here is `npx tsc --noEmit` + `npx eslint src/ App.tsx`
+  only. The jest smoke test was already broken before this work (missing
+  AsyncStorage mock) and was deliberately left alone rather than half-fixed.
