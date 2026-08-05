@@ -209,11 +209,34 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                 eq.setBandLevel(band, mb.coerceIn(minMb, maxMb).toShort())
             }
             eq.enabled = true
+            // Logged on SUCCESS too, not just failure. "The EQ does nothing" has
+            // two completely different causes — it never applied, or it applied
+            // and the device's own post-processing swallowed it — and only the
+            // success line can tell them apart over a cable.
+            Log.i(
+                TAG,
+                "equalizer applied: session=$attachedSession bands=${eq.numberOfBands} " +
+                    "range=${minMb}..${maxMb}mB curve=${curve.joinToString(",")}",
+            )
             promise.resolve(true)
         } catch (e: Exception) {
             Log.w(TAG, "setEqualizer failed: ${e.message}")
             promise.resolve(false)
         }
+    }
+
+    /**
+     * A logcat sink for the JS side.
+     *
+     * In a release build React Native installs no console, so everything the app
+     * knows about itself died inside diag.ts's in-memory ring buffer — which is
+     * why a full logcat capture during a real session contained not one line
+     * from our own code. This is the missing half: `adb logcat -s MPJS` now
+     * shows what the app tried and what came back.
+     */
+    @ReactMethod
+    fun log(tag: String, msg: String) {
+        Log.i("MPJS", "[$tag] $msg")
     }
 
     /**

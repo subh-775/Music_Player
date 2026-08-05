@@ -32,6 +32,7 @@ import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
 import {C} from './src/theme';
 import {
+  appVersion,
   getAlbum,
   getCollection,
   getLocalLibrary,
@@ -57,6 +58,7 @@ import {type Collection} from './src/collections';
 import {applyAudioEffects} from './src/audioEffects';
 import {toggleFollow} from './src/artists';
 import {toast} from './src/toast';
+import {diag} from './src/diag';
 
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
@@ -118,10 +120,15 @@ function Shell() {
   }, [liftSplash]);
 
   useEffect(() => {
+    // First line of every session. Also the proof that the logcat bridge is
+    // alive — if `adb logcat -s MPJS` shows nothing at all, the problem is the
+    // logging, not the thing being investigated.
+    diag('boot', `Music_Player ${appVersion || '?'} starting`);
     hydrate().then(applyAudioEffects);
     // Boot the engine, then restore the last session so the mini player is
     // there on reopen (same song, paused, at the timestamp you left).
     setupPlayer().then(async ok => {
+      diag('boot', ok ? 'audio engine ready' : 'NO native audio engine in this APK');
       setEngine(ok);
       if (ok) {
         const restored = await restoreSession();
@@ -160,6 +167,7 @@ function Shell() {
     } catch (e) {
       // A toast, not a bar in the layout: the old notice sat above the mini
       // player and covered it, hiding the song that was actually playing.
+      diag('play', `"${track?.title}" failed: ${String(e)}`);
       toast(e instanceof Error ? e.message : String(e));
     }
   }, []);

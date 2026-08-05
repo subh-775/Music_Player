@@ -6,6 +6,7 @@
 import {C} from './theme';
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {diag} from './diag';
 
 type Props = {children: React.ReactNode};
 type State = {error: Error | null};
@@ -18,8 +19,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error) {
-    // Surfaces in `adb logcat` under ReactNativeJS for on-device debugging.
-    console.error('Unhandled UI error:', error);
+    // console.error was a lie in a release build — React Native installs no
+    // console there, so the one error that matters most left no trace at all.
+    // diag() reaches logcat (tag MPJS) and the in-app Diagnostics screen.
+    diag('crash', `${error.name}: ${error.message}`);
   }
 
   private reset = () => this.setState({error: null});

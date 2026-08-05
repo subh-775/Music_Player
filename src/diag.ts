@@ -9,7 +9,17 @@
  *
  * Deliberately tiny: a fixed ring buffer in memory, no persistence, no upload.
  * It costs nothing when nobody opens the Diagnostics screen.
+ *
+ * It ALSO mirrors to logcat now. USB debugging turned out to be possible after
+ * all, and the first capture from a real session contained not one line from
+ * our own code — because a release build installs no React Native console, so
+ * every diag() call died in the buffer above. `adb logcat -s MPJS` shows them.
  */
+import {NativeModules} from 'react-native';
+
+const nativeLog = (NativeModules.Audio as {log?: (t: string, m: string) => void})
+  ?.log;
+
 const MAX = 200;
 
 export type DiagEntry = {at: number; tag: string; msg: string};
@@ -20,6 +30,13 @@ let snapshot: DiagEntry[] = [];
 
 /** Record an event. Keep `msg` short — this is a log line, not a report. */
 export function diag(tag: string, msg: string): void {
+  // Best-effort: an older APK has no native `log`, and a logging call must
+  // never be the thing that crashes the app.
+  try {
+    nativeLog?.(tag, msg);
+  } catch {
+    // ignore
+  }
   entries.push({at: Date.now(), tag, msg});
   if (entries.length > MAX) {
     entries.splice(0, entries.length - MAX);
