@@ -15,6 +15,7 @@ import type {Track} from './backend';
 import './playlists';
 import './pins';
 import './searchHistory';
+import './stats';
 import './collections';
 import './artists';
 

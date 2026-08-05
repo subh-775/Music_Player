@@ -32,6 +32,7 @@ import {
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
+import {useUpdateAvailable} from '../update';
 
 const W = Math.min(320, Dimensions.get('window').width * 0.82);
 
@@ -52,7 +53,7 @@ const ITEMS: {
   {
     id: 'stats',
     label: 'Your sound',
-    hint: 'Top artists, songs and minutes',
+    hint: 'Top artists and songs you play',
     Icon: Sparkles,
   },
   {
@@ -80,6 +81,7 @@ export function Sidebar({
 }) {
   // -W = fully off-screen left, 0 = fully open.
   const x = useRef(new Animated.Value(-W)).current;
+  const updateWaiting = useUpdateAvailable();
 
   const settle = useCallback(
     (open: boolean, velocity = 0) => {
@@ -181,7 +183,14 @@ export function Sidebar({
               onPress={() => go(item.id)}>
               <item.Icon size={21} color={C.text} strokeWidth={2} />
               <View style={styles.itemText}>
-                <Text style={styles.itemLabel}>{item.label}</Text>
+                <View style={styles.itemHead}>
+                  <Text style={styles.itemLabel}>{item.label}</Text>
+                  {/* The update lives inside Settings, so the dot follows it
+                      here — the one on the hamburger only says "look inside". */}
+                  {item.id === 'settings' && updateWaiting && (
+                    <View style={styles.dot} />
+                  )}
+                </View>
                 <Text style={styles.itemHint} numberOfLines={1}>
                   {item.hint}
                 </Text>
@@ -227,6 +236,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   itemText: {flex: 1, minWidth: 0},
+  itemHead: {flexDirection: 'row', alignItems: 'center', gap: 7},
+  dot: {width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent},
   itemLabel: {color: C.text, fontSize: 15.5, fontWeight: '700'},
   itemHint: {color: C.sub, fontSize: 12, marginTop: 2},
   version: {

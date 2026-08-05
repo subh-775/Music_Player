@@ -156,6 +156,15 @@ export function dismissUpdate(): void {
   emit();
 }
 
+/**
+ * Is a newer release waiting? Reads `info`, NOT `phase`, on purpose: dismissing
+ * the popup moves the phase back to idle, but the update is still there — the
+ * dot on the menu is what keeps it findable afterwards.
+ */
+export function useUpdateAvailable(): boolean {
+  return useUpdate().info?.available === true;
+}
+
 export function useUpdate(): UpdateState {
   return useSyncExternalStore(
     l => {

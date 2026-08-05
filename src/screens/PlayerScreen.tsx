@@ -45,6 +45,7 @@ import {
   CirclePlus,
   Heart,
   ListMusic,
+  Info,
   Music,
   Pause,
   Play,
@@ -61,9 +62,11 @@ import {enqueueDownload, isDownloaded, useDownloadedIds} from '../downloads';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
+  isShuffled,
   seekTo,
   setRepeat,
   setShuffle,
+  useShuffle,
   skipNext,
   skipPrevious,
   sourceTrackFor,
@@ -147,9 +150,21 @@ export function PlayerScreen({
     track ? getBestArtworkUrl(track) : String(active?.artwork ?? '') || undefined,
   );
 
+  // Fetched here, not inside the pane: the tab bar has to know whether this
+  // song has lyrics BEFORE the tab is pressed. Only while the sheet is open,
+  // so a background session never spends requests on lyrics nobody asked for.
+  const lyricsState = useLyrics(
+    cleanText(String(active?.title ?? '')),
+    String(active?.artist ?? ''),
+    duration ? duration * 1000 : undefined,
+    visible,
+  );
+
   const [pane, setPane] = useState<Pane>('song');
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
-  const [shuffled, setShuffled] = useState(false);
+  // From the player module, not local state — the playlist screen toggles the
+  // same thing, and two copies of this flag is why the icon went stale.
+  const shuffled = useShuffle();
   const [downloading, setDownloading] = useState(false);
   // Subscribed so the button flips to the green tick the moment the download
   // completes, and stays a tick on a song that's already on disk.
@@ -386,14 +401,11 @@ export function PlayerScreen({
       return;
     }
     shuffleLock.current = now;
-    // A real toggle: flip the state, then make the queue match it. OFF restores
-    // the original order; ON shuffles. The icon follows `shuffled`.
-    setShuffled(prev => {
-      const next = !prev;
-      setShuffle(next).catch(() => {});
-      toast(next ? 'Shuffle on' : 'Shuffle off');
-      return next;
-    });
+    // A real toggle: ask the engine to flip; the icon follows whatever the
+    // engine actually did (a queue with nothing upcoming can't shuffle).
+    const next = !isShuffled();
+    setShuffle(next).catch(() => {});
+    toast(next ? 'Shuffle on' : 'Shuffle off');
   }, []);
 
   const download = useCallback(async () => {
@@ -410,6 +422,14 @@ export function PlayerScreen({
       setDownloading(false);
     }
   }, [track, downloading]);
+
+  // Skipping to a song with no lyrics while the Lyrics pane is open would
+  // otherwise strand you on a dead pane behind a dead tab.
+  useEffect(() => {
+    if (pane === 'lyrics' && !lyricsState.available) {
+      setPane('song');
+    }
+  }, [pane, lyricsState.available]);
 
   if (!active) {
     return null;
@@ -467,13 +487,7 @@ export function PlayerScreen({
               re-ran their whole load every pane switch, which is the 1-2s
               "loading again" the pane tabs kept showing. */}
           <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
-            <LyricsPane
-              title={title}
-              artist={String(active.artist ?? '')}
-              durationMs={duration ? duration * 1000 : undefined}
-              position={position}
-              visible={pane === 'lyrics'}
-            />
+            <LyricsPane state={lyricsState} position={position} visible={pane === 'lyrics'} />
           </View>
           <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
             <QueuePane />
@@ -574,15 +588,32 @@ export function PlayerScreen({
             <View style={styles.paneTabs}>
               {PANES.map(({id, label, Icon}) => {
                 const on = pane === id;
+                // Lyrics goes dead when this song genuinely has none — common
+                // on SoundCloud/YouTube uploads. The info glyph replaces the
+                // tab's own icon and explains itself on tap, rather than
+                // opening a pane that only ever says "nothing here".
+                const dead = id === 'lyrics' && !lyricsState.available;
+                const Glyph = dead ? Info : Icon;
                 return (
                   <TouchableOpacity
                     key={id}
-                    onPress={() => setPane(id)}
+                    onPress={() =>
+                      dead
+                        ? toast('No lyrics available for this song')
+                        : setPane(id)
+                    }
                     activeOpacity={0.8}
-                    style={[styles.paneTab, on && styles.paneTabOn]}>
-                    <Icon size={15} color={on ? C.text : C.faint} />
+                    style={[
+                      styles.paneTab,
+                      on && !dead && styles.paneTabOn,
+                      dead && styles.paneTabDead,
+                    ]}>
+                    <Glyph size={15} color={on && !dead ? C.text : C.faint} />
                     <Text
-                      style={[styles.paneLabel, on && styles.paneLabelOn]}>
+                      style={[
+                        styles.paneLabel,
+                        on && !dead && styles.paneLabelOn,
+                      ]}>
                       {label}
                     </Text>
                   </TouchableOpacity>
@@ -688,36 +719,40 @@ function trimCache(map: Map<string, unknown>, max = 40): void {
   }
 }
 
+export type LyricsState = {
+  lyrics: Lyrics | null;
+  busy: boolean;
+  err: string;
+  /** false once we KNOW there are none — what greys out the Lyrics tab. */
+  available: boolean;
+};
+
 /**
- * Synced lyrics scroll themselves and can be tapped to jump; plain text is
- * shown when that's all the sources have.
+ * Fetch the lyrics for a song, once.
+ *
+ * This lives above LyricsPane rather than inside it because the tab bar has to
+ * know the answer BEFORE you press Lyrics: SoundCloud and YouTube uploads
+ * frequently have none, and a tab that opens onto "No lyrics found" is worse
+ * than a tab that says so up front. One owner, one request.
  */
-function LyricsPane({
-  title,
-  artist,
-  durationMs,
-  position,
-  visible = true,
-}: {
-  title: string;
-  artist: string;
-  durationMs?: number;
-  position: number;
-  /** Mounted-but-hidden panes must not scroll a view nobody can see. */
-  visible?: boolean;
-}) {
+function useLyrics(
+  title: string,
+  artist: string,
+  durationMs: number | undefined,
+  enabled: boolean,
+): LyricsState {
   const cacheKey = `${title}|${artist}`.toLowerCase();
   const cached = lyricsCache.get(cacheKey);
   const [lyrics, setLyrics] = useState<Lyrics | null>(cached ?? null);
-  const [busy, setBusy] = useState(!cached);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const scroller = useRef<ScrollView>(null);
 
   useEffect(() => {
-    // New song, new geometry — stale measurements would centre wrong lines.
-    lineTops.current = [];
-    // Cached: the pane paints instantly — switching Song → Queue → Lyrics must
-    // not re-fetch what was on screen two taps ago.
+    if (!enabled || !title) {
+      return;
+    }
+    // Cached: paints instantly — switching Song → Queue → Lyrics must not
+    // re-fetch what was on screen two taps ago.
     const hit = lyricsCache.get(cacheKey);
     if (hit) {
       setLyrics(hit);
@@ -742,7 +777,34 @@ function LyricsPane({
     return () => {
       alive = false;
     };
-  }, [cacheKey, title, artist, durationMs]);
+  }, [cacheKey, title, artist, durationMs, enabled]);
+
+  return {
+    lyrics,
+    busy,
+    err,
+    // While it's still loading, assume yes — the tab shouldn't flicker grey on
+    // every track change.
+    available: busy || !!(lyrics?.synced?.length || lyrics?.plain),
+  };
+}
+
+/**
+ * Synced lyrics scroll themselves and can be tapped to jump; plain text is
+ * shown when that's all the sources have.
+ */
+function LyricsPane({
+  state,
+  position,
+  visible = true,
+}: {
+  state: LyricsState;
+  position: number;
+  /** Mounted-but-hidden panes must not scroll a view nobody can see. */
+  visible?: boolean;
+}) {
+  const {lyrics, busy, err} = state;
+  const scroller = useRef<ScrollView>(null);
 
   const synced = useMemo(() => lyrics?.synced ?? [], [lyrics]);
 
@@ -764,6 +826,11 @@ function LyricsPane({
   // real y; the scroll centres the active one in the visible pane.
   const lineTops = useRef<number[]>([]);
   const [paneH, setPaneH] = useState(0);
+
+  // New sheet, new geometry — stale measurements would centre the wrong lines.
+  useEffect(() => {
+    lineTops.current = [];
+  }, [lyrics]);
 
   useEffect(() => {
     if (!visible || activeLine < 0 || !scroller.current) {
@@ -886,6 +953,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   paneTabOn: {backgroundColor: 'rgba(255,255,255,0.14)'},
+  paneTabDead: {opacity: 0.45},
   paneLabel: {fontSize: 11, fontWeight: '600', color: C.faint},
   paneLabelOn: {color: C.text},
   output: {flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1},

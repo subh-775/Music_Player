@@ -274,6 +274,34 @@ export async function setDownloadsDir(
   return (await res.json()) as {ok: boolean; error?: string} & DownloadsInfo;
 }
 
+/** Browse tiles — the genre grid Search shows before you've typed anything.
+ *  They're HomeItem-shaped, so they open through the same path as a Home card. */
+export async function getGenres(
+  language = 'hindi,english',
+): Promise<HomeItem[]> {
+  const data = await apiGet<{tiles?: HomeItem[]}>(
+    `/genres?language=${encodeURIComponent(language)}`,
+  );
+  return Array.isArray(data.tiles) ? data.tiles : [];
+}
+
+// ─── Cache ──────────────────────────────────────────────────────────────────
+
+/** How much re-fetchable scratch data is on disk. Downloads are NOT counted —
+ *  they're the user's files, not cache. */
+export const getCacheSize = () => apiGet<{bytes: number}>('/cache');
+
+/** Drop resolved stream URLs, lyrics, home rows and cached files. Returns the
+ *  bytes reclaimed. Never touches downloads, playlists or likes. */
+export async function clearBackendCache(): Promise<number> {
+  const res = await fetch(apiUrl('/cache/clear'), {method: 'POST'});
+  if (!res.ok) {
+    throw new Error(`clear cache -> HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as {freed?: number};
+  return data.freed ?? 0;
+}
+
 /** Songs similar to a seed — what keeps playback going when the queue ends. */
 export async function getRadio(
   title: string,

@@ -194,26 +194,23 @@ build. Highest risk is the new gesture stack.
 | Removed | `reduceAnimations` (it was genuinely dead — only 3 minor spots) |
 | New | Sidebar drawer (hamburger replaces gear), sleep timer |
 
-### Remaining queue for v1.0.5
-1. **Home redesign** — decided: Spotify-style 2-col quick-access grid (Liked,
-   Downloads, recent playlists) above the existing horizontal rows, bigger art,
-   real section headers, "Recently played" first.
-2. **Recents + "Your sound" screens** — the drawer routes both to Library as a
-   **stub** right now. Recents = full listen history; Your sound = top artists /
-   songs / minutes, built from local play history (no backend work needed).
-3. **Search revamp** — decided: recent searches on focus; unfocused shows a
-   browse grid of genre cards + a "Your artists" row built only from artists
-   actually listened to. Also: a tapped result must **play immediately** on the
-   best source, with the source chooser moved to the ⋮ menu.
-4. **Smart playlists / auto-mixes** — Discover / On repeat / Recently added from
-   history + the radio endpoint.
-5. **Lyrics** — disable the Lyrics tab when a source has none, with an info icon
-   explaining why; add LRCLIB as a fallback for SoundCloud/YouTube (free, no key,
-   synced).
-6. **Clear cache** — stream cache + artwork + search history, showing reclaimed
-   size. Must never touch downloads/playlists/likes.
-7. **Green dot** on the menu icon while an update is waiting.
-8. **Shuffle icon** state.
+### v1.0.5 batch — landed
+| # | Item | What was actually done |
+|---|---|---|
+| 1 | Home redesign | 2-column quick-access grid above the rows: Liked, Downloaded, then the newest 4 playlists. Home doesn't own the tracklists — it emits a `QuickDest` and App resolves it, the same path a Library row takes. |
+| 2 | Recents / Your sound | New `ActivityScreen` (one screen, two modes) replaces the Library stub. Backed by a new `stats.ts` play counter, bumped from `recentlyPlayed.remember` so every play path counts exactly once. Bounded: 300 tracks / 200 artists, least-recent half dropped when full. |
+| 3 | Search revamp | Recent searches on **focus**; otherwise a browse view — "Your artists" from real play history + a colour-blocked genre grid off the existing `/api/genres`. Genre tiles are HomeItem-shaped, so they open through `pickHomeItem` unchanged. **No source-chooser change was needed** — a tapped result already plays directly; that complaint was the pre-fix search latency. |
+| 5 | Lyrics | The fetch moved OUT of `LyricsPane` into a `useLyrics` hook owned by `PlayerScreen`, because the tab bar must know the answer before the tab is pressed. No lyrics → tab greys out, icon becomes ⓘ, tap explains. Skipping onto a lyric-less song while the pane is open falls back to Song. LRCLIB was **already** the primary source server-side — no backend change. |
+| 6 | Clear cache | Real: new `GET /api/cache` + `POST /api/cache/clear`. Drops the stream-URL cache, lyrics cache, home-row cache and the files in `cache_dir()`, then reports bytes freed. Search history goes with it, app-side. Downloads/playlists/likes explicitly untouched, with a realpath guard in case the cache dir ever overlapped downloads. |
+| 7 | Green dot | `useUpdateAvailable()` reads `info.available`, **not** `phase` — dismissing the popup must not hide the fact. Dot on the Home hamburger and on the drawer's Settings row. |
+| 8 | Shuffle icon | Root cause: PlayerScreen and CollectionScreen each held their **own** `useState`. One store in `player.ts` (`useShuffle`), and the flag is set from what the engine actually did — a queue with nothing upcoming can't shuffle, so the icon no longer claims it did. Building a fresh queue resets it. |
+| — | Artist popup | `animationType="slide"` moved the whole modal including the scrim, so a 60%-black top edge swept up the screen — that was the "harsh dark shadow". Now the sheet translates and the scrim only fades. |
+
+### Deliberately not done
+- **Smart playlists / auto-mixes** (was item 4). Everything else in this batch
+  either fixes a reported defect or was explicitly asked for; this one was my
+  own suggestion. `stats.ts` is the data it would need, so it's cheap to add
+  later — but shipping it untested alongside 13 other changes buys nothing.
 
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.

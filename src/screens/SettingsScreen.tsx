@@ -20,10 +20,13 @@ import {
   ExternalLink,
   HardDrive,
   RefreshCw,
+  Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
   appVersion,
+  clearBackendCache,
+  getCacheSize,
   getDownloadsInfo,
   getSourcesStatus,
   getYouTubeExperimental,
@@ -33,6 +36,7 @@ import {
   type SourceStatus,
 } from '../backend';
 import {resetSettings, useStore, writeSetting} from '../store';
+import {clearSearchHistory} from '../searchHistory';
 import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
 import {TipsScreen} from './TipsScreen';
@@ -51,6 +55,14 @@ import {
 } from '../sleepTimer';
 
 const DOCS_URL = 'https://github.com/subh-775/Music_Player';
+
+function formatBytes(n: number): string {
+  if (n < 1024) {
+    return `${n} B`;
+  }
+  const mb = n / (1024 * 1024);
+  return mb < 1 ? `${Math.round(n / 1024)} KB` : `${mb.toFixed(1)} MB`;
+}
 
 const QUALITIES = [
   {value: 0, label: 'Auto', hint: 'Adjusts to the source'},
@@ -206,6 +218,9 @@ export function SettingsScreen({
     initialPanel,
   );
   const [resetOpen, setResetOpen] = useState(false);
+  const [cacheOpen, setCacheOpen] = useState(false);
+  const [cacheBytes, setCacheBytes] = useState<number | null>(null);
+  const [clearing, setClearing] = useState(false);
   const {settings} = useStore();
   const [sources, setSources] = useState<Record<string, SourceStatus>>({});
   const [downloads, setDownloads] = useState<DownloadsInfo | null>(null);
@@ -240,10 +255,11 @@ export function SettingsScreen({
       // local and instant, so the screen paints immediately and the
       // backend-backed rows (sources, download folder) fill in when ready.
       // The old spinner made opening Settings feel like loading a web page.
-      const [s, d, y] = await Promise.allSettled([
+      const [s, d, y, c] = await Promise.allSettled([
         getSourcesStatus(),
         getDownloadsInfo(),
         getYouTubeExperimental(),
+        getCacheSize(),
       ]);
       if (s.status === 'fulfilled') {
         setSources(s.value);
@@ -253,6 +269,9 @@ export function SettingsScreen({
       }
       if (y.status === 'fulfilled') {
         setYt(y.value);
+      }
+      if (c.status === 'fulfilled') {
+        setCacheBytes(c.value.bytes);
       }
     })();
   }, []);
@@ -336,6 +355,33 @@ export function SettingsScreen({
     resetSettings();
     setResetOpen(false);
     toast('Settings reset to defaults');
+  }, []);
+
+  /**
+   * Clear cache — a real one, not a placebo button.
+   *
+   * Backend side drops resolved stream URLs, lyrics, home rows and the files in
+   * the app's cache directory; app side drops search history. Downloads,
+   * playlists and likes are deliberately untouched: the whole point of the
+   * button is that it's safe to press.
+   */
+  const doClearCache = useCallback(async () => {
+    setCacheOpen(false);
+    setClearing(true);
+    try {
+      const freed = await clearBackendCache();
+      clearSearchHistory();
+      setCacheBytes(0);
+      toast(freed > 0 ? `Cleared ${formatBytes(freed)}` : 'Cache cleared');
+      // Re-read rather than assume zero — Android may hold files open.
+      getCacheSize()
+        .then(r => setCacheBytes(r.bytes))
+        .catch(() => {});
+    } catch {
+      toast("Couldn't clear the cache");
+    } finally {
+      setClearing(false);
+    }
   }, []);
 
   // Real check: asks GitHub for the latest release. A newer one raises the
@@ -638,6 +684,29 @@ export function SettingsScreen({
                 </View>
               </View>
             </View>
+
+            <View style={styles.row}>
+              <Trash2 size={20} color={C.text} strokeWidth={1.9} />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Clear cache</Text>
+                <Text style={styles.rowHint}>
+                  {cacheBytes == null
+                    ? 'Temporary files, lyrics and search history'
+                    : `${formatBytes(
+                        cacheBytes,
+                      )} of temporary files, lyrics and search history`}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.setBtn, styles.checkBtn]}
+                  onPress={() => setCacheOpen(true)}
+                  disabled={clearing}
+                  activeOpacity={0.85}>
+                  <Text style={styles.setBtnText}>
+                    {clearing ? 'Clearing…' : 'Clear'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </Section>
 
           <Section title="About & help">
@@ -697,6 +766,15 @@ export function SettingsScreen({
           danger
           onConfirm={doReset}
           onCancel={() => setResetOpen(false)}
+        />
+
+        <ConfirmModal
+          visible={cacheOpen}
+          title="Clear cache?"
+          message="Frees temporary files, saved lyrics and your search history. Downloads, playlists and liked songs are not touched."
+          confirmLabel="Clear"
+          onConfirm={doClearCache}
+          onCancel={() => setCacheOpen(false)}
         />
     </View>
   );

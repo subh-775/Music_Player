@@ -59,6 +59,7 @@ import {
   togglePlay,
   useActiveTrack,
   usePlaybackState,
+  useShuffle,
 } from '../player';
 import {useLikes} from '../store';
 import {
@@ -90,7 +91,8 @@ export function CollectionScreen({
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(() => isSaved(collection));
-  const [shuffled, setShuffled] = useState(false);
+  // Shared with the player sheet — see useShuffle in player.ts.
+  const shuffled = useShuffle();
   // Own-playlist management, mirrored from the library's long-press sheet so a
   // playlist is editable from inside as well as from its row.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -322,7 +324,6 @@ export function CollectionScreen({
       return;
     }
     const next = !shuffled;
-    setShuffled(next);
     if (!next) {
       // Toggling OFF: put the upcoming tracks back in their original order.
       await setShuffle(false).catch(() => {});

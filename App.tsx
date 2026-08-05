@@ -7,7 +7,8 @@ import {
   View,
 } from 'react-native';
 import {ErrorBoundary} from './src/ErrorBoundary';
-import {HomeScreen} from './src/screens/HomeScreen';
+import {HomeScreen, type QuickDest} from './src/screens/HomeScreen';
+import {ActivityScreen} from './src/screens/ActivityScreen';
 import {SearchScreen} from './src/screens/SearchScreen';
 import {LibraryScreen} from './src/screens/LibraryScreen';
 import {SettingsScreen} from './src/screens/SettingsScreen';
@@ -30,14 +31,27 @@ import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
 import {C} from './src/theme';
-import {getAlbum, getCollection, type HomeItem, type Track} from './src/backend';
+import {
+  getAlbum,
+  getCollection,
+  getLocalLibrary,
+  type HomeItem,
+  type Track,
+} from './src/backend';
+import {
+  downloadsCollection,
+  likedCollection,
+  playlistToCollection,
+} from './src/collections';
+import {readPlaylists} from './src/playlists';
+import {overlayDownloadArtwork} from './src/downloads';
 import {
   playTrack,
   restoreSession,
   setupPlayer,
   startCrossfadeWatcher,
 } from './src/player';
-import {hydrate, readSettings} from './src/store';
+import {hydrate, readSettings, useLikes} from './src/store';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
 import {applyAudioEffects} from './src/audioEffects';
@@ -75,6 +89,9 @@ function Shell() {
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
+  /** The drawer's Recents / Your sound pages. null = closed. */
+  const [activity, setActivity] = useState<'recents' | 'stats' | null>(null);
+  const likes = useLikes();
   const exitArmedAt = useRef(0);
 
   /**
@@ -256,12 +273,40 @@ function Shell() {
     [play, openCollection],
   );
 
+  /** Home's quick-access tiles. Home only knows WHAT was tapped; the
+   *  tracklists live here, next to everything else that opens a Collection. */
+  const openQuick = useCallback(
+    async (dest: QuickDest) => {
+      if (dest.kind === 'liked') {
+        openCollection(likedCollection(likes));
+        return;
+      }
+      if (dest.kind === 'downloads') {
+        try {
+          const {tracks} = await getLocalLibrary();
+          // Same as the Library tab: the disk scan carries no artwork, so lay
+          // back the covers remembered at download time.
+          openCollection(downloadsCollection(overlayDownloadArtwork(tracks)));
+        } catch {
+          toast("Couldn't read your downloads.");
+        }
+        return;
+      }
+      const p = readPlaylists().find(x => x.id === dest.id);
+      if (p) {
+        openCollection(playlistToCollection(p));
+      }
+    },
+    [likes, openCollection],
+  );
+
   const switchTab = useCallback((next: Tab) => {
     setTab(next);
     setCollection(null);
     setArtist(null);
     setImportUrl(null);
     setSettingsOpen(false);
+    setActivity(null);
   }, []);
 
   /**
@@ -293,6 +338,10 @@ function Shell() {
       }
       if (settingsOpen) {
         setSettingsOpen(false);
+        return true;
+      }
+      if (activity) {
+        setActivity(null);
         return true;
       }
       if (importUrl) {
@@ -342,6 +391,7 @@ function Shell() {
     artistChoices,
     sheetTrack,
     settingsOpen,
+    activity,
     artist,
     artistZ,
     importUrl,
@@ -369,6 +419,7 @@ function Shell() {
             onPickTrack={pickHomeItem}
             onPlayTrack={play}
             onOpenMenu={() => setDrawerOpen(true)}
+            onOpenQuick={openQuick}
             onReady={onHomeReady}
           />
         </View>
@@ -378,6 +429,7 @@ function Shell() {
             onImportSpotify={setImportUrl}
             onMenu={openSheet}
             onOpenArtist={openArtist}
+            onOpenBrowse={pickHomeItem}
           />
         </View>
         <View style={tab === 'library' ? styles.tabShown : styles.tabHidden}>
@@ -436,6 +488,18 @@ function Shell() {
             />
           </View>
         )}
+        {!!activity && (
+          <View style={StyleSheet.absoluteFill}>
+            <ActivityScreen
+              mode={activity}
+              onClose={() => setActivity(null)}
+              onPlay={play}
+              onMenu={openSheet}
+              onOpenArtist={openArtist}
+            />
+          </View>
+        )}
+
         {/* Settings is an overlay, not a Modal, for the same reason as the
             rest: a Modal floats over the whole window and hid the mini player.
             Here it stays inside the body, so playback controls remain visible. */}
@@ -499,9 +563,8 @@ function Shell() {
           } else if (dest === 'shortcuts') {
             setSettingsPanel('tips');
             setSettingsOpen(true);
-          } else if (dest === 'recents' || dest === 'stats') {
-            // Both live on the Library tab for now — see SPRINT_LOG.
-            setTab('library');
+          } else {
+            setActivity(dest);
           }
         }}
       />

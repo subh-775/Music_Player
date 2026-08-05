@@ -1738,6 +1738,66 @@ def youtube_cookies_set():
     return jsonify({"present": True, "ok": True})
 
 
+# ─── Cache ────────────────────────────────────────────────────────────────────
+def _cache_bytes() -> int:
+    """Size of the on-disk cache directory. Walks it rather than trusting a
+    running total, because Android can evict from this directory on its own."""
+    total = 0
+    root = android_env.cache_dir()
+    if not root:
+        return 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                pass
+    return total
+
+
+@app.get("/api/cache")
+def cache_info():
+    return jsonify({"bytes": _cache_bytes()})
+
+
+@app.post("/api/cache/clear")
+def cache_clear():
+    """Drop everything re-fetchable: resolved stream URLs, lyrics, home rows,
+    and the scratch files on disk.
+
+    Explicitly NOT touched: the downloads directory, playlists, or likes. Those
+    are the user's own data and live elsewhere — a cache clear that eats a
+    downloaded song is a bug report, not a feature.
+    """
+    before = _cache_bytes()
+
+    _STREAM_CACHE.clear()
+    with _lyrics_cache_lock:
+        _lyrics_cache.clear()
+    try:
+        from components import home as home_mod
+        with home_mod._cache_lock:
+            home_mod._cache.clear()
+    except Exception:
+        pass
+
+    root = android_env.cache_dir()
+    downloads = os.path.realpath(android_env.downloads_dir() or "")
+    if root and os.path.isdir(root):
+        for dirpath, _dirnames, filenames in os.walk(root):
+            # Belt and braces: if the cache dir ever overlapped the downloads
+            # dir, skip it rather than delete music.
+            if downloads and os.path.realpath(dirpath).startswith(downloads):
+                continue
+            for name in filenames:
+                try:
+                    os.remove(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+
+    return jsonify({"freed": max(0, before - _cache_bytes())})
+
+
 # ─── SPA ──────────────────────────────────────────────────────────────────────
 # Serving the React bundle from the SAME origin as the API is what lets
 # frontend/src/utils/config.js keep its relative base: fetch('/api/...') and

@@ -8,8 +8,10 @@
  * Photos are fetched per name and land as they arrive; the sheet is usable
  * immediately with initials in place of a missing picture.
  */
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
+  Animated,
+  Easing,
   Image,
   Modal,
   ScrollView,
@@ -31,6 +33,26 @@ export function ArtistPickerSheet({
   onClose: () => void;
 }) {
   const [images, setImages] = useState<Record<string, string>>({});
+  const open = names.length > 0;
+
+  /**
+   * Presentation, hand-rolled instead of animationType="slide".
+   *
+   * "slide" moves the WHOLE modal — including the scrim — up from the bottom,
+   * so the top edge of a 60%-black rectangle sweeps up the screen. That hard
+   * travelling edge is the "harsh dark shadow above the popup". Here the sheet
+   * slides and the scrim only fades, so nothing has a moving edge.
+   */
+  const t = useRef(new Animated.Value(0)).current; // 0 closed, 1 open
+
+  useEffect(() => {
+    Animated.timing(t, {
+      toValue: open ? 1 : 0,
+      duration: open ? 260 : 180,
+      easing: open ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [open, t]);
 
   useEffect(() => {
     let alive = true;
@@ -58,13 +80,32 @@ export function ArtistPickerSheet({
 
   return (
     <Modal
-      visible={names.length > 0}
+      visible={open}
       transparent
-      animationType="slide"
+      animationType="none"
       onRequestClose={onClose}
       statusBarTranslucent>
-      <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose} />
-      <View style={styles.sheet}>
+      <Animated.View style={[styles.scrim, {opacity: t}]}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+      </Animated.View>
+      <Animated.View
+        style={[
+          styles.sheet,
+          {
+            transform: [
+              {
+                translateY: t.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [SHEET_TRAVEL, 0],
+                }),
+              },
+            ],
+          },
+        ]}>
         <View style={styles.handle} />
         <Text style={styles.title}>Artists on this song</Text>
 
@@ -93,14 +134,21 @@ export function ArtistPickerSheet({
             );
           })}
         </ScrollView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
 
+/** Far enough that the sheet starts fully off-screen at any phone height. */
+const SHEET_TRAVEL = 520;
+
 const styles = StyleSheet.create({
-  scrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
+  scrim: {...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)'},
   sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     maxHeight: '65%',
     backgroundColor: C.surfaceHi,
     borderTopLeftRadius: 16,

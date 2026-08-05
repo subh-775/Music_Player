@@ -9,6 +9,7 @@
  */
 import {createStore, asArray, useStoreValue} from './storage';
 import {getTrackId} from './tracks';
+import {recordPlay} from './stats';
 import type {Track} from './backend';
 
 const MAX = 20;
@@ -21,6 +22,9 @@ const store = createStore<Track[]>('mp.recent.v1', [], raw =>
 export function remember(track: Track): void {
   const id = getTrackId(track);
   store.update(list => [track, ...list.filter(t => getTrackId(t) !== id)].slice(0, MAX));
+  // The long-term counter rides along here rather than at every call site, so
+  // "a song started" is recorded in exactly one place.
+  recordPlay(track);
 }
 
 export function clearRecent(): void {

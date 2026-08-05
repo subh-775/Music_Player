@@ -15,6 +15,7 @@ import {
   FlatList,
   Image,
   Keyboard,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -25,13 +26,17 @@ import {Clock, Search as SearchIcon, X} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
   enrichBatch,
+  getGenres,
   getSuggestions,
   search,
   searchArtists,
+  waitForBackend,
   type ArtistCard,
+  type HomeItem,
   type Suggestion,
   type Track,
 } from '../backend';
+import {useStats} from '../stats';
 import {applyEnrichment, normalizeTracks, type Enrichment} from '../tracks';
 import {TrackRow} from '../components/TrackRow';
 import {
@@ -51,16 +56,28 @@ export function isSpotifyUrl(text: string): boolean {
 
 const DEBOUNCE_MS = 180;
 
+/** Browse tiles are colour-blocked, like Spotify's. A fixed rotation keeps a
+ *  given tile the same colour across launches — a random one per render made
+ *  the grid flicker on every re-render. */
+const TILE_COLORS = [
+  '#1E3264', '#E8115B', '#148A08', '#8D67AB', '#B95D06',
+  '#0D73EC', '#503750', '#477D95', '#777777', '#E13300',
+];
+const tileColor = (i: number) => TILE_COLORS[i % TILE_COLORS.length];
+
 export function SearchScreen({
   onPickTrack,
   onImportSpotify,
   onMenu,
   onOpenArtist,
+  onOpenBrowse,
 }: {
   onPickTrack: (track: Track, context: Track[]) => void;
   onImportSpotify: (url: string) => void;
   onMenu: (track: Track) => void;
   onOpenArtist?: (name: string) => void;
+  /** A genre tile — resolved and opened by the app, same as a Home card. */
+  onOpenBrowse: (item: HomeItem) => void;
 }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -68,7 +85,10 @@ export function SearchScreen({
   const [artists, setArtists] = useState<ArtistCard[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [genres, setGenres] = useState<HomeItem[]>([]);
   const history = useSearchHistory();
+  const {topArtists} = useStats();
 
   // Guards against a slow response for an old query overwriting a newer one.
   const latest = useRef(0);
@@ -156,9 +176,28 @@ export function SearchScreen({
     return () => clearTimeout(id);
   }, [query]);
 
+  // Browse tiles load once, lazily — nobody needs them until the field is idle,
+  // and they're cached server-side for 6h anyway.
+  useEffect(() => {
+    // Wait for the engine first: this mounts during cold start, and firing at
+    // t=0 just burns the one attempt on a backend that isn't listening yet.
+    waitForBackend()
+      .then(ok => (ok ? getGenres() : []))
+      .then(setGenres)
+      .catch(() => {
+        // Browsing is a bonus; searching still works without it.
+      });
+  }, []);
+
   const spotify = isSpotifyUrl(query);
-  const showHistory = !query.trim() && history.length > 0;
+  const idle = !query.trim() && !results.length;
+  // History belongs to the moment you're about to type — on focus, the way
+  // Spotify does it. Idle and unfocused shows something to explore instead.
+  const showHistory = !query.trim() && focused && history.length > 0;
   const showSuggestions = !!suggestions.length && !busy;
+  // Whenever there's nothing else to show. Focusing with no history to offer
+  // would otherwise leave a blank screen under the keyboard.
+  const showBrowse = idle && !busy && !spotify && !showHistory;
 
   return (
     <View style={styles.wrap}>
@@ -174,6 +213,8 @@ export function SearchScreen({
           style={styles.input}
           returnKeyType="search"
           autoCorrect={false}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onSubmitEditing={() => runSearch(query)}
         />
         {!!query && (
@@ -275,7 +316,72 @@ export function SearchScreen({
         />
       )}
 
-      {!busy && !showHistory && !showSuggestions && (
+      {showBrowse && (
+        <ScrollView
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never">
+          {topArtists.length > 0 && onOpenArtist && (
+            <>
+              <Text style={styles.section}>Your artists</Text>
+              <FlatList
+                horizontal
+                data={topArtists.slice(0, 12)}
+                keyExtractor={a => a.name}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.artistStrip}
+                renderItem={({item}) => (
+                  <TouchableOpacity
+                    style={styles.artistCard}
+                    activeOpacity={0.75}
+                    onPress={() => onOpenArtist(item.name)}>
+                    {item.image ? (
+                      <Image source={{uri: item.image}} style={styles.artistPfp} />
+                    ) : (
+                      <View style={[styles.artistPfp, styles.artistPfpEmpty]}>
+                        <Text style={styles.artistInitial}>
+                          {item.name.trim().charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={styles.artistName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </>
+          )}
+
+          {genres.length > 0 && (
+            <>
+              <Text style={styles.section}>Browse all</Text>
+              <View style={styles.grid}>
+                {genres.map((g, i) => (
+                  <TouchableOpacity
+                    key={`${g.perma_url || g.name}-${i}`}
+                    style={[styles.tile, {backgroundColor: tileColor(i)}]}
+                    activeOpacity={0.8}
+                    onPress={() => onOpenBrowse(g)}>
+                    <Text style={styles.tileText} numberOfLines={2}>
+                      {g.name || g.title}
+                    </Text>
+                    {!!g.image && (
+                      <Image
+                        source={{uri: g.image}}
+                        style={styles.tileArt}
+                      />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+        </ScrollView>
+      )}
+
+      {!busy && !showHistory && !showSuggestions && !showBrowse && (
         <FlatList
           data={results}
           keyExtractor={(t, i) => `${t.title}-${t.artist}-${i}`}
@@ -380,6 +486,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: S.gutter,
     paddingTop: 8,
     paddingBottom: 6,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: S.gutter,
+    gap: 10,
+  },
+  tile: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    height: 96,
+    borderRadius: 8,
+    overflow: 'hidden',
+    padding: 12,
+  },
+  tileText: {color: '#fff', fontSize: 15, fontWeight: '800', maxWidth: '75%'},
+  // The cover sits half off the corner, rotated — the Spotify browse-tile look,
+  // and it means a square cover never has to be cropped to fit.
+  tileArt: {
+    position: 'absolute',
+    right: -14,
+    bottom: -6,
+    width: 62,
+    height: 62,
+    borderRadius: 4,
+    transform: [{rotate: '25deg'}],
   },
   artistStrip: {paddingHorizontal: S.gutter, gap: 16, paddingBottom: 6},
   artistCard: {width: 84, alignItems: 'center'},

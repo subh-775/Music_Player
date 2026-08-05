@@ -341,6 +341,10 @@ export async function playTrack(
   queueSource = items.map(x => x.t);
 
   cancelCrossfade(); // and guarantee full volume for the fresh track
+  // A brand-new queue is in the order the user picked — shuffle no longer
+  // describes anything, so the icon must go back to off.
+  preShuffleUpcoming = null;
+  setShuffleFlag(false);
   await TrackPlayer.reset();
   // Add the CHOSEN track (and everything after it) FIRST, so the engine's
   // active track is the one you tapped from the very first frame. Adding the
@@ -558,8 +562,37 @@ export async function skipPrevious(): Promise<void> {
  * Turning it off restoring the order is what makes it a toggle (Spotify's is);
  * the old version shuffled again on every press, which both read as "still on"
  * and left songs playing in an order the user never chose.
+ *
+ * The ON/OFF flag lives HERE, not in each screen. The player sheet and the
+ * playlist screen each held their own useState, so shuffling from one left the
+ * other's icon stale — and either one could disagree with the queue that was
+ * actually shuffled. One store, both read it.
  */
 let preShuffleUpcoming: RNTPTrack[] | null = null;
+let shuffleOn = false;
+const shuffleListeners = new Set<() => void>();
+
+function setShuffleFlag(on: boolean) {
+  if (shuffleOn === on) {
+    return;
+  }
+  shuffleOn = on;
+  shuffleListeners.forEach(l => l());
+}
+
+export function isShuffled(): boolean {
+  return shuffleOn;
+}
+
+export function useShuffle(): boolean {
+  return useSyncExternalStore(
+    l => {
+      shuffleListeners.add(l);
+      return () => shuffleListeners.delete(l);
+    },
+    () => shuffleOn,
+  );
+}
 
 export async function setShuffle(on: boolean): Promise<void> {
   const queue = await TrackPlayer.getQueue();
@@ -570,6 +603,8 @@ export async function setShuffle(on: boolean): Promise<void> {
   const rest = queue.slice(index + 1);
   if (on) {
     if (rest.length < 2) {
+      // Nothing to shuffle — leave the flag alone so the icon doesn't claim a
+      // shuffle that never happened.
       return;
     }
     preShuffleUpcoming = rest; // remember so OFF can restore it
@@ -580,14 +615,16 @@ export async function setShuffle(on: boolean): Promise<void> {
     }
     await TrackPlayer.removeUpcomingTracks();
     await TrackPlayer.add(shuffled);
+    setShuffleFlag(true);
   } else {
-    if (!preShuffleUpcoming) {
-      return;
+    if (preShuffleUpcoming) {
+      await TrackPlayer.removeUpcomingTracks();
+      await TrackPlayer.add(preShuffleUpcoming);
+      preShuffleUpcoming = null;
     }
-    await TrackPlayer.removeUpcomingTracks();
-    await TrackPlayer.add(preShuffleUpcoming);
-    preShuffleUpcoming = null;
+    setShuffleFlag(false);
   }
+  await refreshEngineMirror();
 }
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {
