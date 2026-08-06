@@ -116,6 +116,24 @@ export async function setupPlayer(): Promise<boolean> {
       // us and we resume after. Doing this natively is what keeps Bluetooth
       // hand-offs in sync instead of the app and the headset disagreeing.
       autoHandleInterruptions: true,
+      // RNTP's defaults (minBuffer 50s, playBuffer 2.5s) are ExoPlayer's OWN
+      // defaults — tuned for VIDEO, where a deep buffer hides network jitter.
+      // Nobody had ever set these for an audio-only player, so every play AND
+      // every seek was gated on 2.5 real seconds of rebuffering before sound
+      // resumed — through a proxy that has to resolve + reconnect to the CDN
+      // first. That is the actual "why does this feel like it's struggling"
+      // the WebView build never had this knob wrong to begin with.
+      // 320kbps audio is tiny: 15s of lookahead is ~600KB, not worth hoarding
+      // 50s for. playBuffer down to 400ms is still enough margin to not
+      // audibly stutter on a normal connection.
+      minBuffer: 15,
+      maxBuffer: 30,
+      playBuffer: 0.4,
+      // Seeking BACKWARD (double-tap peek, tapping an earlier lyric line)
+      // reuses audio already downloaded instead of a fresh network round trip
+      // through the proxy — was 0 (nothing kept), so even a 2-second rewind
+      // paid the full resolve+reconnect cost again.
+      backBuffer: 20,
     });
     await TrackPlayer.updateOptions({
       android: {
@@ -284,6 +302,26 @@ export async function restoreSession(): Promise<boolean> {
 }
 
 /** Shape a backend Track for the audio engine. Returns null if unplayable. */
+/**
+ * Fire the SAME resolve `/proxy_stream` will need, right now, in parallel with
+ * whatever else is happening — never awaited.
+ *
+ * This is the other half of the buffer tuning above: shrinking playBuffer only
+ * helps once the stream is already resolved. Without this, that resolve (a
+ * real network round trip to JioSaavn/SoundCloud/YouTube) only ever started
+ * the moment ExoPlayer's own HTTP request reached the backend — AFTER
+ * TrackPlayer.play() had already been awaited, fully serial with everything
+ * else a tap does. Firing it here overlaps it with the RNTP bridge calls
+ * instead, so by the time ExoPlayer actually asks, the answer is often
+ * already cached.
+ */
+function warmStream(track: Track | null | undefined, bitrate: number): void {
+  if (!track || track.file_path) {
+    return; // downloaded file — nothing to resolve
+  }
+  getStreamInfo(track, bitrate).catch(() => {});
+}
+
 function toQueueItem(track: Track, bitrate: number) {
   const url = streamUrlFor(track, bitrate);
   if (!url) {
@@ -339,6 +377,10 @@ export async function playTrack(
   }
 
   queueSource = items.map(x => x.t);
+
+  // Start resolving the tapped track's stream NOW — see warmStream — instead
+  // of only after the RNTP calls below have all been awaited.
+  warmStream(items[startAt].t, bitrate);
 
   cancelCrossfade(); // and guarantee full volume for the fresh track
   // A brand-new queue is in the order the user picked — shuffle no longer
@@ -527,6 +569,9 @@ export function useActiveTrack(): RNTPTrack | null {
 export async function skipNext(): Promise<void> {
   cancelCrossfade(); // a manual skip isn't a crossfade — kill any overlap
   publishStep(1); // show the committed track NOW, before the engine catches up
+  // publishStep already moved the mirror — warm the track it's now pointing
+  // at before the engine even starts skipping to it.
+  warmStream(sourceTrackFor(trackSnapshot), currentQuality());
   try {
     await TrackPlayer.skipToNext();
     await TrackPlayer.play();
@@ -550,6 +595,7 @@ export async function skipPrevious(): Promise<void> {
     }
     // Only publish once we know this is a real track change, not a restart.
     publishStep(-1);
+    warmStream(sourceTrackFor(trackSnapshot), currentQuality());
     await TrackPlayer.skipToPrevious();
     await TrackPlayer.play();
   } catch {
