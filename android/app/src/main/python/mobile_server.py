@@ -1739,14 +1739,37 @@ def youtube_cookies_set():
 
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
-def _cache_bytes() -> int:
-    """Size of the on-disk cache directory. Walks it rather than trusting a
-    running total, because Android can evict from this directory on its own."""
-    total = 0
+# Subdirectories of the cache dir that are app MACHINERY, not the user's cache.
+# `chaquopy` holds the Python runtime's extracted assets — deleting it under a
+# live interpreter is asking for a broken backend, and it only forces a slow
+# re-extract on the next launch. Excluded from the clear AND from the size, so
+# the number on the button is exactly what pressing it frees.
+_CACHE_KEEP = {"chaquopy"}
+
+
+def _cache_walk():
+    """(dirpath, filenames) for the parts of the cache dir we own."""
     root = android_env.cache_dir()
-    if not root:
-        return 0
-    for dirpath, _dirnames, filenames in os.walk(root):
+    if not root or not os.path.isdir(root):
+        return
+    downloads = os.path.realpath(android_env.downloads_dir() or "")
+    for dirpath, dirnames, filenames in os.walk(root):
+        if dirpath == root:
+            # Prune in place so os.walk never descends into them.
+            dirnames[:] = [d for d in dirnames if d not in _CACHE_KEEP]
+        # Belt and braces: if the cache dir ever overlapped the downloads dir,
+        # skip it rather than touch music.
+        if downloads and os.path.realpath(dirpath).startswith(downloads):
+            dirnames[:] = []
+            continue
+        yield dirpath, filenames
+
+
+def _cache_bytes() -> int:
+    """Size of the clearable cache. Walks it rather than trusting a running
+    total, because Android can evict from this directory on its own."""
+    total = 0
+    for dirpath, filenames in _cache_walk():
         for name in filenames:
             try:
                 total += os.path.getsize(os.path.join(dirpath, name))
@@ -1781,19 +1804,15 @@ def cache_clear():
     except Exception:
         pass
 
-    root = android_env.cache_dir()
-    downloads = os.path.realpath(android_env.downloads_dir() or "")
-    if root and os.path.isdir(root):
-        for dirpath, _dirnames, filenames in os.walk(root):
-            # Belt and braces: if the cache dir ever overlapped the downloads
-            # dir, skip it rather than delete music.
-            if downloads and os.path.realpath(dirpath).startswith(downloads):
-                continue
-            for name in filenames:
-                try:
-                    os.remove(os.path.join(dirpath, name))
-                except OSError:
-                    pass
+    for dirpath, filenames in _cache_walk():
+        for name in filenames:
+            try:
+                os.remove(os.path.join(dirpath, name))
+            except OSError:
+                # In use, or Android holds it open. Nothing to do about it, and
+                # the reported figure is measured after the fact so it stays
+                # honest either way.
+                pass
 
     return jsonify({"freed": max(0, before - _cache_bytes())})
 

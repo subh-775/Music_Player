@@ -16,6 +16,7 @@ import {
   BackHandler,
   Dimensions,
   Easing,
+  Image,
   Modal,
   PanResponder,
   StyleSheet,
@@ -34,40 +35,20 @@ import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
 import {useUpdateAvailable} from '../update';
 
+const ICON = require('../assets/app-icon.png');
+
 const W = Math.min(320, Dimensions.get('window').width * 0.82);
 
 export type SidebarDest = 'recents' | 'settings' | 'shortcuts' | 'stats';
 
-const ITEMS: {
-  id: SidebarDest;
-  label: string;
-  hint: string;
-  Icon: typeof Clock;
-}[] = [
-  {
-    id: 'recents',
-    label: 'Recents',
-    hint: 'Everything you have listened to',
-    Icon: Clock,
-  },
-  {
-    id: 'stats',
-    label: 'Your sound',
-    hint: 'Top artists and songs you play',
-    Icon: Sparkles,
-  },
-  {
-    id: 'shortcuts',
-    label: 'Shortcuts',
-    hint: 'Every gesture the app knows',
-    Icon: Keyboard,
-  },
-  {
-    id: 'settings',
-    label: 'Settings',
-    hint: 'Playback, sources, storage',
-    Icon: SettingsIcon,
-  },
+// No per-item hint text any more — "Everything you have listened to" under
+// "Recents" was explaining a label that already explains itself, and it made
+// every row two lines for no reason. The label is enough.
+const ITEMS: {id: SidebarDest; label: string; Icon: typeof Clock}[] = [
+  {id: 'recents', label: 'Recents', Icon: Clock},
+  {id: 'stats', label: 'Your sound', Icon: Sparkles},
+  {id: 'shortcuts', label: 'Shortcuts', Icon: Keyboard},
+  {id: 'settings', label: 'Settings', Icon: SettingsIcon},
 ];
 
 export function Sidebar({
@@ -188,7 +169,16 @@ export function Sidebar({
       <Animated.View
         style={[styles.panel, {transform: [{translateX: x}]}]}
         {...pan.panHandlers}>
-        <Text style={styles.brand}>Fix_Music</Text>
+        {/* The app's own mark, not just a word. A bare text line read as a
+            stray label; the icon is what makes the drawer feel like part of
+            the product. */}
+        <View style={styles.brandRow}>
+          <Image source={ICON} style={styles.brandIcon} />
+          <View style={styles.brandText}>
+            <Text style={styles.brand}>Fix_Music</Text>
+            <Text style={styles.brandSub}>Your library, your sound</Text>
+          </View>
+        </View>
 
         <View style={styles.items}>
           {ITEMS.map(item => (
@@ -199,18 +189,13 @@ export function Sidebar({
               onPress={() => go(item.id)}>
               <item.Icon size={21} color={C.text} strokeWidth={2} />
               <View style={styles.itemText}>
-                <View style={styles.itemHead}>
-                  <Text style={styles.itemLabel}>{item.label}</Text>
-                  {/* The update lives inside Settings, so the dot follows it
-                      here — the one on the hamburger only says "look inside". */}
-                  {item.id === 'settings' && updateWaiting && (
-                    <View style={styles.dot} />
-                  )}
-                </View>
-                <Text style={styles.itemHint} numberOfLines={1}>
-                  {item.hint}
-                </Text>
+                <Text style={styles.itemLabel}>{item.label}</Text>
               </View>
+              {/* The update lives inside Settings, so the dot follows it here —
+                  the one on the hamburger only says "look inside". */}
+              {item.id === 'settings' && updateWaiting && (
+                <View style={styles.dot} />
+              )}
               <ChevronRight size={17} color={C.faint} />
             </TouchableOpacity>
           ))}
@@ -231,18 +216,30 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     width: W,
-    backgroundColor: C.surface,
+    // Translucent, so the app stays faintly visible behind the drawer instead
+    // of it reading as a separate opaque screen. Android has no backdrop blur
+    // without pulling in a native lib, so this is tint + the scrim doing the
+    // work — kept dark enough that every label still clears contrast.
+    backgroundColor: 'rgba(20,20,20,0.93)',
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: 'rgba(255,255,255,0.12)',
     paddingTop: 52,
     borderTopRightRadius: 18,
     borderBottomRightRadius: 18,
   },
-  brand: {
-    ...T.screenTitle,
-    color: C.text,
-    fontSize: 20,
+  // Bigger than a nav row's own icon+label — this is the one place the app
+  // introduces itself, so it earns more weight than the items under it.
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     paddingHorizontal: S.gutter,
-    marginBottom: 18,
+    marginBottom: 28,
   },
+  brandIcon: {width: 56, height: 56, borderRadius: 14},
+  brandText: {flex: 1, minWidth: 0},
+  brand: {...T.screenTitle, color: C.text, fontSize: 24, letterSpacing: 0.1},
+  brandSub: {color: C.sub, fontSize: 12.5, marginTop: 2},
   items: {flex: 1},
   item: {
     flexDirection: 'row',
@@ -252,10 +249,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   itemText: {flex: 1, minWidth: 0},
-  itemHead: {flexDirection: 'row', alignItems: 'center', gap: 7},
-  dot: {width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent},
+  dot: {width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent, marginRight: 4},
   itemLabel: {color: C.text, fontSize: 15.5, fontWeight: '700'},
-  itemHint: {color: C.sub, fontSize: 12, marginTop: 2},
   version: {
     color: C.faint,
     fontSize: 12,

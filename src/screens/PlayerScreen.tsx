@@ -63,6 +63,7 @@ import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
   isShuffled,
+  peekAdjacentTrack,
   seekTo,
   setRepeat,
   setShuffle,
@@ -89,6 +90,10 @@ import {toast} from '../toast';
 const SCREEN_H = Dimensions.get('window').height;
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
+// How far the artwork (and now the title) travels off-screen on a full swipe.
+// Shared so the title tracks the SAME motion the artwork already had — that
+// shared number is what makes them move as one thing instead of two.
+const ART_TRAVEL = 400;
 
 const PANES = [
   {id: 'song', label: 'Song', Icon: Music},
@@ -257,10 +262,14 @@ export function PlayerScreen({
   }, [visible, sheetY]);
 
   const springBack = useCallback(() => {
+    // Lower tension + higher friction than the RN default: the old spring
+    // overshot and wobbled visibly on release, which read as jittery rather
+    // than smooth for a sheet this size.
     Animated.spring(sheetY, {
       toValue: 0,
       useNativeDriver: true,
-      bounciness: 4,
+      tension: 60,
+      friction: 11,
     }).start();
   }, [sheetY]);
 
@@ -271,7 +280,9 @@ export function PlayerScreen({
         toValue: SCREEN_H,
         // A firm flick finishes quicker than a slow drag, so the sheet keeps
         // the speed the finger gave it instead of always taking the same time.
-        duration: velocity > 1.5 ? 150 : 220,
+        // Slightly longer than before — the previous timing was fast enough to
+        // read as a cut rather than a slide, especially on a slow drag.
+        duration: velocity > 1.5 ? 190 : 280,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start(({finished}) => {
@@ -310,12 +321,13 @@ export function PlayerScreen({
       // Fire the skip IMMEDIATELY so the engine advances during the animation,
       // not after it — that lag was the "old song lingers, then flips" bug.
       (dir === 'next' ? skipNext() : skipPrevious()).catch(() => {});
+      setPreviewDir(null); // the swap below IS the commit; no preview needed after
       Animated.timing(slide, {
-        toValue: dir === 'next' ? -400 : 400,
+        toValue: dir === 'next' ? -ART_TRAVEL : ART_TRAVEL,
         duration: 160,
         useNativeDriver: true,
       }).start(() => {
-        slide.setValue(dir === 'next' ? 400 : -400);
+        slide.setValue(dir === 'next' ? ART_TRAVEL : -ART_TRAVEL);
         Animated.timing(slide, {
           toValue: 0,
           duration: 240,
@@ -325,6 +337,22 @@ export function PlayerScreen({
     },
     [slide],
   );
+
+  /**
+   * Which neighbour the title/artist row is currently previewing, if any —
+   * set the moment a horizontal drag begins, so the incoming song's name is
+   * already on screen and moving with the artwork, not something that only
+   * appears once the finger lifts. Spotify shows the destination as you drag;
+   * this used to show only the CURRENT song's name until release, then jump.
+   */
+  const [previewDir, setPreviewDir] = useState<'next' | 'prev' | null>(null);
+  const previewTrack = previewDir
+    ? peekAdjacentTrack(previewDir === 'next' ? 1 : -1)
+    : null;
+  const previewTitle = previewTrack ? cleanText(String(previewTrack.title ?? '')) : '';
+  const previewArtists = previewTrack
+    ? splitArtists(String(previewTrack.artist ?? '')).join(', ')
+    : '';
 
   // The artwork owns TWO gestures: swipe LEFT/RIGHT to change song, and swipe
   // DOWN to dismiss — so the down-swipe works from the big artwork, not only the
@@ -346,12 +374,18 @@ export function PlayerScreen({
           }
           if (artAxis.current === 'h') {
             slide.setValue(g.dx * 0.55);
+            // Which neighbour is being dragged toward. Re-evaluated every move
+            // rather than locked on the first pixel, so reversing mid-drag
+            // (start left, change your mind) swaps the preview back correctly.
+            const dir = g.dx < 0 ? 'next' : g.dx > 0 ? 'prev' : null;
+            setPreviewDir(prev => (prev === dir ? prev : dir));
           } else if (g.dy > 0) {
             sheetY.setValue(g.dy);
           }
         },
         onPanResponderRelease: (_e, g) => {
           if (artAxis.current === 'v') {
+            setPreviewDir(null);
             if (g.dy > 120 || g.vy > 0.8) {
               onClose();
             } else {
@@ -364,6 +398,7 @@ export function PlayerScreen({
           } else if (g.dx >= SWIPE_COMMIT) {
             commit('prev');
           } else {
+            setPreviewDir(null);
             Animated.spring(slide, {
               toValue: 0,
               useNativeDriver: true,
@@ -372,6 +407,7 @@ export function PlayerScreen({
           }
         },
         onPanResponderTerminate: () => {
+          setPreviewDir(null);
           springBack();
           Animated.spring(slide, {toValue: 0, useNativeDriver: true}).start();
         },
@@ -523,26 +559,64 @@ export function PlayerScreen({
         </View>
 
         <View style={styles.controls}>
-          {/* Title + credits on the left, the three per-song actions right. */}
+          {/* Title + credits on the left, the three per-song actions right.
+              The text block moves with the SAME `slide` value as the artwork
+              above, so a swipe drags them as one unit instead of the title
+              sitting frozen until release. */}
           <View style={styles.metaRow}>
-            <View style={styles.meta}>
-              <Text style={styles.title} numberOfLines={1}>
-                {title}
-              </Text>
-              <View style={styles.creditRow}>
-                {/* The WHOLE credit is one target. A single name opens that
-                    profile directly; several open the picker. */}
-                <TouchableOpacity
-                  onPress={() => onOpenArtist(String(active.artist ?? ''))}
-                  activeOpacity={0.6}
-                  style={styles.artistTap}>
-                  <Text style={styles.artist} numberOfLines={1}>
-                    {artists}
+            <View style={styles.metaCarousel}>
+              <Animated.View
+                style={[styles.meta, {transform: [{translateX: slide}]}]}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {title}
+                </Text>
+                <View style={styles.creditRow}>
+                  {/* The WHOLE credit is one target. A single name opens that
+                      profile directly; several open the picker. */}
+                  <TouchableOpacity
+                    onPress={() => onOpenArtist(String(active.artist ?? ''))}
+                    activeOpacity={0.6}
+                    style={styles.artistTap}>
+                    <Text style={styles.artist} numberOfLines={1}>
+                      {artists}
+                    </Text>
+                  </TouchableOpacity>
+                  <SourceBadge track={track} />
+                  <QualityBadge track={track} />
+                </View>
+              </Animated.View>
+
+              {/* The incoming title, entering from the side you're dragging
+                  toward — same ART_TRAVEL offset the artwork uses, so the two
+                  land in sync. Rendered only mid-gesture; the real swap
+                  happens in `active` once commit() fires. */}
+              {!!previewTrack && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.meta,
+                    styles.metaPreview,
+                    {
+                      transform: [
+                        {
+                          translateX: Animated.add(
+                            slide,
+                            previewDir === 'next' ? ART_TRAVEL : -ART_TRAVEL,
+                          ),
+                        },
+                      ],
+                    },
+                  ]}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {previewTitle}
                   </Text>
-                </TouchableOpacity>
-                <SourceBadge track={track} />
-                <QualityBadge track={track} />
-              </View>
+                  <View style={styles.creditRow}>
+                    <Text style={styles.artist} numberOfLines={1}>
+                      {previewArtists}
+                    </Text>
+                  </View>
+                </Animated.View>
+              )}
             </View>
 
             <View style={styles.actions}>
@@ -909,17 +983,23 @@ const styles = StyleSheet.create({
   pane: {flex: 1, minHeight: 0},
   paneFill: {flex: 1, minHeight: 0},
   paneOff: {display: 'none'},
-  artArea: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
+  // Less inset than before — the artwork is the thing you came here to look
+  // at, and 24px of padding on both sides was taking a visible bite out of it.
+  artArea: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12},
   artHolder: {width: '100%', aspectRatio: 1, maxHeight: '100%'},
-  art: {width: '100%', height: '100%', borderRadius: 8, backgroundColor: C.surface},
+  art: {width: '100%', height: '100%', borderRadius: 10, backgroundColor: C.surface},
   artFallback: {backgroundColor: C.surfaceHi},
   tapZones: {...StyleSheet.absoluteFillObject, flexDirection: 'row'},
   tapZone: {flex: 1},
 
   controls: {paddingHorizontal: 24, paddingTop: 12, paddingBottom: 34},
   metaRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
-  meta: {flex: 1, minWidth: 0},
-  title: {fontSize: 20, fontWeight: '800', color: C.text, letterSpacing: -0.3},
+  // Clips the outgoing/incoming title pair to the row's own footprint, so a
+  // long name sliding through never spills into the action buttons beside it.
+  metaCarousel: {flex: 1, minWidth: 0, overflow: 'hidden'},
+  meta: {minWidth: 0},
+  metaPreview: {position: 'absolute', top: 0, left: 0, right: 0},
+  title: {fontSize: 23, fontWeight: '800', color: C.text, letterSpacing: -0.3},
   creditRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3},
   artistTap: {flexShrink: 1, minWidth: 0},
   artist: {...T.sub, color: C.sub, fontSize: 13},

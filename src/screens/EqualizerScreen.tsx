@@ -31,7 +31,7 @@ import {
   bandLabel,
   normalizeGains,
   presetGains,
-  resolveGains,
+  shapedGains,
 } from '../eq';
 import {useSettings, writeSetting, writeSettings} from '../store';
 import {
@@ -64,7 +64,10 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
     applyAudioEffects();
   }, [settings.eqEnabled, settings.eqPreset, settings.eqGains]);
 
-  const gains = useMemo(() => resolveGains(settings), [settings]);
+  // The SHAPE, not the applied curve. With the equalizer switched off,
+  // resolveGains returns flat — so the sliders all sat at zero and no preset
+  // chip lit up, which is why tapping a preset looked like it did nothing.
+  const gains = useMemo(() => shapedGains(settings), [settings]);
 
   const setBand = useCallback(
     (i: number, db: number) => {
@@ -81,9 +84,14 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
     (id: string) => {
       const curve = presetGains(id);
       writeSettings({
-        // Deliberately NOT flipping eqEnabled here. Choosing a preset is
-        // picking a shape, not switching the effect on — auto-enabling meant
-        // browsing the list silently changed how the music sounded.
+        // This DOES switch the equalizer on, same as dragging a band.
+        // It used not to, on the theory that browsing presets shouldn't change
+        // the sound — but you are standing in the Equalizer screen tapping a
+        // named preset. That is the intent, and the toggle is right there to
+        // undo it. Without this, picking "Bass Boost" with the effect off
+        // stored a curve that resolveGains then flattened to nothing: the exact
+        // "equalizer doesn't work" report.
+        eqEnabled: true,
         eqPreset: id,
         // Carry the current curve into Custom so the sliders keep their shape.
         eqGains: curve ? normalizeGains(curve) : normalizeGains(gains),
@@ -140,7 +148,10 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
         <Text style={styles.section}>Presets</Text>
         <View style={styles.presets}>
           {EQ_PRESETS.map(p => {
-            const on = settings.eqPreset === p.id && settings.eqEnabled;
+            // Highlight the SELECTED preset even with the effect off, so the
+            // screen visibly answers a tap. Gating this on eqEnabled meant
+            // tapping a preset lit nothing up at all.
+            const on = settings.eqPreset === p.id;
             return (
               <TouchableOpacity
                 key={p.id}

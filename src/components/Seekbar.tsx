@@ -45,6 +45,17 @@ export function Seekbar({
   const t = useRef(new Animated.Value(0)).current;
   const [label, setLabel] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
+  // Grow, don't recolor. Swapping the thumb's fill white -> accent green (and
+  // back) landed in a single frame each way — a hard color flip reads as a
+  // glitch. Size is what says "this is now grabbed"; the colour never moves.
+  const grow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(grow, {
+      toValue: scrubbing ? 1 : 0,
+      duration: scrubbing ? 120 : 180,
+      useNativeDriver: false, // animates width/height, which the driver can't
+    }).start();
+  }, [scrubbing, grow]);
 
   const widthRef = useRef(0);
   const durationRef = useRef(0);
@@ -128,8 +139,13 @@ export function Seekbar({
         <Animated.View
           style={[
             styles.thumb,
-            {left: widthPct},
-            scrubbing && styles.thumbActive,
+            {
+              left: widthPct,
+              width: grow.interpolate({inputRange: [0, 1], outputRange: [13, 17]}),
+              height: grow.interpolate({inputRange: [0, 1], outputRange: [13, 17]}),
+              marginLeft: grow.interpolate({inputRange: [0, 1], outputRange: [-6.5, -8.5]}),
+              borderRadius: grow.interpolate({inputRange: [0, 1], outputRange: [7, 9]}),
+            },
           ]}
           pointerEvents="none"
         />
@@ -154,23 +170,12 @@ const styles = StyleSheet.create({
   fill: {height: '100%', backgroundColor: C.text, borderRadius: 2},
   thumb: {
     position: 'absolute',
-    width: 13,
-    height: 13,
-    borderRadius: 7,
-    marginLeft: -6.5,
     backgroundColor: C.text,
     shadowColor: '#000',
     shadowOpacity: 0.3,
     shadowRadius: 3,
     shadowOffset: {width: 0, height: 1},
     elevation: 3,
-  },
-  thumbActive: {
-    width: 17,
-    height: 17,
-    borderRadius: 9,
-    marginLeft: -8.5,
-    backgroundColor: C.accentBright,
   },
   times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
   time: {color: C.sub, fontSize: 11, fontVariant: ['tabular-nums']},

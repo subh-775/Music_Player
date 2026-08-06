@@ -18,8 +18,13 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ExternalLink,
+  Eye,
+  Gauge,
   HardDrive,
+  Info,
+  Radio,
   RefreshCw,
+  SlidersHorizontal,
   Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -72,13 +77,42 @@ const QUALITIES = [
   {value: 320, label: 'Very High', hint: '320 kbps — best quality'},
 ];
 
-/** Flat grouped rows — a small label over hairline-separated rows, no card
- *  fills or gradients, so the screen reads calm and formal. */
-function Section({title, children}: {title: string; children: React.ReactNode}) {
+/**
+ * A settings group: a small icon + label, over one rounded card holding its
+ * rows.
+ *
+ * The flat version — a label and then rows ruled edge to edge — made the whole
+ * screen one continuous ribbon of hairlines, so no group had a visible start or
+ * end and everything read as a single undifferentiated list. A card gives each
+ * group a boundary, which is what makes it scannable.
+ *
+ * Separators are injected BETWEEN children rather than set as a border on each
+ * row, so the first row never carries a stray line under the card's top edge.
+ */
+function Section({
+  title,
+  Icon,
+  children,
+}: {
+  title: string;
+  Icon?: typeof HardDrive;
+  children: React.ReactNode;
+}) {
+  const items = React.Children.toArray(children);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
+      <View style={styles.sectionHead}>
+        {!!Icon && <Icon size={13} color={C.faint} strokeWidth={2.6} />}
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      <View style={styles.card}>
+        {items.map((child, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <View style={styles.sep} />}
+            {child}
+          </React.Fragment>
+        ))}
+      </View>
     </View>
   );
 }
@@ -206,24 +240,10 @@ function NavRow({
   );
 }
 
-export function SettingsScreen({
-  onClose,
-  initialPanel = null,
-}: {
-  onClose: () => void;
-  /** Opened straight onto a sub-screen (the drawer's "Shortcuts" entry). */
-  initialPanel?: 'equalizer' | 'tips' | 'playback' | null;
-}) {
+export function SettingsScreen({onClose}: {onClose: () => void}) {
   const [panel, setPanel] = useState<'equalizer' | 'tips' | 'playback' | null>(
-    initialPanel,
+    null,
   );
-
-  // Settings stays MOUNTED once opened, so a later "Shortcuts" from the drawer
-  // only changes this prop — without this it did nothing at all, because the
-  // useState initialiser had already run on the first open.
-  useEffect(() => {
-    setPanel(initialPanel);
-  }, [initialPanel]);
   const [resetOpen, setResetOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
   const [cacheBytes, setCacheBytes] = useState<number | null>(null);
@@ -538,7 +558,32 @@ export function SettingsScreen({
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
           bounces={false}>
-          <Section title="Media quality">
+          {/* Order is deliberate: the things you change often first, the
+              things you set once near the bottom, and the destructive one
+              last and on its own. */}
+          <Section title="Playback" Icon={SlidersHorizontal}>
+            <NavRow
+              label="Playback"
+              value={
+                settings.crossfadeDuration > 0
+                  ? `Crossfade ${settings.crossfadeDuration}s`
+                  : undefined
+              }
+              onPress={() => setPanel('playback')}
+            />
+            <NavRow
+              label="Equalizer"
+              value={
+                settings.eqEnabled
+                  ? EQ_PRESETS.find(p => p.id === settings.eqPreset)?.label ||
+                    'Custom'
+                  : 'Off'
+              }
+              onPress={() => setPanel('equalizer')}
+            />
+          </Section>
+
+          <Section title="Audio quality" Icon={Gauge}>
             <Row
               label="Streaming quality"
               value={qualityLabel}
@@ -570,43 +615,9 @@ export function SettingsScreen({
                   )}
                 </TouchableOpacity>
               ))}
-            <ToggleRow
-              label="Source badge"
-              hint="Show which source a track came from"
-              value={settings.showSourceBadge}
-              onChange={v => writeSetting('showSourceBadge', v)}
-            />
-            <ToggleRow
-              label="Quality badge"
-              hint="Show the streaming bitrate"
-              value={settings.showQualityBadge}
-              onChange={v => writeSetting('showQualityBadge', v)}
-            />
           </Section>
 
-          <Section title="Player">
-            <NavRow
-              label="Playback"
-              value={
-                settings.crossfadeDuration > 0
-                  ? `Crossfade ${settings.crossfadeDuration}s`
-                  : undefined
-              }
-              onPress={() => setPanel('playback')}
-            />
-            <NavRow
-              label="Equalizer"
-              value={
-                settings.eqEnabled
-                  ? EQ_PRESETS.find(p => p.id === settings.eqPreset)?.label ||
-                    'Custom'
-                  : 'Off'
-              }
-              onPress={() => setPanel('equalizer')}
-            />
-          </Section>
-
-          <Section title="Sources">
+          <Section title="Sources" Icon={Radio}>
             {Object.keys(sources).length === 0 && (
               <Text style={styles.folderPath}>Checking sources…</Text>
             )}
@@ -657,8 +668,22 @@ export function SettingsScreen({
               })}
           </Section>
 
-          <Section title="Storage">
-            <Text style={styles.folderPath}>Where your downloaded songs are saved</Text>
+          <Section title="Appearance" Icon={Eye}>
+            <ToggleRow
+              label="Source badge"
+              hint="Show which source a track came from"
+              value={settings.showSourceBadge}
+              onChange={v => writeSetting('showSourceBadge', v)}
+            />
+            <ToggleRow
+              label="Quality badge"
+              hint="Show the streaming bitrate"
+              value={settings.showQualityBadge}
+              onChange={v => writeSetting('showQualityBadge', v)}
+            />
+          </Section>
+
+          <Section title="Storage" Icon={HardDrive}>
             <View style={styles.row}>
               <HardDrive size={20} color={C.text} strokeWidth={1.9} />
               <View style={styles.rowText}>
@@ -716,18 +741,9 @@ export function SettingsScreen({
             </View>
           </Section>
 
-          <Section title="About & help">
-            <NavRow label="Shortcuts" onPress={() => setPanel('tips')} />
-            <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.7}
-              onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
-              <Text style={[styles.rowLabel, styles.rowText]}>Documentation</Text>
-              <ExternalLink size={18} color={C.faint} />
-            </TouchableOpacity>
-          </Section>
-
-          <Section title="Updates">
+          {/* Shortcuts used to live here as well as in the drawer. One home
+              each: gestures are in the drawer, this screen is settings. */}
+          <Section title="About" Icon={Info}>
             <View style={styles.row}>
               <RefreshCw size={19} color={C.sub} strokeWidth={2} />
               <View style={styles.rowText}>
@@ -750,6 +766,13 @@ export function SettingsScreen({
                 </TouchableOpacity>
               </View>
             </View>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
+              <Text style={[styles.rowLabel, styles.rowText]}>Documentation</Text>
+              <ExternalLink size={18} color={C.faint} />
+            </TouchableOpacity>
           </Section>
 
           <TouchableOpacity
@@ -817,32 +840,46 @@ const styles = StyleSheet.create({
   // Enough tail room that the last row clears the mini player + bottom nav —
   // the reset button was getting clipped by a small amount.
   scroll: {paddingBottom: 90},
-  section: {paddingTop: 20},
+  section: {paddingTop: 22},
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: S.gutter + 4,
+    marginBottom: 8,
+  },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 1.1,
     textTransform: 'uppercase',
     color: C.faint,
-    paddingHorizontal: S.gutter,
-    marginBottom: 4,
+  },
+  card: {
+    marginHorizontal: S.gutter,
+    borderRadius: 12,
+    backgroundColor: C.surface,
+    overflow: 'hidden',
+  },
+  sep: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.border,
+    marginLeft: 16,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: S.gutter,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     gap: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: C.border,
   },
   choice: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: S.gutter + 10,
+    paddingHorizontal: 16,
     paddingVertical: 10,
     gap: 14,
-    backgroundColor: C.surface,
+    backgroundColor: C.surfaceHi,
   },
   choiceOn: {color: C.accent},
   rowText: {flex: 1, minWidth: 0},

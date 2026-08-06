@@ -504,6 +504,12 @@ function publishStep(delta: 1 | -1): boolean {
   return true;
 }
 
+/** The track one step away in the mirror, without moving anywhere — what the
+ *  swipe-to-change-song gesture previews while the finger is still down. */
+export function peekAdjacentTrack(delta: 1 | -1): RNTPTrack | null {
+  return engineQueue[activeIndex + delta] ?? null;
+}
+
 /** The track the UI should show: optimistic on gesture, reconciled by the
  *  engine event. Drop-in replacement for RNTP's useActiveTrack. */
 export function useActiveTrack(): RNTPTrack | null {
@@ -818,8 +824,26 @@ async function handoffCrossfade(): Promise<void> {
     const pos = await crossfadePosition();
     if (pos > 0.5) {
       await TrackPlayer.seekTo(pos);
-      // Give RNTP a beat to buffer at pos while the overlap still covers sound.
-      await new Promise(r => setTimeout(r, 250));
+      // Wait for RNTP to actually be ready to play at that position, rather
+      // than a blind fixed pause. A flat 250ms was a guess: fine on a warm
+      // buffer, but on a slow network the re-buffer after the seek can run
+      // longer — and cutting the overlap before RNTP catches up is exactly the
+      // "brief silence, then the song plays" gap this used to leave, ONLY on
+      // crossfaded transitions (a plain track change never seeks mid-buffer
+      // like this). Poll briefly instead; the 250ms cap keeps the worst case
+      // no worse than before.
+      const deadline = Date.now() + 900;
+      while (Date.now() < deadline) {
+        try {
+          const {state} = await TrackPlayer.getPlaybackState();
+          if (state === State.Playing || state === State.Ready) {
+            break;
+          }
+        } catch {
+          break;
+        }
+        await new Promise(r => setTimeout(r, 60));
+      }
     }
   } catch {}
   // ORDER MATTERS. Cut the overlap BEFORE bringing RNTP back to full: both are

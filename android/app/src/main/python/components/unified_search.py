@@ -24,6 +24,26 @@ from components.fuzzy_matcher import FuzzyMatcher
 # Client imports are done lazily in _get_client() to avoid eagerly loading heavy modules
 
 
+def dropword_variants(query: str, min_words: int = 2, max_words: int = 6) -> List[str]:
+    """Every way of dropping exactly one word from `query`, in order.
+
+    A typo in an N-word query still leaves N-1 correct words, and searching
+    those against a source's own (typo-intolerant) search API is what recovers
+    a match a raw retry never would. Pure and network-free on purpose, so it is
+    testable without a live search service.
+    """
+    words = query.split()
+    if not (min_words <= len(words) <= max_words):
+        return []
+    out, seen = [], set()
+    for i in range(len(words)):
+        variant = " ".join(words[:i] + words[i + 1 :])
+        if variant and variant not in seen:
+            seen.add(variant)
+            out.append(variant)
+    return out
+
+
 @dataclass
 class SearchConfig:
     """Configuration for search behavior."""
@@ -294,6 +314,35 @@ class UnifiedSearchService:
         # actually fired in practice while it returned FEWER results. So there's
         # a single path now.
         merged = self._rank_by_relevance(self._merge_results(all_results), query)
+
+        # One typo anywhere in a multi-word query (a transliterated Hindi/Urdu
+        # title especially — "ars kiya hai" for "Arz Kiya Hai") can make every
+        # source's own search API return nothing at all, because their spelling
+        # tolerance is on THEM, not us: we only rank what comes back, and a
+        # zero-result response leaves nothing to rank. There's no dictionary
+        # here — the trick is that a typo lives in exactly one word, so the
+        # query with THAT word dropped still matches on the rest. Try each
+        # single-word-dropped variant against JioSaavn only (fastest, and the
+        # deepest catalogue for the titles this actually happens to) and merge
+        # anything found back into the pool, still ranked against the ORIGINAL
+        # query — so a variant's junk doesn't outrank a genuine near-match.
+        if len(merged) < 5 and SourceType.JIOSAAVN in config.enabled_sources:
+            variants = dropword_variants(query)
+            found_any = False
+            for variant in variants:
+                if context.is_timed_out():
+                    break
+                extra = self._search_source(
+                    SourceType.JIOSAAVN, SearchContext(query=variant, config=config)
+                )
+                if extra:
+                    all_results.setdefault(SourceType.JIOSAAVN, []).extend(extra)
+                    found_any = True
+            if found_any:
+                merged = self._rank_by_relevance(
+                    self._merge_results(all_results), query
+                )
+
         merged = merged[: config.max_total_results]
 
         if config.cache_ttl_seconds > 0:

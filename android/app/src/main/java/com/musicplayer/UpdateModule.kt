@@ -129,7 +129,13 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 lastCheckError = "Release $tag has no .apk attached"
                 null
             } else if (isNewer(tag, installed)) {
-                Release(tag, apkUrl, json.optString("body"))
+                // org.json quirk: when "body" is present but JSON null (a
+                // GitHub release with no description), optString() coerces the
+                // NULL sentinel to the literal STRING "null" rather than
+                // returning "" — which is why the popup read "null" as if it
+                // were real release notes. isNull() catches that case first.
+                val notes = if (json.isNull("body")) "" else json.optString("body")
+                Release(tag, apkUrl, notes)
             } else {
                 null // genuinely up to date — NOT an error
             }

@@ -191,10 +191,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    padding: 8,
+    // Tight, even gap on all sides — the artwork now fills almost the whole
+    // bar height instead of sitting in an 8px frame.
+    padding: 5,
     minWidth: 0,
   },
-  art: {width: 44, height: 44, borderRadius: 5, backgroundColor: C.surface},
+  art: {width: 54, height: 54, borderRadius: 8, backgroundColor: C.surface},
   artFallback: {backgroundColor: C.bg},
   text: {flex: 1, minWidth: 0},
   title: {fontSize: 13, fontWeight: '700', color: C.text, letterSpacing: 0.1},

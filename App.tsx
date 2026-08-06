@@ -12,6 +12,7 @@ import {ActivityScreen} from './src/screens/ActivityScreen';
 import {SearchScreen} from './src/screens/SearchScreen';
 import {LibraryScreen} from './src/screens/LibraryScreen';
 import {SettingsScreen} from './src/screens/SettingsScreen';
+import {TipsScreen} from './src/screens/TipsScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
 import {SpotifyImportScreen} from './src/screens/SpotifyImportScreen';
 import {ArtistScreen} from './src/screens/ArtistScreen';
@@ -85,8 +86,9 @@ function Shell() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  /** Which panel Settings should land on when opened from the drawer. */
-  const [settingsPanel, setSettingsPanel] = useState<'tips' | null>(null);
+  /** Shortcuts, opened from the drawer. Its own overlay, not nested inside
+   *  Settings — see navigateFromDrawer. */
+  const [tipsOpen, setTipsOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
@@ -314,6 +316,7 @@ function Shell() {
     setArtist(null);
     setImportUrl(null);
     setSettingsOpen(false);
+    setTipsOpen(false);
     setActivity(null);
   }, []);
 
@@ -346,6 +349,10 @@ function Shell() {
       }
       if (settingsOpen) {
         setSettingsOpen(false);
+        return true;
+      }
+      if (tipsOpen) {
+        setTipsOpen(false);
         return true;
       }
       if (activity) {
@@ -399,6 +406,7 @@ function Shell() {
     artistChoices,
     sheetTrack,
     settingsOpen,
+    tipsOpen,
     activity,
     artist,
     artistZ,
@@ -412,11 +420,15 @@ function Shell() {
 
   const navigateFromDrawer = useCallback((dest: SidebarDest) => {
     if (dest === 'settings') {
-      setSettingsPanel(null);
       setSettingsOpen(true);
     } else if (dest === 'shortcuts') {
-      setSettingsPanel('tips');
-      setSettingsOpen(true);
+      // Its OWN overlay, not a panel pushed inside Settings. It used to be —
+      // Settings would mount underneath with panel='tips' — so back from
+      // Shortcuts revealed a full Settings LIST the user never asked to open,
+      // landing them somewhere unrelated to what they tapped in the drawer.
+      // Shortcuts is reached from the drawer; its back should return to
+      // wherever the drawer was opened from, same as every other drawer item.
+      setTipsOpen(true);
     } else {
       setActivity(dest);
     }
@@ -527,10 +539,13 @@ function Shell() {
             Here it stays inside the body, so playback controls remain visible. */}
         {settingsOpen && (
           <View style={StyleSheet.absoluteFill}>
-            <SettingsScreen
-            onClose={() => setSettingsOpen(false)}
-            initialPanel={settingsPanel}
-          />
+            <SettingsScreen onClose={() => setSettingsOpen(false)} />
+          </View>
+        )}
+
+        {tipsOpen && (
+          <View style={StyleSheet.absoluteFill}>
+            <TipsScreen onClose={() => setTipsOpen(false)} />
           </View>
         )}
       </View>

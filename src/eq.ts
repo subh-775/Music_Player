@@ -61,17 +61,32 @@ export function normalizeGains(gains: number[] | null | undefined): number[] {
   });
 }
 
-/** The curve actually applied: a preset's own gains, or the user's custom ones. */
-export function resolveGains(settings: {
+type EqSettings = {
   eqEnabled?: boolean;
   eqPreset?: string;
   eqGains?: number[] | null;
-}): number[] {
+};
+
+/**
+ * The curve the user has SHAPED, whether or not the effect is switched on.
+ *
+ * This is what the sliders and the preset chips must draw from. Drawing them
+ * from resolveGains meant that with the equalizer off, every slider sat at zero
+ * and no preset chip lit up — so tapping "Bass Boost" moved nothing on screen
+ * and changed nothing in the sound. The screen looked broken because, visibly,
+ * it did nothing.
+ */
+export function shapedGains(settings: EqSettings): number[] {
+  const preset = presetGains(settings?.eqPreset || 'flat');
+  return normalizeGains(preset || settings?.eqGains);
+}
+
+/** The curve actually SENT to the hardware. Off means flat, always. */
+export function resolveGains(settings: EqSettings): number[] {
   if (!settings?.eqEnabled) {
     return FLAT;
   }
-  const preset = presetGains(settings.eqPreset || 'flat');
-  return normalizeGains(preset || settings.eqGains);
+  return shapedGains(settings);
 }
 
 export function isFlat(gains: number[]): boolean {
