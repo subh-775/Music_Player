@@ -13,7 +13,7 @@
  * the app crashing.
  */
 import {useEffect, useState, useSyncExternalStore} from 'react';
-import {AppState} from 'react-native';
+import {AppState, Image} from 'react-native';
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
@@ -382,40 +382,68 @@ export async function playTrack(
   // of only after the RNTP calls below have all been awaited.
   warmStream(items[startAt].t, bitrate);
 
+  buildingQueue = true;
+
   cancelCrossfade(); // and guarantee full volume for the fresh track
   // A brand-new queue is in the order the user picked — shuffle no longer
   // describes anything, so the icon must go back to off.
   preShuffleUpcoming = null;
   setShuffleFlag(false);
-  await TrackPlayer.reset();
-  // Add the CHOSEN track (and everything after it) FIRST, so the engine's
-  // active track is the one you tapped from the very first frame. Adding the
-  // whole list and then skip(startAt) briefly made the mini player show track 0
-  // — its artwork, title and slide — before jumping to your song.
-  await TrackPlayer.add(items.slice(startAt).map(x => x.q));
-  if (startAt > 0) {
-    // Prepend the earlier tracks so Previous still works. Inserting before
-    // index 0 shifts the active track to startAt without ever surfacing track 0.
-    await TrackPlayer.add(
-      items.slice(0, startAt).map(x => x.q),
-      0,
-    );
+
+  try {
+    await TrackPlayer.reset();
+
+    // ONLY the tapped track goes over the bridge before play() — the rest of the
+    // queue follows after the music has already started.
+    //
+    // This is the "why does starting a song from a playlist take so long" gap.
+    // Every track in the context was serialised across the RN bridge and handed
+    // to ExoPlayer BEFORE play() was even called, so tapping song 3 of a 60-track
+    // album paid for all 60 first. The wait scaled with the size of the list you
+    // happened to be looking at, which is why it felt fine from a search result
+    // and slow from an album — the same tap, wildly different delay.
+    //
+    // ExoPlayer appends and prepends to a playing queue perfectly happily, so the
+    // rest costs nothing once sound is out.
+    await TrackPlayer.add([items[startAt].q]);
+
+    // Full volume, always. Starting silent and ramping up in JS (a previous
+    // attempt at softening a Bluetooth start-of-track blip) is what left tracks
+    // stuck quiet whenever the ramp was interrupted — never trade a guaranteed
+    // silence bug for a cosmetic one.
+    await TrackPlayer.setVolume(1);
+    // Publish the tapped track immediately — waiting for the engine event showed
+    // the old song's title for a beat. The mirror is seeded from the FULL list we
+    // are about to build, not from the one-track queue that exists right now, so
+    // an instant swipe still peeks at the correct neighbour.
+    engineQueue = items.map(x => x.q as RNTPTrack);
+    activeIndex = startAt;
+    publishTrack(engineQueue[startAt] ?? null);
+    warmArtwork(startAt);
+    await TrackPlayer.play();
+
+    // The rest of the queue, now that the song is audible. After: everything the
+    // tapped track came before. Before: the earlier tracks, so Previous works —
+    // inserting at 0 shifts the active track down without ever surfacing track 0.
+    if (items.length > 1) {
+      if (startAt < items.length - 1) {
+        await TrackPlayer.add(items.slice(startAt + 1).map(x => x.q));
+      }
+      if (startAt > 0) {
+        await TrackPlayer.add(
+          items.slice(0, startAt).map(x => x.q),
+          0,
+        );
+      }
+      // The track-change event for the tapped song may already have refreshed the
+      // mirror from the one-track queue. Re-sync now that the real queue exists,
+      // or a skip straight after a tap would find nothing to skip to.
+      await refreshEngineMirror();
+    }
+  } finally {
+    // Whatever happened, autoplay must be allowed to top the queue up again.
+    buildingQueue = false;
   }
-  // Full volume, always. Starting silent and ramping up in JS (a previous
-  // attempt at softening a Bluetooth start-of-track blip) is what left tracks
-  // stuck quiet whenever the ramp was interrupted — never trade a guaranteed
-  // silence bug for a cosmetic one. Play only once the queue is FULLY built —
-  // starting mid-rebuild left a brief window where a swipe (next/previous)
-  // acted on a half-formed queue and could land on the wrong song.
-  await TrackPlayer.setVolume(1);
-  // Publish the tapped track immediately — the queue is built, so this IS what
-  // is about to sound; waiting for the engine event showed the old song's title
-  // for a beat. Also seeds the mirror so an instant swipe skips from the right
-  // place rather than from a stale index.
-  engineQueue = items.map(x => x.q as RNTPTrack);
-  activeIndex = startAt;
-  publishTrack(engineQueue[startAt] ?? null);
-  await TrackPlayer.play();
 
   // Recorded at play-START, before enrichment runs. remember() replaces an
   // existing entry rather than appending, so the cleaned-up version wins later.
@@ -525,11 +553,48 @@ function publishTrack(t: RNTPTrack | null): void {
   trackListeners.forEach(l => l());
 }
 
+/**
+ * Pull the covers around `index` into the image cache BEFORE anything renders
+ * them.
+ *
+ * Nothing did this, so every cover was fetched cold the moment its <Image>
+ * mounted — which is why swiping to the next song showed the title first and
+ * the artwork a beat (or, on a weak connection, several) later. The URLs are
+ * already sitting in the engine queue; Image.prefetch hands them to Android's
+ * own image pipeline, which is the same cache the <Image> reads from, so by the
+ * time the swipe commits the bytes are usually already local.
+ *
+ * One step back and two forward: enough for a swipe in either direction and an
+ * auto-advance, without spending a listener's data on a whole album.
+ */
+const warmedArt = new Set<string>();
+
+function warmArtwork(index: number): void {
+  for (let i = index - 1; i <= index + 2; i++) {
+    const url = engineQueue[i]?.artwork;
+    if (typeof url !== 'string' || !url || warmedArt.has(url)) {
+      continue;
+    }
+    warmedArt.add(url);
+    // Bounded: a long session must not hold every cover URL it ever saw.
+    if (warmedArt.size > 300) {
+      const oldest = warmedArt.values().next().value;
+      if (oldest !== undefined) {
+        warmedArt.delete(oldest);
+      }
+    }
+    Image.prefetch(url).catch(() => {
+      // A cover that won't load is a placeholder, never an error.
+    });
+  }
+}
+
 /** Re-read the engine's queue and index so the mirror is warm before a gesture. */
 async function refreshEngineMirror(index?: number): Promise<void> {
   try {
     engineQueue = await TrackPlayer.getQueue();
     activeIndex = index ?? (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+    warmArtwork(activeIndex);
   } catch {
     /* engine not up — the next event refreshes it */
   }
@@ -543,6 +608,9 @@ function publishStep(delta: 1 | -1): boolean {
   }
   activeIndex += delta;
   publishTrack(next);
+  // The song after the one just committed — so a second swipe in the same
+  // direction is already warm too.
+  warmArtwork(activeIndex);
   return true;
 }
 
@@ -743,9 +811,16 @@ export async function seekTo(seconds: number): Promise<void> {
  * background timer for playback upkeep.
  */
 let radioBusy = false;
+/** True only for the few milliseconds playTrack spends filling the queue in
+ *  behind an already-playing first track. */
+let buildingQueue = false;
 
 async function topUpFromRadio(): Promise<void> {
-  if (radioBusy || !readSettings().autoplay) {
+  // buildingQueue: playTrack starts the song on a one-track queue and appends
+  // the rest a moment later. Without this, a watcher tick landing in that gap
+  // sees "only one track left" and appends radio picks BETWEEN the tapped song
+  // and the rest of its own album.
+  if (radioBusy || buildingQueue || !readSettings().autoplay) {
     return;
   }
   const [queue, index] = await Promise.all([

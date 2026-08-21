@@ -212,11 +212,38 @@ build. Highest risk is the new gesture stack.
   own suggestion. `stats.ts` is the data it would need, so it's cheap to add
   later — but shipping it untested alongside 13 other changes buys nothing.
 
+### v1.0.6 batch — landed
+| # | Item | Root cause / what was actually done |
+|---|---|---|
+| 1 | Artwork slow to appear | Nothing prefetched covers — every one was fetched cold the moment its `<Image>` mounted, which is why the title arrived first and the artwork a beat later. `warmArtwork()` in `player.ts` pushes the URLs one back and two forward through `Image.prefetch` (same cache the `<Image>` reads), hooked into `refreshEngineMirror`, `publishStep` and `playTrack`. Big art and mini-player art get `fadeDuration={0}` — Android's default 300ms dissolve was being spent on an image already decoded. |
+| 2 | Play-start scaled with playlist length | `playTrack` serialised the ENTIRE context across the bridge into ExoPlayer before calling `play()`, so tapping song 3 of a 60-track album paid for all 60 first. Now only the tapped track is added before `play()`; the rest is appended and prepended behind the audio. `buildingQueue` stops the autoplay watcher injecting radio picks into that gap. Covered by `__tests__/playerQueue.test.ts` (4 cases, real `playTrack` against a fake engine). |
+| 3 | Duplicate cover download | `useArtworkColor` runs the native Palette lookup, which opens its OWN `java.net.URL` connection and downloads the full cover a second time — outside the image cache. It was un-gated, so every track change did this for a background colour behind a CLOSED sheet. Now gated on `visible`, same as the lyrics fetch. |
+| 4 | Sidebar on swipe | Non-capture `PanResponder` on Home's root: horizontal-dominant (2:1), 60px commit. Not a capture handler on purpose — a child that already claimed the touch keeps it, so the horizontal rows still scroll and the gesture only lands in the empty black space. |
+| 5 | Search history on focus | `showHistory` also required an EMPTY field, so tapping the bar after a search showed nothing — the query you just ran was still in it. Now focus alone is enough; suggestions replace it once you type 2 characters. |
+| 6 | Search results outlived the tab | The tab stays mounted (that's what makes it instant), so a query stayed on screen forever. New `visible` prop clears query/results/artists/suggestions on leave, bumping the request ticket so an in-flight search can't repopulate it. |
+| 7 | Settings re-loaded every open | It's an overlay that unmounts, so all four backend calls ran again on every reopen — "Checking sources…", dead YouTube switch, blank folder. Module-level `remote` cache seeds the initial state; the fetch still runs and overwrites. |
+| 8 | **YouTube turning itself off** | Two real defects. (a) The restore sat at the END of `_warm_up()`, behind a 10s lrclib call and a 15s test search — so for up to ~25s after every backend start the status endpoint honestly reported `enabled=false`, and opening Settings in that window showed OFF. Now `_restore_youtube()` runs synchronously before the server serves a single request. (b) `write_settings` used `write_text`, which truncates then writes — a kill or a concurrent read in that window left a truncated file, `read_settings` fell back to `{}`, and every saved preference vanished. Now temp-file + `os.replace`. |
+| 9 | Sidebar tone | `rgba(20,20,20,0.93)` floated as a grey slab over an AMOLED-black app → `rgba(8,8,8,0.97)`. |
+
+### v1.0.6 — removed, with your sign-off
+| Removed | Why it cost time |
+|---|---|
+| Boot warm-up search | Every backend start ran a real cross-source search for `"hello"` (15s budget, JioSaavn **and** SoundCloud) to warm TLS — competing with your own first search for the same connections and spending data on a result nobody sees. Replaced with constructing the clients, which buys the expensive part (the lazy imports) for free. |
+| Update check every launch | Was a GitHub round trip 3.5s into every cold start. `checkUpdateOnLaunch()` stays quiet for a day **after a confirmed all-clear only** — a `found` result never writes the timestamp, so a real release still reaches everyone on their very next launch. |
+| Search enrichment pass | A second round trip per search (iTunes/MusicBrainz, up to 25 tracks) that rewrote the whole result list a moment after it appeared. It was also the same iTunes matching behind the wrong-artwork reports. Now dead code removed: `enrichBatch`, `applyEnrichment`, `Enrichment`, `_enriched`. Trade: album/genre/release-date blanks stay blank. |
+
+### Testing
+- `__tests__/App.test.tsx` (react-native init boilerplate) was **deleted**. It
+  rendered the entire live app — audio engine, backend, timers — and had never
+  passed; making it pass meant mocking the whole native surface for zero signal.
+  `__tests__/playerQueue.test.ts` replaces it with a check that actually earns
+  its place: it guards the queue reordering above, where a mistake plays the
+  wrong song.
+- Full gate now: `npx tsc --noEmit`, `npx jest`, `npx eslint src/ App.tsx
+  __tests__/`, and `python -m py_compile` on the changed backend files.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the
   in-app updater's signature chain holds. Swapping to a real keystore forces a
   reinstall for everyone — do it deliberately, at a version boundary.
-- Verification available here is `npx tsc --noEmit` + `npx eslint src/ App.tsx`
-  only. The jest smoke test was already broken before this work (missing
-  AsyncStorage mock) and was deliberately left alone rather than half-fixed.

@@ -267,64 +267,6 @@ export function uniqueTracks(tracks: Track[] = []): Track[] {
 }
 
 /**
- * Overlay an /api/enrich payload onto a track.
- *
- * ENRICHMENT IS PURELY ADDITIVE: it fills blanks, it never overwrites what the
- * source already told us.
- *
- * It used to overwrite, and that was a real bug you could watch happen: iTunes
- * supplies 600/300 artwork keys, which outrank `source:soundcloud` in
- * ARTWORK_PRIORITY — so when iTunes matched the WRONG release (a compilation
- * carrying a "Chill Mix" of the same song), the cover and album of the track
- * you were listening to silently changed mid-play.
- *
- * A source's own metadata is authoritative. Enrichment cannot verify it matched
- * the right release, so it does not get to overrule it. The cost is that a
- * YouTube track with a junk channel-name artist keeps it — a true-but-ugly
- * artist beats a confidently wrong one.
- */
-export function applyEnrichment(track: Track, enrichment: Enrichment): Track {
-  if (!track || !enrichment) {
-    return track;
-  }
-  const hasOwnArtwork = Object.values(track.artwork_urls || {}).some(
-    u => typeof u === 'string' && u,
-  );
-  const artworkUrls = {...(track.artwork_urls || {})};
-  if (!hasOwnArtwork) {
-    for (const [size, url] of Object.entries(enrichment.artwork || {})) {
-      if (typeof url === 'string' && url) {
-        artworkUrls[size] = url;
-      }
-    }
-  }
-
-  const merged: Track = {
-    ...track,
-    artist: track.artist || cleanText(enrichment.artist),
-    album: track.album || cleanText(enrichment.album),
-    artwork_urls: artworkUrls,
-    isrc: track.isrc || enrichment.isrc || undefined,
-    release_date: track.release_date || enrichment.release_date || undefined,
-    genre: track.genre || enrichment.genre || undefined,
-    duration_ms: track.duration_ms || enrichment.duration_ms || undefined,
-    _enriched: true,
-  };
-  merged.artwork_url = getBestArtworkUrl(merged);
-  return merged;
-}
-
-export type Enrichment = {
-  artist?: string | null;
-  album?: string | null;
-  isrc?: string | null;
-  release_date?: string | null;
-  genre?: string | null;
-  duration_ms?: number | null;
-  artwork?: Record<string, string>;
-};
-
-/**
  * Split an artist credit into individual names.
  *
  * Never splits on "-", so genuine hyphenated duos survive ("Vishal-Shekhar",

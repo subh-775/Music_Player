@@ -69,6 +69,27 @@ function formatBytes(n: number): string {
   return mb < 1 ? `${Math.round(n / 1024)} KB` : `${mb.toFixed(1)} MB`;
 }
 
+/**
+ * What the last visit to this screen learned from the backend.
+ *
+ * Settings is an overlay that UNMOUNTS when closed, so every reopen started
+ * from scratch: sources showed "Checking sources…", the YouTube switch sat
+ * disabled, the download folder was blank and the cache size was missing —
+ * every single time, for as long as four backend round trips took. None of it
+ * changes between two opens a minute apart, so it is remembered here and used
+ * as the initial state; the fetch still runs and overwrites it, but the screen
+ * is already complete while that happens.
+ *
+ * Module scope, not a store: it is a cache of remote answers, not state anyone
+ * else needs to read, and it should die with the process.
+ */
+const remote: {
+  sources: Record<string, SourceStatus>;
+  downloads: DownloadsInfo | null;
+  yt: {supported: boolean; enabled: boolean} | null;
+  cacheBytes: number | null;
+} = {sources: {}, downloads: null, yt: null, cacheBytes: null};
+
 const QUALITIES = [
   {value: 0, label: 'Auto', hint: 'Adjusts to the source'},
   {value: 96, label: 'Low', hint: '96 kbps — saves data'},
@@ -197,7 +218,9 @@ function CrossfadeStepper({
     <View style={styles.row}>
       <View style={styles.rowText}>
         <Text style={styles.rowLabel}>Crossfade</Text>
-        <Text style={styles.rowHint}>Overlap the end of one song into the next</Text>
+        <Text style={styles.rowHint}>
+          Overlap the end of one song into the next
+        </Text>
       </View>
       <View style={styles.stepper}>
         <TouchableOpacity
@@ -246,13 +269,19 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   );
   const [resetOpen, setResetOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
-  const [cacheBytes, setCacheBytes] = useState<number | null>(null);
+  const [cacheBytes, setCacheBytes] = useState<number | null>(
+    remote.cacheBytes,
+  );
   const [clearing, setClearing] = useState(false);
   const {settings} = useStore();
-  const [sources, setSources] = useState<Record<string, SourceStatus>>({});
-  const [downloads, setDownloads] = useState<DownloadsInfo | null>(null);
+  const [sources, setSources] = useState<Record<string, SourceStatus>>(
+    remote.sources,
+  );
+  const [downloads, setDownloads] = useState<DownloadsInfo | null>(
+    remote.downloads,
+  );
   const [yt, setYt] = useState<{supported: boolean; enabled: boolean} | null>(
-    null,
+    remote.yt,
   );
   const [ytBusy, setYtBusy] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
@@ -289,41 +318,49 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
         getCacheSize(),
       ]);
       if (s.status === 'fulfilled') {
+        remote.sources = s.value;
         setSources(s.value);
       }
       if (d.status === 'fulfilled') {
+        remote.downloads = d.value;
         setDownloads(d.value);
       }
       if (y.status === 'fulfilled') {
+        remote.yt = y.value;
         setYt(y.value);
       }
       if (c.status === 'fulfilled') {
+        remote.cacheBytes = c.value.bytes;
         setCacheBytes(c.value.bytes);
       }
     })();
   }, []);
 
-  const toggleYt = useCallback(
-    async (next: boolean) => {
-      setYtBusy(true);
-      try {
-        const res = await setYouTubeExperimental(next);
-        setYt(v => (v ? {...v, enabled: !!res.enabled} : v));
-      } finally {
-        setYtBusy(false);
-      }
-    },
-    [],
-  );
+  const toggleYt = useCallback(async (next: boolean) => {
+    setYtBusy(true);
+    try {
+      const res = await setYouTubeExperimental(next);
+      setYt(v => {
+        const now = v ? {...v, enabled: !!res.enabled} : v;
+        remote.yt = now;
+        return now;
+      });
+    } finally {
+      setYtBusy(false);
+    }
+  }, []);
 
   const qualityLabel =
-    QUALITIES.find(q => q.value === settings.audioQuality)?.label ?? 'Very High';
+    QUALITIES.find(q => q.value === settings.audioQuality)?.label ??
+    'Very High';
   const folder = downloads?.path || downloads?.download_dir || '';
 
   /** System folder picker -> backend. The backend refuses an unwritable folder,
    *  so a bad pick fails loudly here instead of silently failing downloads. */
   const pickDownloadFolder = useCallback(async () => {
-    const native = NativeModules.Backend as {pickFolder?: () => Promise<string>};
+    const native = NativeModules.Backend as {
+      pickFolder?: () => Promise<string>;
+    };
     if (typeof native.pickFolder !== 'function') {
       toast('Folder picking needs the newest APK.');
       return;
@@ -338,7 +375,10 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
         toast(res.error || 'Could not use that folder');
         return;
       }
-      setDownloads(d => ({...(d ?? {}), ...res}));
+      setDownloads(d => {
+        remote.downloads = {...(d ?? {}), ...res};
+        return remote.downloads;
+      });
       toast('Download folder updated');
     } catch {
       toast('Could not change the folder');
@@ -349,7 +389,10 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   const useDefaultFolder = useCallback(async () => {
     try {
       const res = await setDownloadsDir('');
-      setDownloads(d => ({...(d ?? {}), ...res}));
+      setDownloads(d => {
+        remote.downloads = {...(d ?? {}), ...res};
+        return remote.downloads;
+      });
       toast('Using the default download folder');
     } catch {
       toast('Could not reset the folder');
@@ -398,11 +441,15 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     try {
       const freed = await clearBackendCache();
       clearSearchHistory();
+      remote.cacheBytes = 0;
       setCacheBytes(0);
       toast(freed > 0 ? `Cleared ${formatBytes(freed)}` : 'Cache cleared');
       // Re-read rather than assume zero — Android may hold files open.
       getCacheSize()
-        .then(r => setCacheBytes(r.bytes))
+        .then(r => {
+          remote.cacheBytes = r.bytes;
+          setCacheBytes(r.bytes);
+        })
         .catch(() => {});
     } catch {
       toast("Couldn't clear the cache");
@@ -435,7 +482,10 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     loop.start();
     return () => loop.stop();
   }, [checking, spin]);
-  const spinDeg = spin.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
+  const spinDeg = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
   const checkUpdates = useCallback(() => checkUpdate(), []);
 
   // Anything with more than a switch's worth of choice gets its OWN screen,
@@ -554,258 +604,258 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
       </View>
 
       <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          overScrollMode="never"
-          bounces={false}>
-          {/* Order is deliberate: the things you change often first, the
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        overScrollMode="never"
+        bounces={false}>
+        {/* Order is deliberate: the things you change often first, the
               things you set once near the bottom, and the destructive one
               last and on its own. */}
-          <Section title="Playback" Icon={SlidersHorizontal}>
-            <NavRow
-              label="Playback"
-              value={
-                settings.crossfadeDuration > 0
-                  ? `Crossfade ${settings.crossfadeDuration}s`
-                  : undefined
-              }
-              onPress={() => setPanel('playback')}
-            />
-            <NavRow
-              label="Equalizer"
-              value={
-                settings.eqEnabled
-                  ? EQ_PRESETS.find(p => p.id === settings.eqPreset)?.label ||
-                    'Custom'
-                  : 'Off'
-              }
-              onPress={() => setPanel('equalizer')}
-            />
-          </Section>
+        <Section title="Playback" Icon={SlidersHorizontal}>
+          <NavRow
+            label="Playback"
+            value={
+              settings.crossfadeDuration > 0
+                ? `Crossfade ${settings.crossfadeDuration}s`
+                : undefined
+            }
+            onPress={() => setPanel('playback')}
+          />
+          <NavRow
+            label="Equalizer"
+            value={
+              settings.eqEnabled
+                ? EQ_PRESETS.find(p => p.id === settings.eqPreset)?.label ||
+                  'Custom'
+                : 'Off'
+            }
+            onPress={() => setPanel('equalizer')}
+          />
+        </Section>
 
-          <Section title="Audio quality" Icon={Gauge}>
-            <Row
-              label="Streaming quality"
-              value={qualityLabel}
-              onPress={() => setQualityOpen(v => !v)}
-              hint="Higher sounds better and uses more data"
-            />
-            {qualityOpen &&
-              QUALITIES.map(q => (
-                <TouchableOpacity
-                  key={q.value}
-                  style={styles.choice}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    writeSetting('audioQuality', q.value);
-                    setQualityOpen(false);
-                  }}>
+        <Section title="Audio quality" Icon={Gauge}>
+          <Row
+            label="Streaming quality"
+            value={qualityLabel}
+            onPress={() => setQualityOpen(v => !v)}
+            hint="Higher sounds better and uses more data"
+          />
+          {qualityOpen &&
+            QUALITIES.map(q => (
+              <TouchableOpacity
+                key={q.value}
+                style={styles.choice}
+                activeOpacity={0.7}
+                onPress={() => {
+                  writeSetting('audioQuality', q.value);
+                  setQualityOpen(false);
+                }}>
+                <View style={styles.rowText}>
+                  <Text
+                    style={[
+                      styles.rowLabel,
+                      settings.audioQuality === q.value && styles.choiceOn,
+                    ]}>
+                    {q.label}
+                  </Text>
+                  <Text style={styles.rowHint}>{q.hint}</Text>
+                </View>
+                {settings.audioQuality === q.value && (
+                  <Check size={18} color={C.accent} strokeWidth={2.6} />
+                )}
+              </TouchableOpacity>
+            ))}
+        </Section>
+
+        <Section title="Sources" Icon={Radio}>
+          {Object.keys(sources).length === 0 && (
+            <Text style={styles.folderPath}>Checking sources…</Text>
+          )}
+          {Object.entries(sources)
+            .filter(([, v]) => v.type === 'audio')
+            .map(([name]) => {
+              // Same tints as the track badges, so "which source is this"
+              // reads the same everywhere.
+              const tint = SOURCE_META[name]?.tint || C.sub;
+              return name === 'youtube' ? (
+                <View key={name} style={styles.row}>
+                  <View style={[styles.dot, {backgroundColor: tint}]} />
                   <View style={styles.rowText}>
-                    <Text
-                      style={[
-                        styles.rowLabel,
-                        settings.audioQuality === q.value && styles.choiceOn,
-                      ]}>
-                      {q.label}
+                    <Text style={styles.rowLabel}>YouTube</Text>
+                    <Text style={styles.rowHint}>
+                      {ytBusy
+                        ? 'Checking this device…'
+                        : yt?.supported
+                        ? 'Adds YouTube as a search and download source. No sign-in needed.'
+                        : 'Not available on this device.'}
                     </Text>
-                    <Text style={styles.rowHint}>{q.hint}</Text>
                   </View>
-                  {settings.audioQuality === q.value && (
-                    <Check size={18} color={C.accent} strokeWidth={2.6} />
-                  )}
-                </TouchableOpacity>
-              ))}
-          </Section>
-
-          <Section title="Sources" Icon={Radio}>
-            {Object.keys(sources).length === 0 && (
-              <Text style={styles.folderPath}>Checking sources…</Text>
-            )}
-            {Object.entries(sources)
-              .filter(([, v]) => v.type === 'audio')
-              .map(([name]) => {
-                // Same tints as the track badges, so "which source is this"
-                // reads the same everywhere.
-                const tint = SOURCE_META[name]?.tint || C.sub;
-                return name === 'youtube' ? (
-                  <View key={name} style={styles.row}>
-                    <View style={[styles.dot, {backgroundColor: tint}]} />
-                    <View style={styles.rowText}>
-                      <Text style={styles.rowLabel}>YouTube</Text>
-                      <Text style={styles.rowHint}>
-                        {ytBusy
-                          ? 'Checking this device…'
-                          : yt?.supported
-                          ? 'Adds YouTube as a search and download source. No sign-in needed.'
-                          : 'Not available on this device.'}
-                      </Text>
-                    </View>
-                    <Toggle
-                      value={!!yt?.enabled}
-                      disabled={ytBusy || !yt?.supported}
-                      onChange={toggleYt}
-                    />
+                  <Toggle
+                    value={!!yt?.enabled}
+                    disabled={ytBusy || !yt?.supported}
+                    onChange={toggleYt}
+                  />
+                </View>
+              ) : (
+                <View key={name} style={styles.row}>
+                  <View style={[styles.dot, {backgroundColor: tint}]} />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>
+                      {SOURCE_META[name]?.label ||
+                        (name === 'jiosaavn' ? 'JioSaavn' : 'SoundCloud')}
+                    </Text>
+                    <Text style={styles.rowHint}>
+                      {name === 'jiosaavn'
+                        ? 'High-quality tracks and albums'
+                        : 'Remixes, sets and independent uploads'}
+                    </Text>
                   </View>
-                ) : (
-                  <View key={name} style={styles.row}>
-                    <View style={[styles.dot, {backgroundColor: tint}]} />
-                    <View style={styles.rowText}>
-                      <Text style={styles.rowLabel}>
-                        {SOURCE_META[name]?.label ||
-                          (name === 'jiosaavn' ? 'JioSaavn' : 'SoundCloud')}
-                      </Text>
-                      <Text style={styles.rowHint}>
-                        {name === 'jiosaavn'
-                          ? 'High-quality tracks and albums'
-                          : 'Remixes, sets and independent uploads'}
-                      </Text>
-                    </View>
-                    {/* Always on — these two need no setup, so the switch is a
+                  {/* Always on — these two need no setup, so the switch is a
                         frozen ON, not a status word. */}
-                    <Toggle value disabled onChange={() => {}} />
-                  </View>
-                );
-              })}
-          </Section>
-
-          <Section title="Appearance" Icon={Eye}>
-            <ToggleRow
-              label="Source badge"
-              hint="Show which source a track came from"
-              value={settings.showSourceBadge}
-              onChange={v => writeSetting('showSourceBadge', v)}
-            />
-            <ToggleRow
-              label="Quality badge"
-              hint="Show the streaming bitrate"
-              value={settings.showQualityBadge}
-              onChange={v => writeSetting('showQualityBadge', v)}
-            />
-          </Section>
-
-          <Section title="Storage" Icon={HardDrive}>
-            <View style={styles.row}>
-              <HardDrive size={20} color={C.text} strokeWidth={1.9} />
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>Downloads</Text>
-                <Text style={styles.rowHint} numberOfLines={2}>
-                  {folder ||
-                    (downloads?.using_fallback
-                      ? 'Using private app storage'
-                      : 'Not available yet')}
-                </Text>
-                <View style={styles.btnRow}>
-                  <TouchableOpacity
-                    style={styles.setBtn}
-                    onPress={pickDownloadFolder}
-                    activeOpacity={0.85}>
-                    <Text style={styles.setBtnText}>Select</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.ghostBtn}
-                    onPress={openDownloadFolder}
-                    activeOpacity={0.7}>
-                    <Text style={styles.ghostBtnText}>Open folder</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.ghostBtn}
-                    onPress={useDefaultFolder}
-                    activeOpacity={0.7}>
-                    <Text style={styles.ghostBtnText}>Use default</Text>
-                  </TouchableOpacity>
+                  <Toggle value disabled onChange={() => {}} />
                 </View>
-              </View>
-            </View>
+              );
+            })}
+        </Section>
 
-            <View style={styles.row}>
-              <Trash2 size={20} color={C.text} strokeWidth={1.9} />
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>Clear cache</Text>
-                <Text style={styles.rowHint}>
-                  {cacheBytes == null
-                    ? 'Temporary files, lyrics and search history'
-                    : `${formatBytes(
-                        cacheBytes,
-                      )} of temporary files, lyrics and search history`}
-                </Text>
+        <Section title="Appearance" Icon={Eye}>
+          <ToggleRow
+            label="Source badge"
+            hint="Show which source a track came from"
+            value={settings.showSourceBadge}
+            onChange={v => writeSetting('showSourceBadge', v)}
+          />
+          <ToggleRow
+            label="Quality badge"
+            hint="Show the streaming bitrate"
+            value={settings.showQualityBadge}
+            onChange={v => writeSetting('showQualityBadge', v)}
+          />
+        </Section>
+
+        <Section title="Storage" Icon={HardDrive}>
+          <View style={styles.row}>
+            <HardDrive size={20} color={C.text} strokeWidth={1.9} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Downloads</Text>
+              <Text style={styles.rowHint} numberOfLines={2}>
+                {folder ||
+                  (downloads?.using_fallback
+                    ? 'Using private app storage'
+                    : 'Not available yet')}
+              </Text>
+              <View style={styles.btnRow}>
                 <TouchableOpacity
-                  style={[styles.setBtn, styles.checkBtn]}
-                  onPress={() => setCacheOpen(true)}
-                  disabled={clearing}
+                  style={styles.setBtn}
+                  onPress={pickDownloadFolder}
                   activeOpacity={0.85}>
-                  <Text style={styles.setBtnText}>
-                    {clearing ? 'Clearing…' : 'Clear'}
-                  </Text>
+                  <Text style={styles.setBtnText}>Select</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.ghostBtn}
+                  onPress={openDownloadFolder}
+                  activeOpacity={0.7}>
+                  <Text style={styles.ghostBtnText}>Open folder</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.ghostBtn}
+                  onPress={useDefaultFolder}
+                  activeOpacity={0.7}>
+                  <Text style={styles.ghostBtnText}>Use default</Text>
                 </TouchableOpacity>
               </View>
             </View>
-          </Section>
+          </View>
 
-          {/* Shortcuts used to live here as well as in the drawer. One home
+          <View style={styles.row}>
+            <Trash2 size={20} color={C.text} strokeWidth={1.9} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Clear cache</Text>
+              <Text style={styles.rowHint}>
+                {cacheBytes == null
+                  ? 'Temporary files, lyrics and search history'
+                  : `${formatBytes(
+                      cacheBytes,
+                    )} of temporary files, lyrics and search history`}
+              </Text>
+              <TouchableOpacity
+                style={[styles.setBtn, styles.checkBtn]}
+                onPress={() => setCacheOpen(true)}
+                disabled={clearing}
+                activeOpacity={0.85}>
+                <Text style={styles.setBtnText}>
+                  {clearing ? 'Clearing…' : 'Clear'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Section>
+
+        {/* Shortcuts used to live here as well as in the drawer. One home
               each: gestures are in the drawer, this screen is settings. */}
-          <Section title="About" Icon={Info}>
-            <View style={styles.row}>
-              <RefreshCw size={19} color={C.sub} strokeWidth={2} />
-              <View style={styles.rowText}>
-                <View style={styles.updateHead}>
-                  <Text style={styles.rowLabel}>Installed</Text>
-                  <Text style={styles.rowValue}>{appVersion || '—'}</Text>
-                </View>
-                <Text style={styles.rowHint}>{updateStatusText}</Text>
-                <TouchableOpacity
-                  style={[styles.setBtn, styles.checkBtn]}
-                  onPress={checkUpdates}
-                  disabled={checking}
-                  activeOpacity={0.85}>
-                  <Animated.View style={{transform: [{rotate: spinDeg}]}}>
-                    <RefreshCw size={14} color={C.text} strokeWidth={2.2} />
-                  </Animated.View>
-                  <Text style={styles.setBtnText}>
-                    {checking ? 'Checking…' : 'Check again'}
-                  </Text>
-                </TouchableOpacity>
+        <Section title="About" Icon={Info}>
+          <View style={styles.row}>
+            <RefreshCw size={19} color={C.sub} strokeWidth={2} />
+            <View style={styles.rowText}>
+              <View style={styles.updateHead}>
+                <Text style={styles.rowLabel}>Installed</Text>
+                <Text style={styles.rowValue}>{appVersion || '—'}</Text>
               </View>
+              <Text style={styles.rowHint}>{updateStatusText}</Text>
+              <TouchableOpacity
+                style={[styles.setBtn, styles.checkBtn]}
+                onPress={checkUpdates}
+                disabled={checking}
+                activeOpacity={0.85}>
+                <Animated.View style={{transform: [{rotate: spinDeg}]}}>
+                  <RefreshCw size={14} color={C.text} strokeWidth={2.2} />
+                </Animated.View>
+                <Text style={styles.setBtnText}>
+                  {checking ? 'Checking…' : 'Check again'}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.7}
-              onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
-              <Text style={[styles.rowLabel, styles.rowText]}>Documentation</Text>
-              <ExternalLink size={18} color={C.faint} />
-            </TouchableOpacity>
-          </Section>
-
+          </View>
           <TouchableOpacity
-            style={styles.reset}
+            style={styles.row}
             activeOpacity={0.7}
-            onPress={() => setResetOpen(true)}>
-            <Text style={styles.resetText}>Reset all settings</Text>
-            <Text style={styles.rowHint}>
-              Puts everything back to defaults. Your library isn&apos;t touched.
-            </Text>
+            onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
+            <Text style={[styles.rowLabel, styles.rowText]}>Documentation</Text>
+            <ExternalLink size={18} color={C.faint} />
           </TouchableOpacity>
+        </Section>
 
-          <View style={styles.tail} />
-        </ScrollView>
+        <TouchableOpacity
+          style={styles.reset}
+          activeOpacity={0.7}
+          onPress={() => setResetOpen(true)}>
+          <Text style={styles.resetText}>Reset all settings</Text>
+          <Text style={styles.rowHint}>
+            Puts everything back to defaults. Your library isn&apos;t touched.
+          </Text>
+        </TouchableOpacity>
 
-        <ConfirmModal
-          visible={resetOpen}
-          title="Reset all settings?"
-          message="Everything goes back to defaults. Your library isn't touched."
-          confirmLabel="Reset"
-          danger
-          onConfirm={doReset}
-          onCancel={() => setResetOpen(false)}
-        />
+        <View style={styles.tail} />
+      </ScrollView>
 
-        <ConfirmModal
-          visible={cacheOpen}
-          title="Clear cache?"
-          message="Frees temporary files, saved lyrics and your search history. Downloads, playlists and liked songs are not touched."
-          confirmLabel="Clear"
-          onConfirm={doClearCache}
-          onCancel={() => setCacheOpen(false)}
-        />
+      <ConfirmModal
+        visible={resetOpen}
+        title="Reset all settings?"
+        message="Everything goes back to defaults. Your library isn't touched."
+        confirmLabel="Reset"
+        danger
+        onConfirm={doReset}
+        onCancel={() => setResetOpen(false)}
+      />
+
+      <ConfirmModal
+        visible={cacheOpen}
+        title="Clear cache?"
+        message="Frees temporary files, saved lyrics and your search history. Downloads, playlists and liked songs are not touched."
+        confirmLabel="Clear"
+        onConfirm={doClearCache}
+        onCancel={() => setCacheOpen(false)}
+      />
     </View>
   );
 }

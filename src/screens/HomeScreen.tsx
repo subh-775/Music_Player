@@ -1,7 +1,8 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   FlatList,
   Image,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +11,13 @@ import {
 } from 'react-native';
 import {Menu} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {getHome, waitForBackend, type HomeItem, type HomeRow, type Track} from '../backend';
+import {
+  getHome,
+  waitForBackend,
+  type HomeItem,
+  type HomeRow,
+  type Track,
+} from '../backend';
 import {Greeting} from '../components/Greeting';
 import {useRecentlyPlayed} from '../recentlyPlayed';
 import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
@@ -38,7 +45,10 @@ const homeCache = createStore<HomeRow[]>('mp.homeRows.v1', [], raw =>
 
 /** What a quick-access tile points at. Home doesn't own the tracklists — the
  *  app resolves the id, the same way it resolves a library row. */
-export type QuickDest = {kind: 'liked'} | {kind: 'downloads'} | {kind: 'playlist'; id: string};
+export type QuickDest =
+  | {kind: 'liked'}
+  | {kind: 'downloads'}
+  | {kind: 'playlist'; id: string};
 
 type Props = {
   onPickTrack: (item: HomeItem) => void;
@@ -67,8 +77,38 @@ export function HomeScreen({
   const [error, setError] = useState('');
 
   const rows = fresh ?? cachedRows;
-  const phase: 'boot' | 'ready' | 'error' =
-    rows.length ? 'ready' : error ? 'error' : 'boot';
+  const phase: 'boot' | 'ready' | 'error' = rows.length
+    ? 'ready'
+    : error
+    ? 'error'
+    : 'boot';
+
+  /**
+   * Drag right anywhere on Home to open the drawer, so the hamburger stops
+   * being the only way in.
+   *
+   * Deliberately NOT a capture handler. Without capture, a child that has
+   * already claimed the touch keeps it — so dragging a "Recently played" row
+   * still scrolls that row, and dragging vertically still scrolls the page.
+   * The gesture only lands when nothing else wanted it, which is exactly the
+   * empty black space between and around the rows.
+   *
+   * Threshold is horizontal-dominant (2:1) so a diagonal flick down the page
+   * can't be mistaken for a drawer pull.
+   */
+  const openRef = useRef(onOpenMenu);
+  openRef.current = onOpenMenu;
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) =>
+        g.dx > 14 && g.dx > Math.abs(g.dy) * 2,
+      onPanResponderRelease: (_e, g) => {
+        if (g.dx > 60 || g.vx > 0.5) {
+          openRef.current();
+        }
+      },
+    }),
+  ).current;
 
   const load = useCallback(async () => {
     setError('');
@@ -114,92 +154,96 @@ export function HomeScreen({
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.scroll}
-      showsVerticalScrollIndicator={false}
-      overScrollMode="never"
-      bounces={false}
->
-      {/* Hamburger FIRST: the drawer slides in from the left, so its handle
+    <View style={styles.fill} {...pan.panHandlers}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        overScrollMode="never"
+        bounces={false}>
+        {/* Hamburger FIRST: the drawer slides in from the left, so its handle
           belongs on the left — a right-hand button that opens a left-hand panel
           reads backwards, and it's the far corner for a right thumb. */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onOpenMenu} hitSlop={14} style={styles.gear}>
-          <Menu size={25} color={C.text} strokeWidth={2.4} />
-          {/* A waiting update has to stay findable after the popup is
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={onOpenMenu}
+            hitSlop={14}
+            style={styles.gear}>
+            <Menu size={25} color={C.text} strokeWidth={2.4} />
+            {/* A waiting update has to stay findable after the popup is
               dismissed — this is the only thing that says so. */}
-          {updateWaiting && <View style={styles.dot} />}
-        </TouchableOpacity>
-        <View style={styles.headerText}>
-          <Greeting />
+            {updateWaiting && <View style={styles.dot} />}
+          </TouchableOpacity>
+          <View style={styles.headerText}>
+            <Greeting />
+          </View>
         </View>
-      </View>
 
-      {/* Quick access. The two things everyone opens most (Liked, Downloaded)
+        {/* Quick access. The two things everyone opens most (Liked, Downloaded)
           plus the newest playlists, one tap from the top of Home instead of a
           trip through the Library tab. Two columns, so four fit above the fold
           without pushing the content rows off screen. */}
-      <View style={styles.quickGrid}>
-        <QuickTile
-          collection={likedCollection(likes)}
-          sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
-          onPress={() => onOpenQuick({kind: 'liked'})}
-        />
-        <QuickTile
-          collection={downloadsCollection([])}
-          sub="Offline"
-          onPress={() => onOpenQuick({kind: 'downloads'})}
-        />
-        {playlists.slice(0, 4).map(p => (
+        <View style={styles.quickGrid}>
           <QuickTile
-            key={p.id}
-            collection={playlistToCollection(p)}
-            sub={`${p.tracks?.length ?? 0} song${
-              (p.tracks?.length ?? 0) === 1 ? '' : 's'
-            }`}
-            onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
+            collection={likedCollection(likes)}
+            sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
+            onPress={() => onOpenQuick({kind: 'liked'})}
           />
-        ))}
-      </View>
-
-      {recent.length > 0 && (
-        <View style={styles.row}>
-          <Text style={styles.rowTitle}>Recently played</Text>
-          <FlatList
-            horizontal
-            data={recent}
-            keyExtractor={(t, i) => `${t.title}-${i}`}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rowList}
-            renderItem={({item}) => (
-              <TouchableOpacity
-                style={styles.card}
-                activeOpacity={0.7}
-                onPress={() => onPlayTrack(item, recent)}>
-                <View style={styles.artWrap}>
-                  {getBestArtworkUrl(item) ? (
-                    <Image
-                      source={{uri: getBestArtworkUrl(item)}}
-                      style={styles.art}
-                    />
-                  ) : (
-                    <View style={[styles.art, styles.artFallback]} />
-                  )}
-                </View>
-                <Text style={styles.cardTitle} numberOfLines={2}>
-                  {cleanText(item.title)}
-                </Text>
-              </TouchableOpacity>
-            )}
+          <QuickTile
+            collection={downloadsCollection([])}
+            sub="Offline"
+            onPress={() => onOpenQuick({kind: 'downloads'})}
           />
+          {playlists.slice(0, 4).map(p => (
+            <QuickTile
+              key={p.id}
+              collection={playlistToCollection(p)}
+              sub={`${p.tracks?.length ?? 0} song${
+                (p.tracks?.length ?? 0) === 1 ? '' : 's'
+              }`}
+              onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
+            />
+          ))}
         </View>
-      )}
 
-      {rows.map(row => (
-        <Row key={row.title} row={row} onPick={onPickTrack} />
-      ))}
-      <View style={styles.tail} />
-    </ScrollView>
+        {recent.length > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.rowTitle}>Recently played</Text>
+            <FlatList
+              horizontal
+              data={recent}
+              keyExtractor={(t, i) => `${t.title}-${i}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.rowList}
+              renderItem={({item}) => (
+                <TouchableOpacity
+                  style={styles.card}
+                  activeOpacity={0.7}
+                  onPress={() => onPlayTrack(item, recent)}>
+                  <View style={styles.artWrap}>
+                    {getBestArtworkUrl(item) ? (
+                      <Image
+                        source={{uri: getBestArtworkUrl(item)}}
+                        style={styles.art}
+                      />
+                    ) : (
+                      <View style={[styles.art, styles.artFallback]} />
+                    )}
+                  </View>
+                  <Text style={styles.cardTitle} numberOfLines={2}>
+                    {cleanText(item.title)}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
+
+        {rows.map(row => (
+          <Row key={row.title} row={row} onPick={onPickTrack} />
+        ))}
+        <View style={styles.tail} />
+      </ScrollView>
+    </View>
   );
 }
 
@@ -217,7 +261,10 @@ function QuickTile({
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity style={styles.quick} activeOpacity={0.7} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.quick}
+      activeOpacity={0.7}
+      onPress={onPress}>
       <CollectionArt collection={collection} size={56} />
       <View style={styles.quickText}>
         <Text style={styles.quickLabel} numberOfLines={1}>
@@ -263,7 +310,10 @@ function Card({item, onPick}: {item: HomeItem; onPick: (i: HomeItem) => void}) {
       onPress={() => onPick(item)}>
       <View style={styles.artWrap}>
         {item.image ? (
-          <Image source={{uri: upgradeArtwork(item.image)}} style={styles.art} />
+          <Image
+            source={{uri: upgradeArtwork(item.image)}}
+            style={styles.art}
+          />
         ) : (
           <View style={[styles.art, styles.artFallback]} />
         )}
@@ -283,6 +333,7 @@ function Card({item, onPick}: {item: HomeItem; onPick: (i: HomeItem) => void}) {
 const CARD = 138;
 
 const styles = StyleSheet.create({
+  fill: {flex: 1},
   scroll: {paddingBottom: 24},
   header: {
     flexDirection: 'row',

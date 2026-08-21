@@ -4,7 +4,7 @@
  * Three states, in the order you meet them:
  *   empty field  → recent searches
  *   typing       → suggestions (debounced, cheap, JioSaavn-only server-side)
- *   submitted    → full cross-source results, then enriched once
+ *   submitted    → full cross-source results, final as soon as they land
  *
  * A Spotify playlist/album link pasted into the field is detected and offered
  * as an import rather than searched for as text.
@@ -25,7 +25,6 @@ import {
 import {Clock, Search as SearchIcon, X} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
-  enrichBatch,
   getGenres,
   getSuggestions,
   search,
@@ -37,13 +36,9 @@ import {
   type Track,
 } from '../backend';
 import {useStats} from '../stats';
-import {applyEnrichment, normalizeTracks, type Enrichment} from '../tracks';
+import {normalizeTracks} from '../tracks';
 import {TrackRow} from '../components/TrackRow';
-import {
-  forgetSearch,
-  rememberSearch,
-  useSearchHistory,
-} from '../searchHistory';
+import {forgetSearch, rememberSearch, useSearchHistory} from '../searchHistory';
 
 /** A public Spotify playlist/album link (or spotify: URI). */
 export function isSpotifyUrl(text: string): boolean {
@@ -60,18 +55,31 @@ const DEBOUNCE_MS = 180;
  *  given tile the same colour across launches — a random one per render made
  *  the grid flicker on every re-render. */
 const TILE_COLORS = [
-  '#1E3264', '#E8115B', '#148A08', '#8D67AB', '#B95D06',
-  '#0D73EC', '#503750', '#477D95', '#777777', '#E13300',
+  '#1E3264',
+  '#E8115B',
+  '#148A08',
+  '#8D67AB',
+  '#B95D06',
+  '#0D73EC',
+  '#503750',
+  '#477D95',
+  '#777777',
+  '#E13300',
 ];
 const tileColor = (i: number) => TILE_COLORS[i % TILE_COLORS.length];
 
 export function SearchScreen({
+  visible,
   onPickTrack,
   onImportSpotify,
   onMenu,
   onOpenArtist,
   onOpenBrowse,
 }: {
+  /** Whether the Search tab is the one on screen. The tab stays MOUNTED when
+   *  you leave it (that's what keeps it instant to come back to), so leaving is
+   *  the only signal there is that the search is over. */
+  visible: boolean;
   onPickTrack: (track: Track, context: Track[]) => void;
   onImportSpotify: (url: string) => void;
   onMenu: (track: Track) => void;
@@ -124,27 +132,21 @@ export function SearchScreen({
         rememberSearch(text);
       }
 
-      // Enrich AFTER render, once, so results appear instantly and clean
-      // metadata fills in a moment later. applyEnrichment only fills blanks —
-      // it never overwrites what the source already said.
-      if (found.length) {
-        enrichBatch(found)
-          .then(list => {
-            if (ticket !== latest.current || !Array.isArray(list)) {
-              return;
-            }
-            setResults(prev =>
-              prev.map((t, i) =>
-                list[i] && !t._enriched
-                  ? applyEnrichment(t, list[i] as Enrichment)
-                  : t,
-              ),
-            );
-          })
-          .catch(() => {
-            // Enrichment is best-effort; the results are already usable.
-          });
-      }
+      // No enrichment pass here any more.
+      //
+      // It used to fire a SECOND network round trip per search (iTunes and
+      // MusicBrainz, for up to 25 tracks) and then rewrite the whole result
+      // list, re-rendering every row and re-fetching any artwork it changed —
+      // all to fill blanks in fields the source had usually already given us.
+      // The visible cost was a list that shuffled and reloaded a moment after
+      // it appeared; the invisible one was data spent on every search.
+      //
+      // The trade is real and deliberate: album, genre and release-date blanks
+      // now stay blank, and covers are whatever the source gave. Titles and
+      // artists are already cleaned locally (normalizeTracks), and the artwork
+      // resolution that actually mattered lives in the backend's own merge —
+      // the enrichment pass was the same iTunes matching that put "Phir Se Ud
+      // Chala" artwork on a different song from the same album.
     } catch (e) {
       if (ticket === latest.current) {
         setError(e instanceof Error ? e.message : String(e));
@@ -176,6 +178,32 @@ export function SearchScreen({
     return () => clearTimeout(id);
   }, [query]);
 
+  /**
+   * Leaving the tab ends the search.
+   *
+   * The tab is kept mounted so returning to it is instant, but that also meant
+   * a query typed once stayed on screen forever: play a song, go to Library,
+   * come back — and the old result list was still there instead of the artists
+   * and genres this screen is supposed to open on. Clearing here puts it back
+   * in its idle state without giving up the mounted-tab speed.
+   *
+   * `latest` is bumped so a search still in flight can't land afterwards and
+   * repopulate the list we just cleared.
+   */
+  useEffect(() => {
+    if (visible) {
+      return;
+    }
+    latest.current++;
+    setQuery('');
+    setResults([]);
+    setArtists([]);
+    setSuggestions([]);
+    setError('');
+    setBusy(false);
+    setFocused(false);
+  }, [visible]);
+
   // Browse tiles load once, lazily — nobody needs them until the field is idle,
   // and they're cached server-side for 6h anyway.
   useEffect(() => {
@@ -191,10 +219,20 @@ export function SearchScreen({
 
   const spotify = isSpotifyUrl(query);
   const idle = !query.trim() && !results.length;
-  // History belongs to the moment you're about to type — on focus, the way
-  // Spotify does it. Idle and unfocused shows something to explore instead.
-  const showHistory = !query.trim() && focused && history.length > 0;
   const showSuggestions = !!suggestions.length && !busy;
+  /**
+   * Recent searches, whenever the field has focus and there is nothing more
+   * specific to show.
+   *
+   * This used to also require an EMPTY field — which is why tapping the search
+   * bar after a search showed nothing: the query you just ran was still in it,
+   * so the condition was false and the old results stayed put. Tapping the
+   * field means "I'm about to search for something else", and the recent list
+   * is the answer to that. Typing two characters brings suggestions in over the
+   * top of it, so the history is never in the way.
+   */
+  const showHistory =
+    focused && !busy && !spotify && !showSuggestions && history.length > 0;
   // Whenever there's nothing else to show. Focusing with no history to offer
   // would otherwise leave a blank screen under the keyboard.
   const showBrowse = idle && !busy && !spotify && !showHistory;
@@ -295,7 +333,10 @@ export function SearchScreen({
                 runSearch(q);
               }}>
               {item.artwork_url ? (
-                <Image source={{uri: item.artwork_url}} style={styles.suggestionArt} />
+                <Image
+                  source={{uri: item.artwork_url}}
+                  style={styles.suggestionArt}
+                />
               ) : (
                 <View style={[styles.suggestionArt, styles.suggestionArtEmpty]}>
                   <SearchIcon size={16} color={C.faint} />
@@ -337,7 +378,10 @@ export function SearchScreen({
                     activeOpacity={0.75}
                     onPress={() => onOpenArtist(item.name)}>
                     {item.image ? (
-                      <Image source={{uri: item.image}} style={styles.artistPfp} />
+                      <Image
+                        source={{uri: item.image}}
+                        style={styles.artistPfp}
+                      />
                     ) : (
                       <View style={[styles.artistPfp, styles.artistPfpEmpty]}>
                         <Text style={styles.artistInitial}>
@@ -368,10 +412,7 @@ export function SearchScreen({
                       {g.name || g.title}
                     </Text>
                     {!!g.image && (
-                      <Image
-                        source={{uri: g.image}}
-                        style={styles.tileArt}
-                      />
+                      <Image source={{uri: g.image}} style={styles.tileArt} />
                     )}
                   </TouchableOpacity>
                 ))}
@@ -409,7 +450,10 @@ export function SearchScreen({
                       activeOpacity={0.75}
                       onPress={() => onOpenArtist(item.name)}>
                       {item.image ? (
-                        <Image source={{uri: item.image}} style={styles.artistPfp} />
+                        <Image
+                          source={{uri: item.image}}
+                          style={styles.artistPfp}
+                        />
                       ) : (
                         <View style={[styles.artistPfp, styles.artistPfpEmpty]}>
                           <Text style={styles.artistInitial}>
@@ -515,7 +559,12 @@ const styles = StyleSheet.create({
   },
   artistStrip: {paddingHorizontal: S.gutter, gap: 16, paddingBottom: 6},
   artistCard: {width: 84, alignItems: 'center'},
-  artistPfp: {width: 76, height: 76, borderRadius: 38, backgroundColor: C.surface},
+  artistPfp: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: C.surface,
+  },
   artistPfpEmpty: {
     alignItems: 'center',
     justifyContent: 'center',

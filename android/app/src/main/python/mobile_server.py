@@ -1839,36 +1839,49 @@ def spa_assets(filename):
 # ──────────────────────────────────────────────────────────────────────────────
 # Lifecycle — called from Kotlin
 # ──────────────────────────────────────────────────────────────────────────────
-def _warm_up():
-    """Pay the cold-start costs in the background so the user's FIRST search and
-    FIRST lyrics lookup are already warm (lazy imports, SoundCloud client_id
-    resolution, TLS handshakes). Best-effort; never blocks startup."""
-    try:
-        _lyrics_session.get("https://lrclib.net/api/search",
-                            params={"q": "hello"}, timeout=10)
-    except Exception:
-        pass
-    try:
-        cfg = replace(
-            _search_service.config, max_total_results=5,
-            enabled_sources=PLAYABLE_SEARCH_SOURCES, timeout_seconds=15.0,
-        )
-        _search_service.search("hello", cfg)
-    except Exception:
-        pass
+def _restore_youtube() -> None:
+    """Re-apply the saved YouTube toggle. Cheap: is_supported() only checks that
+    the extractor class loads — no network, no extraction — so this runs BEFORE
+    the server starts serving rather than on the warm-up thread.
 
-    # Restore experimental YouTube if the user had it on. We trust the previous
-    # on-device self-test rather than re-running it at every boot (it's slow),
-    # and register the provider here. Fully guarded: if the engine is gone, the
-    # source is simply added but returns nothing — never a crash.
+    It used to sit at the END of _warm_up(), behind an lrclib request (10s
+    timeout) and a full test search (15s). For up to ~25s after every backend
+    start, GET /api/youtube/experimental honestly reported enabled=False — so
+    opening Settings inside that window showed the switch OFF, and the user
+    turned "back on" something that was never off in their settings file. That
+    window is the whole bug: it explains why it looked random (it depended only
+    on how fast Settings was opened) and why it recurred without them changing
+    anything.
+    """
     try:
-        if android_env.read_settings().get("youtube_experimental"):
-            import newpipe_yt
-            if newpipe_yt.is_supported():
-                _set_youtube(True)
-                print("[backend] YouTube restored")
+        if not android_env.read_settings().get("youtube_experimental"):
+            return
+        import newpipe_yt
+        if newpipe_yt.is_supported():
+            _set_youtube(True)
+            print("[backend] YouTube restored")
     except Exception as e:
         print(f"[backend] YouTube restore skipped: {e}")
+
+
+def _warm_up():
+    """Pay the cold-start IMPORT costs in the background, so the user's first
+    search doesn't also pay for loading the source clients. Best-effort; never
+    blocks startup.
+
+    This used to run a real cross-source search for "hello" — a 15s-budget
+    network call to JioSaavn AND SoundCloud on every single backend start. It
+    warmed the clients, but it did so by competing with the user's own first
+    search for the same connections and spending their data on a result nobody
+    would ever see. Constructing the clients gets the expensive part (the lazy
+    module imports) for free; the connection warms itself on the first real
+    query a moment later.
+    """
+    for source in PLAYABLE_SEARCH_SOURCES:
+        try:
+            _search_service._get_client(source)
+        except Exception:
+            pass
 
 
 def start_server(files_dir: str, downloads_dir: str, web_dir: str,
@@ -1901,6 +1914,10 @@ def start_server(files_dir: str, downloads_dir: str, web_dir: str,
     _download_manager.start()
     _enricher = MetadataEnricher()
     _download_manager.set_finalizer(_finalize_track_info)
+
+    # Before the first request can be served, so the toggle never reads as OFF
+    # while the saved setting says ON.
+    _restore_youtube()
 
     threading.Thread(target=_warm_up, daemon=True).start()
 

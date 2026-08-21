@@ -10,7 +10,22 @@
  */
 import {useSyncExternalStore} from 'react';
 import {NativeEventEmitter, NativeModules} from 'react-native';
+import {createStore} from './storage';
 import {diag} from './diag';
+
+/**
+ * When we last confirmed there was NOTHING new — and deliberately only that.
+ *
+ * A "found" result never writes here, so an update that is genuinely waiting is
+ * re-checked on every single launch and the popup keeps appearing until it is
+ * installed. Only "you're up to date" earns the day of quiet, which is the
+ * answer nothing is lost by not asking for again.
+ */
+const lastAllClear = createStore<number>('mp.updateAllClearAt.v1', 0, raw =>
+  typeof raw === 'number' && raw > 0 ? raw : 0,
+);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type UpdaterNative = {
   check?: () => Promise<boolean>;
@@ -79,6 +94,9 @@ function ensureRegistered() {
         ? `check failed: ${res.error}`
         : `up to date (${res?.installed || '?'})`,
     );
+    if (!res?.available && !failed) {
+      lastAllClear.set(Date.now());
+    }
     state = {
       ...state,
       info: res,
@@ -137,6 +155,22 @@ export function checkUpdate(): void {
     state = {...state, phase: 'failed', error: String(e)};
     emit();
   });
+}
+
+/**
+ * The launch check. Identical to checkUpdate, except it stays quiet for a day
+ * after a confirmed all-clear — so a cold start doesn't spend a GitHub round
+ * trip re-learning that nothing has changed since an hour ago.
+ *
+ * It does NOT throttle when an update is actually waiting (see lastAllClear),
+ * so a release still reaches everyone on their very next launch.
+ */
+export function checkUpdateOnLaunch(): void {
+  if (Date.now() - lastAllClear.get() < DAY_MS) {
+    diag('update', 'launch check skipped — all clear less than a day ago');
+    return;
+  }
+  checkUpdate();
 }
 
 /** Begin downloading + installing (the user still confirms the OS install). */

@@ -209,20 +209,24 @@ export function Sidebar({
 }
 
 const styles = StyleSheet.create({
-  scrim: {...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)'},
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
   panel: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
     width: W,
-    // Translucent, so the app stays faintly visible behind the drawer instead
-    // of it reading as a separate opaque screen. Android has no backdrop blur
-    // without pulling in a native lib, so this is tint + the scrim doing the
-    // work — kept dark enough that every label still clears contrast.
-    backgroundColor: 'rgba(20,20,20,0.93)',
+    // Nearly black, barely translucent. The lighter grey it used to be
+    // (rgba(20,20,20,0.93)) floated as a visibly separate grey slab over an
+    // AMOLED-black app; sitting this close to the background makes the panel
+    // read as the app itself sliding aside, and the labels gain contrast rather
+    // than lose it. The hairline edge is what still separates it from the page.
+    backgroundColor: 'rgba(8,8,8,0.97)',
     borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: 'rgba(255,255,255,0.12)',
+    borderRightColor: 'rgba(255,255,255,0.10)',
     paddingTop: 52,
     borderTopRightRadius: 18,
     borderBottomRightRadius: 18,
@@ -249,7 +253,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   itemText: {flex: 1, minWidth: 0},
-  dot: {width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent, marginRight: 4},
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: C.accent,
+    marginRight: 4,
+  },
   itemLabel: {color: C.text, fontSize: 15.5, fontWeight: '700'},
   version: {
     color: C.faint,

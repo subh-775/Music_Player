@@ -24,7 +24,9 @@ export function apiUrl(path: string): string {
   if (!token) {
     return url;
   }
-  return `${url}${url.includes('?') ? '&' : '?'}_t=${encodeURIComponent(token)}`;
+  return `${url}${url.includes('?') ? '&' : '?'}_t=${encodeURIComponent(
+    token,
+  )}`;
 }
 
 /** GET an /api endpoint as JSON. Throws on a non-2xx or a network error. */
@@ -90,8 +92,6 @@ export type Track = {
   isrc?: string;
   release_date?: string;
   genre?: string;
-  /** Set once /api/enrich has been applied — the guard against re-enriching. */
-  _enriched?: boolean;
   /** Set on autoplay/radio picks, so the queue can label them "Recommended". */
   _autoplay?: boolean;
 };
@@ -189,7 +189,9 @@ export async function getLyrics(
   // .toString() throws "not implemented", which made every lyrics call fail
   // before the request even left the app — "No lyrics found" for every song.
   const cleanTitle = cleanForLyrics(title);
-  let q = `title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(artist)}`;
+  let q = `title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(
+    artist,
+  )}`;
   if (durationMs) {
     q += `&duration=${Math.round(durationMs / 1000)}`;
   }
@@ -224,7 +226,9 @@ export async function getAlbum(
 ): Promise<Collection> {
   // Hand-built for the same Hermes reason as getLyrics — the stub
   // URLSearchParams broke every album-by-name open (artist page albums).
-  let q = `name=${encodeURIComponent(name)}&artist=${encodeURIComponent(artist)}`;
+  let q = `name=${encodeURIComponent(name)}&artist=${encodeURIComponent(
+    artist,
+  )}`;
   if (songUrl) {
     q += `&song_url=${encodeURIComponent(songUrl)}`;
   }
@@ -332,7 +336,9 @@ export type SourceStatus = {
  * which in turn meant the YouTube toggle was never reachable, which is why
  * YouTube never appeared in search results.
  */
-export async function getSourcesStatus(): Promise<Record<string, SourceStatus>> {
+export async function getSourcesStatus(): Promise<
+  Record<string, SourceStatus>
+> {
   const data = await apiGet<{sources?: Record<string, SourceStatus>}>(
     '/sources/status',
   );
@@ -379,40 +385,6 @@ export async function getSuggestions(
     `/search/suggestions?q=${encodeURIComponent(q)}&limit=${limit}`,
   );
   return Array.isArray(data.suggestions) ? data.suggestions : [];
-}
-
-// ─── Enrichment ─────────────────────────────────────────────────────────────
-
-/**
- * Batch iTunes metadata lookup. Results come back in the SAME ORDER as the
- * tracks sent (the backend uses executor.map for exactly this), which is how
- * the caller aligns them without needing an id per row.
- *
- * Call this at most once per track — see applyEnrichment's `_enriched` flag.
- */
-export async function enrichBatch(
-  tracks: Track[],
-): Promise<Array<Record<string, unknown> | null>> {
-  if (!tracks.length) {
-    return [];
-  }
-  const res = await fetch(apiUrl('/enrich'), {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      tracks: tracks.map(t => ({
-        title: t.title,
-        artist: t.artist,
-        isrc: t.isrc,
-        duration_ms: t.duration_ms,
-      })),
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`enrich -> HTTP ${res.status}`);
-  }
-  const data = (await res.json()) as {results?: Array<Record<string, unknown> | null>};
-  return Array.isArray(data.results) ? data.results : [];
 }
 
 // ─── Spotify import ─────────────────────────────────────────────────────────

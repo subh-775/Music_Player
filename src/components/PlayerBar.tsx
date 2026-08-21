@@ -18,13 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  Bluetooth,
-  Headphones,
-  Heart,
-  Pause,
-  Play,
-} from 'lucide-react-native';
+import {Bluetooth, Headphones, Heart, Pause, Play} from 'lucide-react-native';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {Marquee} from './Marquee';
@@ -107,36 +101,41 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
       {...pan.panHandlers}>
       {/* The BAR and ARTWORK stay put; only the title travels. */}
       <View style={styles.slider}>
-      <TouchableOpacity
-        style={styles.main}
-        activeOpacity={0.85}
-        onPress={onExpand}>
-        {artwork ? (
-          <Image key={artwork} source={{uri: artwork}} style={styles.art} />
-        ) : (
-          <View style={[styles.art, styles.artFallback]} />
-        )}
-
-        <Animated.View
-          style={[styles.text, {transform: [{translateX: titleSlide}]}]}>
-          <Marquee
-            text={cleanText(String(active.title ?? ''))}
-            style={styles.title}
-          />
-          {output ? (
-            <View style={styles.outputRow}>
-              <Bluetooth size={10} color={C.accent} />
-              <Text style={styles.output} numberOfLines={1}>
-                {output}
-              </Text>
-            </View>
+        <TouchableOpacity
+          style={styles.main}
+          activeOpacity={0.85}
+          onPress={onExpand}>
+          {artwork ? (
+            <Image
+              key={artwork}
+              source={{uri: artwork}}
+              style={styles.art}
+              fadeDuration={0}
+            />
           ) : (
-            <Text style={styles.artist} numberOfLines={1}>
-              {cleanText(String(active.artist ?? ''))}
-            </Text>
+            <View style={[styles.art, styles.artFallback]} />
           )}
-        </Animated.View>
-      </TouchableOpacity>
+
+          <Animated.View
+            style={[styles.text, {transform: [{translateX: titleSlide}]}]}>
+            <Marquee
+              text={cleanText(String(active.title ?? ''))}
+              style={styles.title}
+            />
+            {output ? (
+              <View style={styles.outputRow}>
+                <Bluetooth size={10} color={C.accent} />
+                <Text style={styles.output} numberOfLines={1}>
+                  {output}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.artist} numberOfLines={1}>
+                {cleanText(String(active.artist ?? ''))}
+              </Text>
+            )}
+          </Animated.View>
+        </TouchableOpacity>
       </View>
 
       {/* Headphones, like, play — evenly spaced and all on the same optical
@@ -144,7 +143,9 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           the other two don't shuffle sideways the moment a headset connects. */}
       <View style={styles.controls}>
         <View style={styles.ctl}>
-          {!!output && <Headphones size={22} color={C.accent} strokeWidth={2} />}
+          {!!output && (
+            <Headphones size={22} color={C.accent} strokeWidth={2} />
+          )}
         </View>
 
         <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.ctl}>
@@ -163,7 +164,12 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
           {playing ? (
             <Pause size={26} color={C.text} fill={C.text} />
           ) : (
-            <Play size={26} color={C.text} fill={C.text} style={styles.playNudge} />
+            <Play
+              size={26}
+              color={C.text}
+              fill={C.text}
+              style={styles.playNudge}
+            />
           )}
         </TouchableOpacity>
       </View>
@@ -201,7 +207,12 @@ const styles = StyleSheet.create({
   text: {flex: 1, minWidth: 0},
   title: {fontSize: 13, fontWeight: '700', color: C.text, letterSpacing: 0.1},
   artist: {fontSize: 12, color: C.sub, marginTop: 1.5},
-  outputRow: {flexDirection: 'row', alignItems: 'center', gap: 3.5, marginTop: 2},
+  outputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3.5,
+    marginTop: 2,
+  },
   output: {fontSize: 10.5, fontWeight: '600', color: C.accent, flexShrink: 1},
   controls: {
     flexDirection: 'row',

@@ -16,13 +16,7 @@
  * The pane toggles sit ABOVE the transport rather than in the header, so the
  * play controls never move when you switch panes.
  */
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -132,7 +126,8 @@ export function PlayerScreen({
     null,
   );
   const position =
-    seekEcho && Math.abs(enginePosition - seekEcho.to) > 1.2 &&
+    seekEcho &&
+    Math.abs(enginePosition - seekEcho.to) > 1.2 &&
     Date.now() - seekEcho.at < 1500
       ? seekEcho.to
       : enginePosition;
@@ -151,8 +146,20 @@ export function PlayerScreen({
 
   // The screen takes on the song's colour, darkened hard enough that every
   // label keeps contrast. Falls back to plain black when unknown.
+  //
+  // Only while the sheet is OPEN. The palette lookup is a full second download
+  // of the cover on its own native connection — it does not share the image
+  // cache the artwork itself uses — so leaving it un-gated meant every track
+  // change downloaded its artwork twice, forever, for a background colour
+  // behind a screen that was closed. On a weak connection that duplicate was
+  // competing for bandwidth with the audio and with the cover being shown.
+  // Same reasoning as the lyrics fetch just below.
   const tint = useArtworkColor(
-    track ? getBestArtworkUrl(track) : String(active?.artwork ?? '') || undefined,
+    visible
+      ? track
+        ? getBestArtworkUrl(track)
+        : String(active?.artwork ?? '') || undefined
+      : undefined,
   );
 
   // Fetched here, not inside the pane: the tab bar has to know whether this
@@ -349,7 +356,9 @@ export function PlayerScreen({
   const previewTrack = previewDir
     ? peekAdjacentTrack(previewDir === 'next' ? 1 : -1)
     : null;
-  const previewTitle = previewTrack ? cleanText(String(previewTrack.title ?? '')) : '';
+  const previewTitle = previewTrack
+    ? cleanText(String(previewTrack.title ?? ''))
+    : '';
   const previewArtists = previewTrack
     ? splitArtists(String(previewTrack.artist ?? '')).join(', ')
     : '';
@@ -369,8 +378,7 @@ export function PlayerScreen({
         },
         onPanResponderMove: (_e, g) => {
           if (!artAxis.current) {
-            artAxis.current =
-              Math.abs(g.dx) > Math.abs(g.dy) ? 'h' : 'v';
+            artAxis.current = Math.abs(g.dx) > Math.abs(g.dy) ? 'h' : 'v';
           }
           if (artAxis.current === 'h') {
             slide.setValue(g.dx * 0.55);
@@ -471,7 +479,9 @@ export function PlayerScreen({
     return null;
   }
 
-  const artwork = track ? getBestArtworkUrl(track) : String(active.artwork ?? '');
+  const artwork = track
+    ? getBestArtworkUrl(track)
+    : String(active.artwork ?? '');
   const title = cleanText(String(active.title ?? ''));
   const artists = splitArtists(String(active.artist ?? '')).join(', ');
   const album = track?.album ? cleanText(track.album) : '';
@@ -494,263 +504,296 @@ export function PlayerScreen({
           That is why the queue's drag-to-reorder did nothing: the list was
           correct, the gestures simply never reached it. */}
       <GestureHandlerRootView style={styles.ghRoot}>
-      <Animated.View
-        style={[
-          styles.wrap,
-          !!tint && {backgroundColor: toward(tint, 0.72)},
-          {transform: [{translateY: sheetY}]},
-        ]}>
-        {/* Header — close on the left, what you're inside of in the middle.
+        <Animated.View
+          style={[
+            styles.wrap,
+            !!tint && {backgroundColor: toward(tint, 0.72)},
+            {transform: [{translateY: sheetY}]},
+          ]}>
+          {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
-        <View style={styles.topBar} {...dismissPan.panHandlers}>
-          <TouchableOpacity
-            onPress={() => close()}
-            hitSlop={14}
-            style={styles.iconBtn}>
-            <ChevronDown size={26} color={C.text} />
-          </TouchableOpacity>
-          <Text style={styles.context} numberOfLines={1}>
-            {album || 'Now playing'}
-          </Text>
-          {/* Balances the close button so the label stays centred. */}
-          <View style={styles.iconBtn} />
-        </View>
+          <View style={styles.topBar} {...dismissPan.panHandlers}>
+            <TouchableOpacity
+              onPress={() => close()}
+              hitSlop={14}
+              style={styles.iconBtn}>
+              <ChevronDown size={26} color={C.text} />
+            </TouchableOpacity>
+            <Text style={styles.context} numberOfLines={1}>
+              {album || 'Now playing'}
+            </Text>
+            {/* Balances the close button so the label stays centred. */}
+            <View style={styles.iconBtn} />
+          </View>
 
-        {/* The only flexible row: it shrinks and scrolls rather than pushing
+          {/* The only flexible row: it shrinks and scrolls rather than pushing
             the controls below the fold. */}
-        <View style={styles.pane}>
-          {/* Lyrics and queue stay MOUNTED and are shown/hidden — remounting
+          <View style={styles.pane}>
+            {/* Lyrics and queue stay MOUNTED and are shown/hidden — remounting
               re-ran their whole load every pane switch, which is the 1-2s
               "loading again" the pane tabs kept showing. */}
-          <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
-            <LyricsPane state={lyricsState} position={position} visible={pane === 'lyrics'} />
-          </View>
-          <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
-            <QueuePane />
-          </View>
-          {pane === 'song' && (
-            <View style={styles.artArea} {...pan.panHandlers}>
-              <Animated.View
-                style={[styles.artHolder, {transform: [{translateX: slide}]}]}
-                pointerEvents="none">
-                {artwork ? (
-                  // Keyed by the URL: when the song changes, React swaps in a
-                  // FRESH Image rather than reusing the old element (which held
-                  // the previous cover visible until the new one decoded — the
-                  // "previous artwork for a few ms" flash).
-                  <Image key={artwork} source={{uri: artwork}} style={styles.art} />
-                ) : (
-                  <View style={[styles.art, styles.artFallback]} />
-                )}
-              </Animated.View>
-
-              {/* Double-tap zones over the artwork edges. They claim a TAP
-                  only — the swipe responder above still owns any drag. */}
-              <View style={styles.tapZones} pointerEvents="box-none">
-                <TapZone onDoubleTap={() => doubleTapSeek(-1)} />
-                <TapZone onDoubleTap={() => doubleTapSeek(1)} />
-              </View>
-
-              {!!seekFlash && (
-                <SeekPeek side={seekFlash.side} seconds={seekFlash.secs} />
-              )}
+            <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
+              <LyricsPane
+                state={lyricsState}
+                position={position}
+                visible={pane === 'lyrics'}
+              />
             </View>
-          )}
-        </View>
-
-        <View style={styles.controls}>
-          {/* Title + credits on the left, the three per-song actions right.
-              The text block moves with the SAME `slide` value as the artwork
-              above, so a swipe drags them as one unit instead of the title
-              sitting frozen until release. */}
-          <View style={styles.metaRow}>
-            <View style={styles.metaCarousel}>
-              <Animated.View
-                style={[styles.meta, {transform: [{translateX: slide}]}]}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {title}
-                </Text>
-                <View style={styles.creditRow}>
-                  {/* The WHOLE credit is one target. A single name opens that
-                      profile directly; several open the picker. */}
-                  <TouchableOpacity
-                    onPress={() => onOpenArtist(String(active.artist ?? ''))}
-                    activeOpacity={0.6}
-                    style={styles.artistTap}>
-                    <Text style={styles.artist} numberOfLines={1}>
-                      {artists}
-                    </Text>
-                  </TouchableOpacity>
-                  <SourceBadge track={track} />
-                  <QualityBadge track={track} />
-                </View>
-              </Animated.View>
-
-              {/* The incoming title, entering from the side you're dragging
-                  toward — same ART_TRAVEL offset the artwork uses, so the two
-                  land in sync. Rendered only mid-gesture; the real swap
-                  happens in `active` once commit() fires. */}
-              {!!previewTrack && (
+            <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
+              <QueuePane />
+            </View>
+            {pane === 'song' && (
+              <View style={styles.artArea} {...pan.panHandlers}>
                 <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    styles.meta,
-                    styles.metaPreview,
-                    {
-                      transform: [
-                        {
-                          translateX: Animated.add(
-                            slide,
-                            previewDir === 'next' ? ART_TRAVEL : -ART_TRAVEL,
-                          ),
-                        },
-                      ],
-                    },
-                  ]}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {previewTitle}
-                  </Text>
-                  <View style={styles.creditRow}>
-                    <Text style={styles.artist} numberOfLines={1}>
-                      {previewArtists}
-                    </Text>
-                  </View>
+                  style={[styles.artHolder, {transform: [{translateX: slide}]}]}
+                  pointerEvents="none">
+                  {artwork ? (
+                    // Keyed by the URL: when the song changes, React swaps in a
+                    // FRESH Image rather than reusing the old element (which held
+                    // the previous cover visible until the new one decoded — the
+                    // "previous artwork for a few ms" flash).
+                    //
+                    // fadeDuration=0 because the cover is prefetched (see
+                    // warmArtwork in player.ts) — Android's default 300ms cross-
+                    // fade was spending a third of a second dissolving in an image
+                    // that was already decoded and ready to paint.
+                    <Image
+                      key={artwork}
+                      source={{uri: artwork}}
+                      style={styles.art}
+                      fadeDuration={0}
+                    />
+                  ) : (
+                    <View style={[styles.art, styles.artFallback]} />
+                  )}
                 </Animated.View>
-              )}
-            </View>
 
-            <View style={styles.actions}>
-              {/* Circled glyphs, matching the reference: ⊕ add, ♥ like,
-                  ⬇-in-circle download. */}
-              <TouchableOpacity
-                onPress={() => track && onAddToPlaylist(track)}
-                hitSlop={8}
-                style={styles.actionBtn}>
-                <CirclePlus size={23} color={C.sub} strokeWidth={1.8} />
-              </TouchableOpacity>
+                {/* Double-tap zones over the artwork edges. They claim a TAP
+                  only — the swipe responder above still owns any drag. */}
+                <View style={styles.tapZones} pointerEvents="box-none">
+                  <TapZone onDoubleTap={() => doubleTapSeek(-1)} />
+                  <TapZone onDoubleTap={() => doubleTapSeek(1)} />
+                </View>
 
-              <TouchableOpacity
-                onPress={toggleLike}
-                hitSlop={8}
-                style={styles.actionBtn}>
-                <Heart
-                  size={22}
-                  color={liked ? C.accent : C.sub}
-                  fill={liked ? C.accent : 'transparent'}
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={download}
-                disabled={downloading || downloaded}
-                hitSlop={8}
-                style={styles.actionBtn}>
-                {downloaded || downloading ? (
-                  <Check size={22} color={C.accent} strokeWidth={2.6} />
-                ) : (
-                  <CircleArrowDown size={23} color={C.sub} strokeWidth={1.8} />
+                {!!seekFlash && (
+                  <SeekPeek side={seekFlash.side} seconds={seekFlash.secs} />
                 )}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
-
-          {/* Pane toggles left, audio output right — above the transport so
-              the play controls never shift. */}
-          <View style={styles.paneRow}>
-            <View style={styles.paneTabs}>
-              {PANES.map(({id, label, Icon}) => {
-                const on = pane === id;
-                // Lyrics goes dead when this song genuinely has none — common
-                // on SoundCloud/YouTube uploads. The info glyph replaces the
-                // tab's own icon and explains itself on tap, rather than
-                // opening a pane that only ever says "nothing here".
-                const dead = id === 'lyrics' && !lyricsState.available;
-                const Glyph = dead ? Info : Icon;
-                return (
-                  <TouchableOpacity
-                    key={id}
-                    onPress={() =>
-                      dead
-                        ? toast('No lyrics available for this song')
-                        : setPane(id)
-                    }
-                    activeOpacity={0.8}
-                    style={[
-                      styles.paneTab,
-                      on && !dead && styles.paneTabOn,
-                      dead && styles.paneTabDead,
-                    ]}>
-                    <Glyph size={15} color={on && !dead ? C.text : C.faint} />
-                    <Text
-                      style={[
-                        styles.paneLabel,
-                        on && !dead && styles.paneLabelOn,
-                      ]}>
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {!!output && (
-              <View style={styles.output}>
-                <Bluetooth size={13} color={C.accent} />
-                <Text style={styles.outputText} numberOfLines={1}>
-                  {output}
-                </Text>
               </View>
             )}
           </View>
 
-          {/* Transport */}
-          <View style={styles.transport}>
-            <TouchableOpacity onPress={onShuffle} hitSlop={10} style={styles.tBtn}>
-              <Shuffle size={24} color={shuffled ? C.accent : C.sub} />
-            </TouchableOpacity>
+          <View style={styles.controls}>
+            {/* Title + credits on the left, the three per-song actions right.
+              The text block moves with the SAME `slide` value as the artwork
+              above, so a swipe drags them as one unit instead of the title
+              sitting frozen until release. */}
+            <View style={styles.metaRow}>
+              <View style={styles.metaCarousel}>
+                <Animated.View
+                  style={[styles.meta, {transform: [{translateX: slide}]}]}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {title}
+                  </Text>
+                  <View style={styles.creditRow}>
+                    {/* The WHOLE credit is one target. A single name opens that
+                      profile directly; several open the picker. */}
+                    <TouchableOpacity
+                      onPress={() => onOpenArtist(String(active.artist ?? ''))}
+                      activeOpacity={0.6}
+                      style={styles.artistTap}>
+                      <Text style={styles.artist} numberOfLines={1}>
+                        {artists}
+                      </Text>
+                    </TouchableOpacity>
+                    <SourceBadge track={track} />
+                    <QualityBadge track={track} />
+                  </View>
+                </Animated.View>
 
-            <TouchableOpacity
-              onPress={() => skipPrevious()}
-              hitSlop={10}
-              style={styles.tBtn}>
-              <SkipBack size={34} color={C.text} fill={C.text} />
-            </TouchableOpacity>
+                {/* The incoming title, entering from the side you're dragging
+                  toward — same ART_TRAVEL offset the artwork uses, so the two
+                  land in sync. Rendered only mid-gesture; the real swap
+                  happens in `active` once commit() fires. */}
+                {!!previewTrack && (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.meta,
+                      styles.metaPreview,
+                      {
+                        transform: [
+                          {
+                            translateX: Animated.add(
+                              slide,
+                              previewDir === 'next' ? ART_TRAVEL : -ART_TRAVEL,
+                            ),
+                          },
+                        ],
+                      },
+                    ]}>
+                    <Text style={styles.title} numberOfLines={1}>
+                      {previewTitle}
+                    </Text>
+                    <View style={styles.creditRow}>
+                      <Text style={styles.artist} numberOfLines={1}>
+                        {previewArtists}
+                      </Text>
+                    </View>
+                  </Animated.View>
+                )}
+              </View>
 
-            <TouchableOpacity
-              onPress={() => togglePlay()}
-              activeOpacity={0.85}
-              style={styles.playBtn}>
-              {playing ? (
-                <Pause size={30} color={C.bg} fill={C.bg} />
-              ) : (
-                <Play size={30} color={C.bg} fill={C.bg} style={styles.playNudge} />
+              <View style={styles.actions}>
+                {/* Circled glyphs, matching the reference: ⊕ add, ♥ like,
+                  ⬇-in-circle download. */}
+                <TouchableOpacity
+                  onPress={() => track && onAddToPlaylist(track)}
+                  hitSlop={8}
+                  style={styles.actionBtn}>
+                  <CirclePlus size={23} color={C.sub} strokeWidth={1.8} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={toggleLike}
+                  hitSlop={8}
+                  style={styles.actionBtn}>
+                  <Heart
+                    size={22}
+                    color={liked ? C.accent : C.sub}
+                    fill={liked ? C.accent : 'transparent'}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={download}
+                  disabled={downloading || downloaded}
+                  hitSlop={8}
+                  style={styles.actionBtn}>
+                  {downloaded || downloading ? (
+                    <Check size={22} color={C.accent} strokeWidth={2.6} />
+                  ) : (
+                    <CircleArrowDown
+                      size={23}
+                      color={C.sub}
+                      strokeWidth={1.8}
+                    />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <Seekbar
+              position={position}
+              duration={duration}
+              onSeek={seekAndShow}
+            />
+
+            {/* Pane toggles left, audio output right — above the transport so
+              the play controls never shift. */}
+            <View style={styles.paneRow}>
+              <View style={styles.paneTabs}>
+                {PANES.map(({id, label, Icon}) => {
+                  const on = pane === id;
+                  // Lyrics goes dead when this song genuinely has none — common
+                  // on SoundCloud/YouTube uploads. The info glyph replaces the
+                  // tab's own icon and explains itself on tap, rather than
+                  // opening a pane that only ever says "nothing here".
+                  const dead = id === 'lyrics' && !lyricsState.available;
+                  const Glyph = dead ? Info : Icon;
+                  return (
+                    <TouchableOpacity
+                      key={id}
+                      onPress={() =>
+                        dead
+                          ? toast('No lyrics available for this song')
+                          : setPane(id)
+                      }
+                      activeOpacity={0.8}
+                      style={[
+                        styles.paneTab,
+                        on && !dead && styles.paneTabOn,
+                        dead && styles.paneTabDead,
+                      ]}>
+                      <Glyph size={15} color={on && !dead ? C.text : C.faint} />
+                      <Text
+                        style={[
+                          styles.paneLabel,
+                          on && !dead && styles.paneLabelOn,
+                        ]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {!!output && (
+                <View style={styles.output}>
+                  <Bluetooth size={13} color={C.accent} />
+                  <Text style={styles.outputText} numberOfLines={1}>
+                    {output}
+                  </Text>
+                </View>
               )}
-            </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-              onPress={() => skipNext()}
-              hitSlop={10}
-              style={styles.tBtn}>
-              <SkipForward size={34} color={C.text} fill={C.text} />
-            </TouchableOpacity>
+            {/* Transport */}
+            <View style={styles.transport}>
+              <TouchableOpacity
+                onPress={onShuffle}
+                hitSlop={10}
+                style={styles.tBtn}>
+                <Shuffle size={24} color={shuffled ? C.accent : C.sub} />
+              </TouchableOpacity>
 
-            <TouchableOpacity onPress={toggleRepeat} hitSlop={10} style={styles.tBtn}>
-              <Repeat2
-                size={26}
-                color={repeat === RepeatMode.Off ? C.sub : C.accent}
-                strokeWidth={repeat === RepeatMode.Off ? 2 : 2.4}
-              />
-            </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => skipPrevious()}
+                hitSlop={10}
+                style={styles.tBtn}>
+                <SkipBack size={34} color={C.text} fill={C.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => togglePlay()}
+                activeOpacity={0.85}
+                style={styles.playBtn}>
+                {playing ? (
+                  <Pause size={30} color={C.bg} fill={C.bg} />
+                ) : (
+                  <Play
+                    size={30}
+                    color={C.bg}
+                    fill={C.bg}
+                    style={styles.playNudge}
+                  />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => skipNext()}
+                hitSlop={10}
+                style={styles.tBtn}>
+                <SkipForward size={34} color={C.text} fill={C.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={toggleRepeat}
+                hitSlop={10}
+                style={styles.tBtn}>
+                <Repeat2
+                  size={26}
+                  color={repeat === RepeatMode.Off ? C.sub : C.accent}
+                  strokeWidth={repeat === RepeatMode.Off ? 2 : 2.4}
+                />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
 
-        {/* Toasts must be visible INSIDE this modal — the app-root toaster
+          {/* Toasts must be visible INSIDE this modal — the app-root toaster
             sits underneath it, so "Downloading…" was invisible until the
             player was closed. Same queue, second outlet. */}
-        <Toaster bottom={40} />
-      </Animated.View>
+          <Toaster bottom={40} />
+        </Animated.View>
       </GestureHandlerRootView>
     </Modal>
   );
@@ -947,7 +990,10 @@ function LyricsPane({
               onLayout={e => {
                 lineTops.current[i] = e.nativeEvent.layout.y;
               }}
-              style={[styles.lyricLine, i === activeLine && styles.lyricLineOn]}>
+              style={[
+                styles.lyricLine,
+                i === activeLine && styles.lyricLineOn,
+              ]}>
               {line.text || '♪'}
             </Text>
           ))
@@ -985,9 +1031,19 @@ const styles = StyleSheet.create({
   paneOff: {display: 'none'},
   // Less inset than before — the artwork is the thing you came here to look
   // at, and 24px of padding on both sides was taking a visible bite out of it.
-  artArea: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12},
+  artArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
   artHolder: {width: '100%', aspectRatio: 1, maxHeight: '100%'},
-  art: {width: '100%', height: '100%', borderRadius: 10, backgroundColor: C.surface},
+  art: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
+    backgroundColor: C.surface,
+  },
   artFallback: {backgroundColor: C.surfaceHi},
   tapZones: {...StyleSheet.absoluteFillObject, flexDirection: 'row'},
   tapZone: {flex: 1},
@@ -1014,7 +1070,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
 
   paneRow: {
     flexDirection: 'row',

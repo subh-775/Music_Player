@@ -23,7 +23,7 @@ import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
 import {UpdateModal} from './src/components/UpdateModal';
-import {checkUpdate} from './src/update';
+import {checkUpdateOnLaunch} from './src/update';
 import {
   TrackActionSheet,
   type SheetContext,
@@ -130,7 +130,10 @@ function Shell() {
     // Boot the engine, then restore the last session so the mini player is
     // there on reopen (same song, paused, at the timestamp you left).
     setupPlayer().then(async ok => {
-      diag('boot', ok ? 'audio engine ready' : 'NO native audio engine in this APK');
+      diag(
+        'boot',
+        ok ? 'audio engine ready' : 'NO native audio engine in this APK',
+      );
       setEngine(ok);
       if (ok) {
         const restored = await restoreSession();
@@ -155,7 +158,7 @@ function Shell() {
     startCrossfadeWatcher(() => readSettings().crossfadeDuration);
     // Silent update check on launch — the popup only appears if a newer release
     // is actually out. Delayed a little so it never competes with cold start.
-    const u = setTimeout(checkUpdate, 3500);
+    const u = setTimeout(checkUpdateOnLaunch, 3500);
     return () => {
       clearTimeout(u);
       clearTimeout(bootCap);
@@ -223,7 +226,11 @@ function Shell() {
         if (data.tracks.length) {
           setCollection(prev =>
             prev && prev.id === `album:${albumName}`
-              ? {...prev, name: data.name || albumName, tracks: normalizeTracks(data.tracks)}
+              ? {
+                  ...prev,
+                  name: data.name || albumName,
+                  tracks: normalizeTracks(data.tracks),
+                }
               : prev,
           );
         }
@@ -459,6 +466,7 @@ function Shell() {
         </View>
         <View style={tab === 'search' ? styles.tabShown : styles.tabHidden}>
           <SearchScreen
+            visible={tab === 'search'}
             onPickTrack={play}
             onImportSpotify={setImportUrl}
             onMenu={openSheet}
@@ -513,9 +521,7 @@ function Shell() {
               onMenu={openSheet}
               onToggleFollow={(n, img) =>
                 toast(
-                  toggleFollow(n, img)
-                    ? `Following ${n}`
-                    : `Unfollowed ${n}`,
+                  toggleFollow(n, img) ? `Following ${n}` : `Unfollowed ${n}`,
                 )
               }
               onOpenAlbum={openAlbumByName}
