@@ -42,6 +42,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, is_dataclass, replace
 from html import unescape
@@ -64,6 +65,7 @@ from werkzeug.serving import make_server
 if not (Path(__file__).parent / "components").is_dir():
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from components.fuzz_compat import fuzz
 from components.unified_search import UnifiedSearchService
 from components.source_merger import SourceType
 from components.download_manager import DownloadManager, DownloadQueueConfig
@@ -191,7 +193,7 @@ def _download_from_url_android(self, url: str, task):
     out_path = f"{task.output_path}.{ext}"
 
     try:
-        with http_requests.get(info["url"], stream=True, timeout=60) as r:
+        with _stream_session.get(info["url"], stream=True, timeout=60) as r:
             r.raise_for_status()
             total = int(r.headers.get("Content-Length") or 0)
             done = 0
@@ -279,15 +281,20 @@ _lyrics_cache_lock = threading.Lock()
 _LYRICS_CACHE_MAX = 1000
 
 
-def _build_lyrics_session() -> http_requests.Session:
-    """Pooled session for lrclib. Mobile networks make a cold TLS handshake even
-    more expensive than on desktop, so connection reuse matters more here."""
+def _build_pooled_session(pool: int = 4, maxsize: int = 8) -> http_requests.Session:
+    """A connection-reusing session.
+
+    Mobile networks make a cold TLS handshake even more expensive than on
+    desktop — 300-900ms on a carrier — so connection reuse matters more here
+    than anywhere else in the app.
+    """
     s = http_requests.Session()
     try:
         from urllib3.util.retry import Retry
         retry = Retry(total=1, connect=1, read=0, status=0, backoff_factor=0.2,
-                      allowed_methods=frozenset(["GET"]))
-        adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=8)
+                      allowed_methods=frozenset(["GET", "HEAD"]))
+        adapter = HTTPAdapter(max_retries=retry,
+                              pool_connections=pool, pool_maxsize=maxsize)
         s.mount("https://", adapter)
         s.mount("http://", adapter)
     except Exception:
@@ -295,7 +302,20 @@ def _build_lyrics_session() -> http_requests.Session:
     return s
 
 
-_lyrics_session = _build_lyrics_session()
+_lyrics_session = _build_pooled_session()
+
+# The audio path's own session.
+#
+# This existed for lyrics and never for the hottest path in the app: every play
+# AND every seek called the bare `requests` module, which builds a throwaway
+# Session and pays a full DNS + TCP + TLS handshake to a CDN we were talking to
+# a second earlier. That was several hundred milliseconds of pure waste before
+# the first audio byte, on every single seek.
+#
+# Separate from the lyrics pool on purpose: a stalled lyrics lookup must never
+# be able to hold a connection slot the audio needs, and audio wants a deeper
+# pool (a seek can overlap the previous response still closing).
+_stream_session = _build_pooled_session(pool=8, maxsize=16)
 
 
 def get_default_download_dir() -> str:
@@ -413,33 +433,113 @@ def _clean_artwork_urls(artwork_urls: Dict[str, Any]) -> Dict[str, str]:
 # on every play. The resolved URL is deterministic for a given (source, url,
 # bitrate), so we memoise it.
 #
-# TTL, not permanent: these are time-limited signed CDN URLs. 5 minutes is far
-# inside their real lifetime (hours) yet short enough that a much-later replay
-# re-resolves a fresh one. On an upstream 4xx the proxy evicts the entry so a
-# retry never re-serves a URL that has actually gone stale.
-_STREAM_CACHE: Dict[tuple, tuple] = {}   # (source, url, bitrate) -> (stream_url, expires_at)
-_STREAM_TTL = 300.0
+# TTL, not permanent: these are time-limited signed CDN URLs.
+#
+# This was 300s, and that was a bug you could hear. The URLs live for HOURS, but
+# any track longer than five minutes fell out of cache mid-song — so a seek near
+# the end paid a FULL re-resolve (for JioSaavn, two sequential API round trips)
+# at the exact moment the user was waiting on it. 30 minutes is still far inside
+# their real lifetime, and the window now SLIDES on every hit, so the song you
+# are actually listening to can never expire underneath you.
+#
+# On an upstream 4xx the proxy evicts the entry, so a genuinely dead URL is
+# never re-served from cache no matter how long the TTL is.
+_STREAM_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()  # (source, url, bitrate) -> (stream_url, expires_at)
+_STREAM_TTL = 1800.0
+_stream_cache_lock = threading.Lock()
+_STREAM_CACHE_MAX = 256
+
+
+# The bitrate rung that actually worked for a track, remembered.
+#
+# proxy_stream rebuilt [320, 160, 96] on EVERY request, so a track with no 320
+# file paid a failed 320 resolve plus a failed 320 CDN request before falling to
+# 160 — on every single seek. That is the "some songs are much worse than
+# others" pattern.
+#
+# It was also a correctness bug: a seek that fell to a DIFFERENT rung than the
+# initial play used is a different file of a different length, so the byte
+# offsets the player computed are meaningless — garbled audio or a hard stall.
+# Pinning makes every request for a track use the rung it started on.
+_LADDER_PIN: Dict[tuple, int] = {}   # (source, url) -> bitrate that worked
+_ladder_lock = threading.Lock()
+
+
+def _pin_ladder(url: str, source: str, bitrate: int) -> None:
+    with _ladder_lock:
+        _LADDER_PIN[(source, url)] = bitrate
+        if len(_LADDER_PIN) > _STREAM_CACHE_MAX:
+            _LADDER_PIN.clear()  # cheap bound; a re-walk costs one request
+
+
+def _unpin_ladder(url: str, source: str) -> None:
+    """Forget the pin so a rung that has genuinely died can be re-walked."""
+    with _ladder_lock:
+        _LADDER_PIN.pop((source, url), None)
 
 
 def _resolve_stream_url_cached(url: str, source: str, bitrate: int = 320) -> Optional[str]:
     key = (source, url, bitrate)
     now = time.monotonic()
-    hit = _STREAM_CACHE.get(key)
-    if hit and hit[1] > now:
-        return hit[0]
+    with _stream_cache_lock:
+        hit = _STREAM_CACHE.get(key)
+        if hit and hit[1] > now:
+            # Sliding window: touching an entry renews it AND marks it
+            # most-recently-used, so the currently-playing track is both the
+            # last to expire and the last to be evicted.
+            _STREAM_CACHE[key] = (hit[0], now + _STREAM_TTL)
+            _STREAM_CACHE.move_to_end(key)
+            return hit[0]
+    # Resolve OUTSIDE the lock — it is a network round trip, and holding the
+    # lock across it would serialise every concurrent play behind the slowest.
     resolved = _resolve_stream_url(url, source, bitrate)
     if resolved:
-        # ponytail: plain dict with a crude size cap, bounded mainly by the TTL.
-        # A real LRU only if a single 5-min window ever resolves 256+ distinct
-        # tracks, which no one listening to music does.
-        if len(_STREAM_CACHE) > 256:
-            _STREAM_CACHE.clear()
-        _STREAM_CACHE[key] = (resolved, now + _STREAM_TTL)
+        with _stream_cache_lock:
+            _STREAM_CACHE[key] = (resolved, now + _STREAM_TTL)
+            _STREAM_CACHE.move_to_end(key)
+            # Evict the OLDEST, not everything. The old code called .clear() on
+            # overflow, so the 257th entry wiped the song you were listening to
+            # and the next seek re-resolved from scratch. The check-then-clear
+            # -then-set sequence was not atomic either, and the server is
+            # threaded=True, so two concurrent resolves could interleave in it.
+            while len(_STREAM_CACHE) > _STREAM_CACHE_MAX:
+                _STREAM_CACHE.popitem(last=False)
     return resolved
 
 
 def _evict_stream_url(url: str, source: str, bitrate: int) -> None:
-    _STREAM_CACHE.pop((source, url, bitrate), None)
+    with _stream_cache_lock:
+        _STREAM_CACHE.pop((source, url, bitrate), None)
+    _unpin_ladder(url, source)
+
+
+# One client per source, for the whole process.
+#
+# These were constructed fresh on every resolve — a new requests.Session each
+# time, so a cold TLS handshake to the SOURCE stacked on top of the cold
+# handshake to the CDN. JioSaavn's get_streaming_url makes two sequential API
+# calls, so that was two wasted handshakes per play, every play.
+_source_clients: Dict[str, Any] = {}
+_source_client_lock = threading.Lock()
+
+
+def _source_client(name: str):
+    with _source_client_lock:
+        client = _source_clients.get(name)
+        if client is None:
+            if name == "jiosaavn":
+                from components.jiosaavn_downloader import JioSaavnClient
+                client = JioSaavnClient()
+            elif name == "soundcloud":
+                from components.soundcloud_downloader import SoundCloudClient
+                client = SoundCloudClient()
+            elif name == "itunes":
+                from components.itunes_client import iTunesClient
+                client = iTunesClient()
+            else:
+                return None
+            _source_clients[name] = client
+        return client
 
 
 def _resolve_stream_url(url: str, source: str, bitrate: int = 320) -> Optional[str]:
@@ -453,13 +553,11 @@ def _resolve_stream_url(url: str, source: str, bitrate: int = 320) -> Optional[s
         info = newpipe_yt.stream_url(url)
         return info.get("url") if info else None
     if source == "jiosaavn":
-        from components.jiosaavn_downloader import JioSaavnClient
         # JioSaavn serves discrete bitrates only: 320 / 160 / 96.
         js_bitrate = 320 if bitrate >= 320 else (160 if bitrate >= 160 else 96)
-        return JioSaavnClient().get_streaming_url(url, js_bitrate)
+        return _source_client("jiosaavn").get_streaming_url(url, js_bitrate)
     if source == "soundcloud":
-        from components.soundcloud_downloader import SoundCloudClient
-        return SoundCloudClient().get_streaming_url(url, bitrate)
+        return _source_client("soundcloud").get_streaming_url(url, bitrate)
     return None
 
 
@@ -554,7 +652,7 @@ def connectivity():
     """Distinguishes 'offline' from 'no results' for the UI's offline banner."""
     for url in ("https://www.google.com", "https://1.1.1.1"):
         try:
-            http_requests.head(url, timeout=4, allow_redirects=False)
+            _stream_session.head(url, timeout=4, allow_redirects=False)
             return jsonify({"online": True})
         except Exception:
             continue
@@ -581,7 +679,12 @@ def search_tracks():
             _search_service.config,
             max_total_results=limit,
             enabled_sources=PLAYABLE_SEARCH_SOURCES,
-            timeout_seconds=12.0,
+            # 12 -> 8. This number used to be decorative: the search blocked on
+            # the slowest source no matter what it said (see the executor in
+            # unified_search.search). Now it is a real wall-clock cap on how long
+            # a search can take, so it is worth setting to something a person
+            # would actually wait — whatever has arrived by then ships.
+            timeout_seconds=8.0,
         )
         results = _search_service.search(query, req_config)
 
@@ -619,21 +722,23 @@ def search_suggestions():
 
     try:
         # Suggestions must be CHEAP — they fire on every debounced keystroke.
-        # JioSaavn only: it has the fastest autocomplete-grade index.
-        req_config = replace(
-            _search_service.config,
-            max_total_results=limit,
-            enabled_sources={SourceType.JIOSAAVN},
-            max_results_per_source=limit,
-            timeout_seconds=6.0,
-        )
-        results = _search_service.search(q, req_config)
+        #
+        # This called the full UnifiedSearchService.search(), which meant every
+        # keystroke paid SourceMerger._resolve_key's fuzzy bucketing,
+        # _merge_entries, _rank_by_relevance and the cache bookkeeping — to
+        # produce a list of title strings. All of that exists to reconcile
+        # results ACROSS sources, and this route deliberately queries exactly
+        # one, so there was never anything to reconcile.
+        #
+        # Straight to the client. The prefix ordering and the de-dupe below are
+        # what actually shape this list, and they are unchanged.
+        songs = _source_client("jiosaavn").search(q, limit)
 
         # While TYPING, what the user wants is almost always a completion of
         # what they've typed — so titles that start with the query outrank
         # titles that merely contain it, which outrank fuzzy-only hits.
         qn = q.lower().strip()
-        results = sorted(results, key=lambda t: (
+        songs = sorted(songs, key=lambda t: (
             0 if (t.title or "").lower().startswith(qn)
             else 1 if qn in (t.title or "").lower()
             else 2,
@@ -641,8 +746,8 @@ def search_suggestions():
         ))
 
         seen, suggestions = set(), []
-        for track in results:
-            key = f"{track.title.lower()}|{track.artist.lower()}"
+        for track in songs:
+            key = f"{(track.title or '').lower()}|{(track.artist or '').lower()}"
             if key in seen:
                 continue
             seen.add(key)
@@ -650,14 +755,15 @@ def search_suggestions():
                 "title": track.title,
                 "artist": track.artist,
                 "album": track.album,
-                "sources": [s.value for s in track.sources.keys()],
-                "isrc": track.isrc,
+                # Single-source by construction, so this is a constant rather
+                # than something to read off a merged track.
+                "sources": ["jiosaavn"],
+                "isrc": None,
                 # The suggestion list shows a cover next to each row. The search
                 # result already carries artwork, so returning it here costs
                 # nothing — whereas letting the client look it up would mean an
                 # extra request per row, on every debounced keystroke.
-                "artwork_url": (track.get_best_artwork()
-                                if hasattr(track, "get_best_artwork") else None),
+                "artwork_url": track.image_url or None,
             })
             if len(suggestions) >= limit:
                 break
@@ -672,7 +778,10 @@ def get_stream_url():
     body = _body()
     url, source = body.get("url") or "", body.get("source") or ""
     try:
-        stream_url = _resolve_stream_url(url, source, 320)
+        # Cached, so this shares the entry stream_info/proxy_stream just filled
+        # rather than paying its own resolve. (Not called by the RN app — it is
+        # here for anything driving the backend directly.)
+        stream_url = _resolve_stream_url_cached(url, source, 320)
         if stream_url:
             return jsonify({"stream_url": stream_url})
         return jsonify({
@@ -722,8 +831,15 @@ def proxy_stream():
     bitrate = _int_arg("bitrate", 320)
 
     # JioSaavn doesn't hold every track at every bitrate — a 320 file may 404
-    # while 160/96 exist. Walk down from what was asked for.
-    if source == "jiosaavn":
+    # while 160/96 exist. Walk down from what was asked for, but only ONCE per
+    # track: after a rung works it is pinned (see _LADDER_PIN) and every later
+    # request for the same track — every seek — starts there instead of
+    # re-walking the failures.
+    with _ladder_lock:
+        pinned = _LADDER_PIN.get((source, url))
+    if pinned:
+        ladder = [pinned]
+    elif source == "jiosaavn":
         ladder, seen = [], set()
         for b in (bitrate, 320, 160, 96):
             if b <= bitrate and b not in seen:
@@ -734,6 +850,9 @@ def proxy_stream():
         ladder = [bitrate]
 
     range_header = request.headers.get("Range", "bytes=0-")
+    # Whether the CLIENT asked to start part-way in. "bytes=0-" is the default
+    # above and is not a real seek, so it doesn't count.
+    wants_range = "Range" in request.headers
 
     def resolve_and_fetch(br):
         s_url = _resolve_stream_url_cached(url, source, br)
@@ -754,16 +873,21 @@ def proxy_stream():
         # hang the whole 30s on connect, freezing the player on a track that was
         # never going to play; now it fails in ~6s and the caller can move on.
         # The 30s read budget is untouched, so a slow-but-valid stream is fine.
-        r = http_requests.get(s_url, headers=headers, stream=True, timeout=(6, 30))
+        # _stream_session, NOT the bare module: reuses the CDN connection across
+        # plays and seeks instead of a fresh TLS handshake every time.
+        r = _stream_session.get(s_url, headers=headers, stream=True, timeout=(6, 30))
         if r.status_code in (403, 404, 410, 500, 502, 503):
             code = r.status_code
             r.close()
             # A cached URL that upstream now rejects is stale — drop it so the
             # next attempt (next ladder step, or a replay) re-resolves fresh
-            # instead of serving the same dead URL from cache.
+            # instead of serving the same dead URL from cache. This also drops
+            # the ladder pin, so a rung that has died gets re-walked.
             _evict_stream_url(url, source, br)
             print(f"[proxy] {source} upstream {code} for {url} (br={br})")
             return None, code
+        # This rung works — every later seek on this track starts here.
+        _pin_ladder(url, source, br)
         return r, None
 
     upstream, last_status = None, None
@@ -780,6 +904,15 @@ def proxy_stream():
                   if last_status else "Could not resolve streaming URL")
         return jsonify({"detail": detail}), 502
 
+    # The client asked to jump to an offset and upstream ignored it, sending the
+    # whole file from byte 0. Forwarding that as a 200 tells the player "no range
+    # support" AFTER it already committed to a seek, so it either restarts the
+    # track or buffers everything before it can move. Say so in the log — this
+    # is the one shape of slow seek the fixes above cannot help with.
+    if wants_range and upstream.status_code == 200:
+        print(f"[proxy] {source} upstream ignored Range for {url} "
+              f"— seeking will be slow on this track")
+
     resp_headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
     if upstream.status_code == 206:
         cr = upstream.headers.get("content-range")
@@ -791,7 +924,13 @@ def proxy_stream():
 
     def stream_chunks():
         try:
-            for chunk in upstream.iter_content(chunk_size=8192):
+            # 64KB, not 8KB. A player prebuffering after a seek pulls at line
+            # speed, not at 320kbps — at 5MB/s, 8KB chunks meant ~640 iterations
+            # a second, each one crossing the GIL, going through Werkzeug's
+            # chunked writer and hitting the loopback socket. CPython under
+            # Chaquopy is not fast at that. The YouTube download path already
+            # used 64KB; this is the same number on the hotter path.
+            for chunk in upstream.iter_content(chunk_size=65536):
                 if chunk:
                     yield chunk
         finally:
@@ -1125,29 +1264,23 @@ def get_lyrics():
 
         plain_fallback = {"value": None}
 
-        # rapidfuzz has no Android wheel, so this always takes the difflib branch
-        # on-device. Kept identical to the desktop code so behaviour matches when
-        # rapidfuzz IS importable (e.g. running this file on a PC).
-        try:
-            from rapidfuzz import fuzz as _fuzz
+        # fuzz_compat is rapidfuzz on desktop and an equivalent pure-Python
+        # implementation on Android, so this is ONE code path on both.
+        #
+        # It used to try `from rapidfuzz import fuzz` here and fall back to bare
+        # difflib. rapidfuzz has no Android wheel, so on-device that import
+        # always raised (re-walking the import path every call, since Python
+        # does not negatively-cache failures) — and the difflib branch dropped
+        # token_set_ratio entirely, losing exactly the extra-words tolerance
+        # this matching depends on.
+        def _sim(a, b):
+            return max(fuzz.token_set_ratio(a, b), fuzz.partial_ratio(a, b))
 
-            def _sim(a, b):
-                return max(_fuzz.token_set_ratio(a, b), _fuzz.partial_ratio(a, b))
-
-            def _artist_cmp(a, b):
-                # No partial_ratio here: it spuriously matches long multi-artist
-                # credit strings.
-                return max(_fuzz.token_set_ratio(a, b),
-                           _fuzz.ratio(a.replace(" ", ""), b.replace(" ", "")))
-        except ImportError:
-            from difflib import SequenceMatcher as _SM
-
-            def _sim(a, b):
-                return _SM(None, a, b).ratio() * 100
-
-            def _artist_cmp(a, b):
-                return max(_SM(None, a, b).ratio() * 100,
-                           _SM(None, a.replace(" ", ""), b.replace(" ", "")).ratio() * 100)
+        def _artist_cmp(a, b):
+            # No partial_ratio here: it spuriously matches long multi-artist
+            # credit strings.
+            return max(fuzz.token_set_ratio(a, b),
+                       fuzz.ratio(a.replace(" ", ""), b.replace(" ", "")))
 
         def _norm(s):
             s = re.sub(r"[^\w\s]", " ", (s or "").lower())
@@ -1272,7 +1405,7 @@ def get_lyrics():
                 qs = urllib.parse.urlencode(
                     {**params, "_format": "json", "_marker": "0", "ctx": "web6dot0"}
                 )
-                r = http_requests.get(f"{js_base}?{qs}", headers=js_headers, timeout=8)
+                r = _stream_session.get(f"{js_base}?{qs}", headers=js_headers, timeout=8)
                 return r.json() if r.status_code == 200 else {}
 
             ac_data = _js_get({"__call": "autocomplete.get",
@@ -1323,8 +1456,8 @@ def get_lyrics():
 @app.get("/api/artwork")
 def get_artwork():
     try:
-        from components.itunes_client import iTunesClient
-        results = iTunesClient().search(f"{_arg('title')} {_arg('artist')}".strip(), limit=1)
+        results = _source_client("itunes").search(
+            f"{_arg('title')} {_arg('artist')}".strip(), limit=1)
         if results:
             art = getattr(results[0], "artwork_urls", {}) or {}
             return jsonify({"artwork_url": art.get("600") or art.get("300") or ""})
@@ -1794,7 +1927,10 @@ def cache_clear():
     """
     before = _cache_bytes()
 
-    _STREAM_CACHE.clear()
+    with _stream_cache_lock:
+        _STREAM_CACHE.clear()
+    with _ladder_lock:
+        _LADDER_PIN.clear()
     with _lyrics_cache_lock:
         _lyrics_cache.clear()
     try:

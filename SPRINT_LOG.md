@@ -242,6 +242,66 @@ build. Highest risk is the new gesture stack.
 - Full gate now: `npx tsc --noEmit`, `npx jest`, `npx eslint src/ App.tsx
   __tests__/`, and `python -m py_compile` on the changed backend files.
 
+### v1.0.7 batch — backend/performance audit
+
+An external audit was run against `main` (the 4-commit walking skeleton), not
+`mobile`. Several of its findings were already fixed here — ProGuard is on, the
+FOREGROUND_SERVICE permissions are present, the API token is generated and
+passed, playback is already on react-native-track-player, and next-track
+prefetch already exists. Everything below was verified against `mobile` HEAD
+before being touched.
+
+**Seek latency**
+| Fix | Was |
+|---|---|
+| `_stream_session`, a pooled session for the audio path | Bare `requests.get` — a full DNS+TCP+TLS handshake to the CDN on every play AND every seek (300-900ms on a carrier). The pooled-session helper already existed, for lyrics only. |
+| 64KB chunks in `proxy_stream` | 8KB. A player prebuffering after a seek pulls at line speed; at 5MB/s that was ~640 GIL round-trips a second through Werkzeug's chunked writer. |
+| Ladder pinning (`_LADDER_PIN`) | `[320,160,96]` rebuilt per request, so a track with no 320 file paid a failed resolve + failed CDN request on **every seek**. Also a correctness bug: a seek landing on a different rung is a different file of a different length, so the player's byte offsets meant nothing. |
+| `_STREAM_TTL` 300 → 1800, sliding on hit | Any track over 5 minutes fell out of cache mid-song, so a seek near the end paid a full re-resolve (two sequential JioSaavn calls). The URLs live for hours. |
+| LRU + lock on `_STREAM_CACHE` | `.clear()` on overflow wiped the song you were listening to; the check→clear→set sequence wasn't atomic under `threaded=True`. |
+| Range→200 logged | Upstream ignoring a Range was forwarded as 200, so a seek silently became "restart or buffer everything". Now it says so. |
+
+**Cold start**
+| Fix | Was |
+|---|---|
+| `pyc { src = true }` | Raw `.py` shipped, so CPython parsed and compiled every module **on the phone** at first import — yt-dlp alone is ~1800 modules, on the SoundCloud play path, re-paid after every app update. |
+| `Python.start()` moved onto the backend thread | It ran in `MainApplication.onCreate()` — extracting the stdlib and `dlopen`ing libpython on the **main thread**, blocking the first frame. Only `start_server`, the cheap half, was backgrounded. |
+| `PythonBackend.started` reset in `catch` | Set before the thread started and never cleared, so a crash latched the backend off for the whole process with nothing to retry it. |
+| Home feed cached to disk | 6h TTL on a process-local dict — and Android kills the process constantly, so every launch refetched `getLaunchData` anyway. Atomic write; corrupt/expired/no-cache-dir all fall through to a refetch (self-checked). |
+| `waitForBackend` backs off 100ms→1s | Flat 500ms × 60 polls, competing for CPU with the Chaquopy boot it was waiting for. |
+
+**Search**
+| Fix | Was |
+|---|---|
+| Shared executor, one wall-clock deadline, partial results | A new `ThreadPoolExecutor` per keystroke while `self._executor` sat unused; the `break` was inside `with`, whose `shutdown(wait=True)` blocked on the slowest source anyway — the timeout was decorative; and each future got the *full* budget, so worst case was timeout × sources. Guarded by `test_search_deadline.py`. |
+| `/api/search` timeout 12s → 8s | Only meaningful now that the deadline is real. |
+| Suggestions bypass merge+rank | Every debounced keystroke ran `SourceMerger._resolve_key` fuzzy bucketing, `_merge_entries` and `_rank_by_relevance` — all of which exist to reconcile *across* sources, on a route that queries exactly one. |
+| `profile.py` uses `fuzz_compat` | `from rapidfuzz import fuzz` **inside** `_ratio`/`_plain_ratio`. rapidfuzz has no Android wheel, so on-device that always raised — and Python doesn't negatively-cache failed imports, so every call re-walked the APK asset importer, in loops. The fallback was also *wrong*: 100/60/0 buckets, so artist and album matching ran on a three-valued score. Same fix in `mobile_server`'s enrich block, whose difflib fallback dropped `token_set_ratio` entirely. |
+| `fuzz_compat` memoised + exact early exits | The file claimed "nothing here is on a hot loop"; it is on two. `ratio` is now `lru_cache`d, `partial_ratio` short-circuits on a contained substring and skips windows whose `quick_ratio` upper bound can't win, and `token_set_ratio` skips pairings whose length-derived ceiling can't win. All exact — 0 mismatches over 9,747 comparisons vs the previous implementation. **1.6× on a cold search, 4.5× across a 6-search session.** |
+| One pooled `SESSION` (`components/http.py`) | Bare `requests.get` in profile (5), radio, download_manager cover art (4), musicbrainz (2), youtube_downloader (2), spotify_import — the helpers behind Home, artist pages, albums, playlists and radio. New TLS handshake each. |
+| 64KB download chunks | 8KB, in the same process as the audio proxy, so every boundary was a GIL round-trip playback had to contend with. |
+
+**Drawer gesture**
+Reworked to track the finger. It was mounting on RELEASE and playing its own
+220ms open animation, so you dragged, nothing happened, then a panel appeared.
+Position now lives in `src/drawer.ts` as one shared `Animated.Value` that both
+the gesture and the settle write to, and the Sidebar stopped being a `<Modal>`
+— a Modal is its own window and cannot be dragged into view under an in-flight
+gesture. Same pattern the rest of this app already uses for overlays.
+
+### v1.0.7 — deliberately NOT done
+- **Direct CDN URLs to ExoPlayer** (the audit's headline §3.1). It is the real
+  architectural win — RNTP can set `Referer`, so `proxy_stream` could leave the
+  audio path entirely — but it rewrites playback, and it cannot be verified from
+  here. Shipping an unverified playback rewrite is not worth it in the same
+  release as the fixes above. Next release, with the proxy kept as fallback.
+- **SoundCloud API v2 instead of yt-dlp** (§2.4). Same reason: a real win, an
+  extractor rewrite, unverifiable without a device.
+- **Pausing downloads while streaming** (§5.3). Speculative coupling; the 64KB
+  chunk change addresses most of the GIL contention it was aimed at.
+- `/api/connectivity` (§5.2) is never called by the app — left alone rather than
+  optimised.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

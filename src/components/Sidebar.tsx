@@ -1,23 +1,28 @@
 /**
  * The navigation drawer.
  *
- * Opens from the hamburger on Home, or by dragging in from the left edge. It
- * holds the things that are *about* the app rather than about the music —
- * settings, shortcuts, your listening activity — so the bottom nav stays purely
- * about content and the Home header loses its stray gear.
+ * Opens from the hamburger on Home, or by dragging in from anywhere in Home's
+ * empty space. It holds the things that are *about* the app rather than about
+ * the music — settings, shortcuts, your listening activity — so the bottom nav
+ * stays purely about content and the Home header loses its stray gear.
  *
- * Driven by one Animated.Value: the panel's X offset. The scrim's opacity is an
- * interpolation of the same value, so the dim and the slide can never disagree
- * mid-gesture (they did when they were separate animations).
+ * Driven by ONE Animated.Value, `drawerX`, which lives in ../drawer rather than
+ * in this component. That is what lets the opening gesture drive the panel
+ * directly: the finger writes to the same value the settle animation does, so
+ * the panel tracks the drag from the first pixel instead of appearing after the
+ * finger lifts. The scrim's opacity is an interpolation of that same value, so
+ * the dim and the slide can never disagree mid-gesture.
+ *
+ * NOT a <Modal>, for the same reason nothing else in this app is: a Modal is its
+ * own window, it cannot be dragged into view underneath an in-progress gesture,
+ * and it floats over the mini player. As a plain absolute overlay it can be
+ * half-open, which is the whole feature.
  */
 import React, {useCallback, useEffect, useRef} from 'react';
 import {
   Animated,
   BackHandler,
-  Dimensions,
-  Easing,
   Image,
-  Modal,
   PanResponder,
   StyleSheet,
   Text,
@@ -34,10 +39,9 @@ import {
 import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
 import {useUpdateAvailable} from '../update';
+import {DRAWER_W, drawerX, settleDrawer} from '../drawer';
 
 const ICON = require('../assets/app-icon.png');
-
-const W = Math.min(320, Dimensions.get('window').width * 0.82);
 
 export type SidebarDest = 'recents' | 'settings' | 'shortcuts' | 'stats';
 
@@ -56,52 +60,28 @@ export function Sidebar({
   onClose,
   onNavigate,
 }: {
+  /** Mounted and interactive. Turns TRUE the moment a drag begins, not when it
+   *  finishes — the panel is on screen and moving while the finger is down. */
   visible: boolean;
   onClose: () => void;
   onNavigate: (dest: SidebarDest) => void;
 }) {
-  // -W = fully off-screen left, 0 = fully open.
-  const x = useRef(new Animated.Value(-W)).current;
   const updateWaiting = useUpdateAvailable();
 
-  const settle = useCallback(
-    (open: boolean, velocity = 0) => {
-      Animated.timing(x, {
-        toValue: open ? 0 : -W,
-        duration: velocity > 1.2 ? 140 : 220,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({finished}) => {
-        if (finished && !open) {
-          onClose();
-        }
-      });
-    },
-    [x, onClose],
-  );
+  // onClose is an inline arrow from the app, so it has a new identity on every
+  // app render. Held in a ref, it can be called from a gesture without its
+  // identity becoming an input to any effect — which is what used to re-run the
+  // open effect mid-navigation and slam the panel back open.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
-  /**
-   * Open when `visible` turns on — and ONLY then.
-   *
-   * This used to depend on `settle`, which depends on `onClose`, which the app
-   * passes as an inline arrow. So every re-render of the app produced a new
-   * `onClose`, a new `settle`, and re-ran this effect — and because `visible`
-   * was still true at that moment, it slammed the panel back open. Tapping a
-   * drawer item navigates (a re-render), so the drawer re-opened on top of the
-   * page it had just opened; tapping again from there stacked a second screen.
-   *
-   * `settle` in a ref keeps the animation callable without making identity
-   * changes an input to "should the drawer open".
-   */
-  const settleRef = useRef(settle);
-  settleRef.current = settle;
-
-  useEffect(() => {
-    if (visible) {
-      x.setValue(-W);
-      settleRef.current(true);
-    }
-  }, [visible, x]);
+  const close = useCallback((velocity = 0) => {
+    settleDrawer(false, velocity, finished => {
+      if (finished) {
+        closeRef.current();
+      }
+    });
+  }, []);
 
   // Hardware back closes the drawer before anything else sees it.
   useEffect(() => {
@@ -109,25 +89,32 @@ export function Sidebar({
       return;
     }
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      settle(false);
+      close();
       return true;
     });
     return () => sub.remove();
-  }, [visible, settle]);
+  }, [visible, close]);
 
+  // Drag LEFT on the open panel to push it back out. The mirror image of the
+  // gesture that opened it, on the same Animated.Value.
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) =>
         g.dx < -8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
       onPanResponderMove: (_e, g) => {
         if (g.dx < 0) {
-          x.setValue(Math.max(-W, g.dx));
+          drawerX.setValue(Math.max(-DRAWER_W, g.dx));
         }
       },
       onPanResponderRelease: (_e, g) => {
-        settle(!(g.dx < -W / 3 || g.vx < -0.5), Math.abs(g.vx));
+        const shouldClose = g.dx < -DRAWER_W / 3 || g.vx < -0.5;
+        if (shouldClose) {
+          close(Math.abs(g.vx));
+        } else {
+          settleDrawer(true, Math.abs(g.vx));
+        }
       },
-      onPanResponderTerminate: () => settle(true),
+      onPanResponderTerminate: () => settleDrawer(true),
     }),
   ).current;
 
@@ -136,24 +123,23 @@ export function Sidebar({
       // Navigate first, then slide away — the destination is already mounted
       // behind the drawer, so this reads as the drawer uncovering it.
       onNavigate(dest);
-      settle(false);
+      close();
     },
-    [onNavigate, settle],
+    [onNavigate, close],
   );
 
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={() => settle(false)}
-      statusBarTranslucent>
+    <View style={styles.host} pointerEvents="box-none">
       <Animated.View
         style={[
           styles.scrim,
           {
-            opacity: x.interpolate({
-              inputRange: [-W, 0],
+            opacity: drawerX.interpolate({
+              inputRange: [-DRAWER_W, 0],
               outputRange: [0, 1],
               extrapolate: 'clamp',
             }),
@@ -162,12 +148,12 @@ export function Sidebar({
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
-          onPress={() => settle(false)}
+          onPress={() => close()}
         />
       </Animated.View>
 
       <Animated.View
-        style={[styles.panel, {transform: [{translateX: x}]}]}
+        style={[styles.panel, {transform: [{translateX: drawerX}]}]}
         {...pan.panHandlers}>
         {/* The app's own mark, not just a word. A bare text line read as a
             stray label; the icon is what makes the drawer feel like part of
@@ -204,11 +190,14 @@ export function Sidebar({
         {/* Version, centred, and nothing else — as specified. */}
         <Text style={styles.version}>v{appVersion || '—'}</Text>
       </Animated.View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Covers the whole app, above everything, but box-none so only the scrim and
+  // the panel themselves take touches.
+  host: {...StyleSheet.absoluteFillObject, zIndex: 40},
   scrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -218,7 +207,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     left: 0,
-    width: W,
+    width: DRAWER_W,
     // Nearly black, barely translucent. The lighter grey it used to be
     // (rgba(20,20,20,0.93)) floated as a visibly separate grey slab over an
     // AMOLED-black app; sitting this close to the background makes the panel

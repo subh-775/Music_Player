@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from components.source_merger import SourceMerger
+from components.http import SESSION
 
 # ponytail: shared public Last.fm demo key. Ceiling: rate-limited/shared.
 # Upgrade path: set LASTFM_API_KEY env var with your own free key.
@@ -59,7 +60,7 @@ def _lastfm(method, **kw):
     """Single Last.fm GET. Returns parsed JSON dict, or {} on any failure."""
     common = {"api_key": LASTFM_KEY, "format": "json", "autocorrect": 1}
     try:
-        return requests.get(LASTFM_URL, params={**common, "method": method, **kw}, timeout=8).json()
+        return SESSION.get(LASTFM_URL, params={**common, "method": method, **kw}, timeout=8).json()
     except Exception:
         return {}
 

@@ -32,6 +32,7 @@ import {
   type Collection,
 } from '../collections';
 import {useUpdateAvailable} from '../update';
+import {dragDrawer, isDrawerPull, resetDrawer, shouldOpen} from '../drawer';
 
 /**
  * Last Home rows, persisted. Showing these instantly on the next launch is
@@ -54,6 +55,10 @@ type Props = {
   onPickTrack: (item: HomeItem) => void;
   onPlayTrack: (track: Track, context: Track[]) => void;
   onOpenMenu: () => void;
+  /** A drawer pull has started — mount the panel NOW so it can be dragged. */
+  onBeginDrag: () => void;
+  /** The finger lifted: settle open or closed, carrying its speed. */
+  onEndDrag: (open: boolean, velocity: number) => void;
   onOpenQuick: (dest: QuickDest) => void;
   /** Home has something to show — the app lifts its splash on this. */
   onReady?: () => void;
@@ -63,6 +68,8 @@ export function HomeScreen({
   onPickTrack,
   onPlayTrack,
   onOpenMenu,
+  onBeginDrag,
+  onEndDrag,
   onOpenQuick,
   onReady,
 }: Props) {
@@ -84,29 +91,41 @@ export function HomeScreen({
     : 'boot';
 
   /**
-   * Drag right anywhere on Home to open the drawer, so the hamburger stops
-   * being the only way in.
+   * Drag right anywhere on Home to pull the drawer in — and the panel follows
+   * the finger the whole way, the way Gmail, Twitter and ChatGPT do it.
+   *
+   * The panel is mounted the instant the gesture is claimed (onBeginDrag), then
+   * every move writes the finger's distance straight to the shared drawerX. The
+   * previous version only called onOpenMenu on RELEASE, so the drawer played
+   * its own animation after the gesture was already over — you dragged, nothing
+   * happened, then a panel appeared.
    *
    * Deliberately NOT a capture handler. Without capture, a child that has
    * already claimed the touch keeps it — so dragging a "Recently played" row
    * still scrolls that row, and dragging vertically still scrolls the page.
    * The gesture only lands when nothing else wanted it, which is exactly the
-   * empty black space between and around the rows.
-   *
-   * Threshold is horizontal-dominant (2:1) so a diagonal flick down the page
-   * can't be mistaken for a drawer pull.
+   * empty space between and around the rows.
    */
-  const openRef = useRef(onOpenMenu);
-  openRef.current = onOpenMenu;
+  const dragRef = useRef(onBeginDrag);
+  dragRef.current = onBeginDrag;
+  const endRef = useRef(onEndDrag);
+  endRef.current = onEndDrag;
+
   const pan = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) =>
-        g.dx > 14 && g.dx > Math.abs(g.dy) * 2,
-      onPanResponderRelease: (_e, g) => {
-        if (g.dx > 60 || g.vx > 0.5) {
-          openRef.current();
-        }
+      onMoveShouldSetPanResponder: (_e, g) => isDrawerPull(g.dx, g.dy),
+      onPanResponderGrant: () => {
+        // Mount it closed, right now, so the very next move already moves a
+        // panel that is on screen.
+        resetDrawer();
+        dragRef.current();
       },
+      onPanResponderMove: (_e, g) => dragDrawer(g.dx),
+      onPanResponderRelease: (_e, g) =>
+        endRef.current(shouldOpen(g.dx, g.vx), Math.abs(g.vx)),
+      // A cancelled gesture (a call arriving, the OS taking over) must not leave
+      // the panel stranded half open.
+      onPanResponderTerminate: () => endRef.current(false, 0),
     }),
   ).current;
 

@@ -166,9 +166,18 @@ chaquopy {
             install "yt-dlp>=2026.7.4"
         }
 
-        // Skip .pyc precompile — keeps build times down; first import is a hair
-        // slower, hidden by the backend warm-up thread.
-        pyc { src = false }
+        // Precompile to .pyc at BUILD time, not on the phone.
+        //
+        // This was false, with a comment claiming the first import is "a hair
+        // slower". It is not a hair. Shipping raw .py means CPython parses and
+        // compiles every module on the DEVICE at first import — and yt-dlp
+        // alone is ~1800 modules, on the SoundCloud play path. That cost is
+        // paid again after every app update, because the update invalidates the
+        // cache directory. It is the single biggest reason the first song after
+        // an install feels terrible.
+        //
+        // CI build time goes up. That is a machine's problem, not the user's.
+        pyc { src = true }
     }
 
     sourceSets {

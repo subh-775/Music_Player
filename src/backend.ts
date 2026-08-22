@@ -44,6 +44,15 @@ export async function apiGet<T>(path: string): Promise<T> {
  */
 export async function waitForBackend(timeoutMs = 30_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  // Backing off, not a flat 500ms.
+  //
+  // The flat interval meant up to 60 fetches during the exact window Chaquopy
+  // is extracting the stdlib and importing Flask — so the poll was competing
+  // for CPU with the thing it was waiting for. Start tight (the backend is
+  // often up in a few hundred ms on a warm launch, and that case should feel
+  // instant), then widen fast so a genuinely slow start is polled a handful of
+  // times instead of dozens.
+  let delay = 100;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`${BASE}/health`);
@@ -53,7 +62,8 @@ export async function waitForBackend(timeoutMs = 30_000): Promise<boolean> {
     } catch {
       // not up yet
     }
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, delay));
+    delay = Math.min(delay * 2, 1000);
   }
   return false;
 }

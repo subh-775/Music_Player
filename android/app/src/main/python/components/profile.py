@@ -32,9 +32,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+from components.fuzz_compat import fuzz
 from components.source_merger import SourceMerger
 # Reuse the shared singletons + helpers radio already battle-tested.
 from components.radio import _jiosaavn, _lastfm, _primary_artist, _resolve
+from components.http import SESSION
 
 # ponytail: TheAudioDB public test key "2". Ceiling: shared/rate-limited test key.
 # Upgrade path: set TADB_API_KEY to a Patreon key for production.
@@ -94,28 +96,34 @@ def _jcall(params):
     base = {"_format": "json", "_marker": "0", "ctx": "web6dot0"}
     url = f"{_JS_API}?{urllib.parse.urlencode({**base, **params})}"
     try:
-        return requests.get(url, headers=_JS_HEADERS, timeout=12).json()
+        return SESSION.get(url, headers=_JS_HEADERS, timeout=12).json()
     except Exception:
         return {}
 
 
 def _ratio(a, b):
-    """Fuzzy similarity 0..100 between two names (token-set, case-insensitive)."""
-    try:
-        from rapidfuzz import fuzz
-        return fuzz.token_set_ratio((a or "").lower(), (b or "").lower())
-    except Exception:
-        a, b = (a or "").lower(), (b or "").lower()
-        return 100 if a and a == b else (60 if a and (a in b or b in a) else 0)
+    """Fuzzy similarity 0..100 between two names (token-set, case-insensitive).
+
+    Uses fuzz_compat — rapidfuzz on desktop, an equivalent pure-Python
+    implementation on Android.
+
+    This used to do `from rapidfuzz import fuzz` INSIDE the function. rapidfuzz
+    has no Android wheel, so on-device that import ALWAYS raised — and Python
+    does not negatively-cache a failed import, so every call re-walked the whole
+    import path, which under Chaquopy means scanning the APK asset importer.
+    _ratio runs in loops during artist resolution, album matching and Spotify
+    import matching.
+
+    The old fallback was also WRONG, not merely slow: it returned 100/60/0
+    buckets, so artist and album matching on Android had been running on a
+    three-valued similarity score this whole time.
+    """
+    return fuzz.token_set_ratio((a or "").lower(), (b or "").lower())
 
 
 def _plain_ratio(a, b):
     """Length-sensitive ratio (penalizes extra words, unlike token_set)."""
-    try:
-        from rapidfuzz import fuzz
-        return fuzz.ratio((a or "").lower(), (b or "").lower())
-    except Exception:
-        return _ratio(a, b)
+    return fuzz.ratio((a or "").lower(), (b or "").lower())
 
 
 def _score_artist(query, title):
@@ -415,7 +423,7 @@ def _resolve_names(pairs, limit):
 def _audiodb_artist(name):
     """TheAudioDB artist lookup → HD images, bio, genre, founded year, country."""
     try:
-        d = requests.get(f"{TADB_URL}/search.php", params={"s": name}, timeout=10).json()
+        d = SESSION.get(f"{TADB_URL}/search.php", params={"s": name}, timeout=10).json()
     except Exception:
         return {}
     arts = (d or {}).get("artists") or []
@@ -504,7 +512,7 @@ def _url_ok(url):
     if not url:
         return False
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Range": "bytes=0-0"},
+        r = SESSION.get(url, headers={"User-Agent": "Mozilla/5.0", "Range": "bytes=0-0"},
                          timeout=5, stream=True)
         ok = r.status_code in (200, 206)
         r.close()
@@ -594,7 +602,7 @@ def _artist_has_content(name):
 def _deezer_search_artists(query, limit):
     """Deezer artist index → [{name, image, fans}] (Western coverage + photos)."""
     try:
-        r = requests.get("https://api.deezer.com/search/artist",
+        r = SESSION.get("https://api.deezer.com/search/artist",
                          params={"q": query, "limit": limit + 8}, timeout=8)
         data = (r.json() or {}).get("data", [])
     except Exception:
@@ -913,7 +921,7 @@ def _deezer_artist(name):
             return _cache[key]
     out = {}
     try:
-        r = requests.get("https://api.deezer.com/search/artist",
+        r = SESSION.get("https://api.deezer.com/search/artist",
                          params={"q": name, "limit": 5}, timeout=8)
         for a in (r.json() or {}).get("data", [])[:5]:
             # Strict same-artist name match (length-sensitive) so an ambiguous

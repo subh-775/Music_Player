@@ -16,7 +16,11 @@ import asyncio
 import time
 from typing import List, Dict, Any, Set
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
 import threading
 
 from components.source_merger import SourceMerger, SourceType
@@ -273,25 +277,56 @@ class UnifiedSearchService:
         all_results: Dict[SourceType, List[Dict]] = {}
 
         if config.parallel_search:
-            # Parallel search across all sources
-            futures = {}
-            with ThreadPoolExecutor(
-                max_workers=config.max_parallel_workers
-            ) as executor:
-                for source_type in config.enabled_sources:
-                    future = executor.submit(self._search_source, source_type, context)
-                    futures[future] = source_type
-
-                for future in as_completed(futures):
-                    if context.is_timed_out():
-                        break
+            # Parallel search across all sources, on ONE wall-clock deadline.
+            #
+            # Three things were wrong here and they compounded:
+            #
+            #  1. A brand-new ThreadPoolExecutor was built per search, so every
+            #     debounced keystroke spun up threads — while self._executor,
+            #     created in __init__ for exactly this, was never used at all.
+            #
+            #  2. The `break` on timeout sat INSIDE `with executor`, whose
+            #     __exit__ calls shutdown(wait=True). So breaking out still
+            #     blocked until the slowest source finished. The timeout was
+            #     decorative: it changed which results were collected, never how
+            #     long the user waited.
+            #
+            #  3. future.result(timeout=config.timeout_seconds) gave EACH future
+            #     the full budget, so the worst case was timeout x sources, not
+            #     timeout total.
+            #
+            # Now: shared pool, one deadline for the whole search, and whatever
+            # has arrived when it expires is what ships. A slow source costs its
+            # own results, not the user's search.
+            deadline = time.time() + config.timeout_seconds
+            futures = {
+                self._executor.submit(self._search_source, source_type, context):
+                    source_type
+                for source_type in config.enabled_sources
+            }
+            try:
+                for future in as_completed(
+                    futures, timeout=max(0.1, deadline - time.time())
+                ):
                     source_type = futures[future]
                     try:
-                        results = future.result(timeout=config.timeout_seconds)
+                        # Already complete — as_completed only yields finished
+                        # futures, so this cannot block.
+                        results = future.result(timeout=0)
                         if results:
                             all_results[source_type] = results
                     except Exception as e:
                         print(f"Search failed for {source_type}: {e}")
+            except FuturesTimeoutError:
+                slow = [s.value if hasattr(s, "value") else str(s)
+                        for f, s in futures.items() if not f.done()]
+                print(f"Search deadline hit; still running: {slow}")
+            finally:
+                # Cancel anything not started. A source already mid-request keeps
+                # going on the shared pool and simply has its result dropped —
+                # we do not wait for it.
+                for f in futures:
+                    f.cancel()
         else:
             # Sequential search
             for source_type in config.enabled_sources:

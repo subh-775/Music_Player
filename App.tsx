@@ -31,6 +31,7 @@ import {
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
+import {resetDrawer, settleDrawer} from './src/drawer';
 import {C} from './src/theme';
 import {
   appVersion,
@@ -425,6 +426,31 @@ function Shell() {
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
+  /**
+   * Opening by TAP: mount the panel closed, then run it open. The drag path
+   * (below) skips the animation entirely because the finger IS the animation.
+   */
+  const openDrawer = useCallback(() => {
+    resetDrawer();
+    setDrawerOpen(true);
+    settleDrawer(true);
+  }, []);
+
+  /** A drawer pull has begun. Mount without animating — HomeScreen has already
+   *  parked the panel off-screen and is about to drive it directly. */
+  const beginDrawerDrag = useCallback(() => setDrawerOpen(true), []);
+
+  /** The finger lifted. Carry its speed into the settle, and unmount only once
+   *  a close has actually finished — unmounting early would snap it away
+   *  mid-animation. */
+  const endDrawerDrag = useCallback((open: boolean, velocity: number) => {
+    settleDrawer(open, velocity, finished => {
+      if (finished && !open) {
+        setDrawerOpen(false);
+      }
+    });
+  }, []);
+
   const navigateFromDrawer = useCallback((dest: SidebarDest) => {
     if (dest === 'settings') {
       setSettingsOpen(true);
@@ -459,7 +485,9 @@ function Shell() {
           <HomeScreen
             onPickTrack={pickHomeItem}
             onPlayTrack={play}
-            onOpenMenu={() => setDrawerOpen(true)}
+            onOpenMenu={openDrawer}
+            onBeginDrag={beginDrawerDrag}
+            onEndDrag={endDrawerDrag}
             onOpenQuick={openQuick}
             onReady={onHomeReady}
           />
@@ -596,11 +624,15 @@ function Shell() {
       {/* Above everything, and the real UI is already mounted and painted
           underneath — so lifting this reveals a finished screen rather than
           starting the loading the user can watch. */}
-      {/* Both handlers are stable. Inline arrows here gave the drawer a new
-          onClose on every app re-render, and its open-effect keyed off that —
-          so navigating (a re-render) re-opened the drawer over the page it had
-          just opened. Fixed inside Sidebar too; stable props keep the Modal
-          from re-rendering for nothing either way. */}
+      {/* Last in the tree and absolutely positioned, so it covers the mini
+          player and the bottom nav the way a drawer should — but it is NOT a
+          Modal, because a Modal is its own window and cannot be dragged into
+          view underneath a gesture that is already in progress. Its position is
+          the shared drawerX; see src/drawer.ts.
+
+          Both handlers are stable. Inline arrows here gave the drawer a new
+          onClose on every app re-render, which used to re-run its open effect
+          and slam the panel back open over the page it had just opened. */}
       <Sidebar
         visible={drawerOpen}
         onClose={closeDrawer}

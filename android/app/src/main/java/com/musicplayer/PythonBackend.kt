@@ -35,9 +35,6 @@ object PythonBackend {
         started = true
 
         val app = context.applicationContext
-        if (!Python.isStarted()) {
-            Python.start(AndroidPlatform(app))
-        }
 
         val filesDir = app.filesDir.absolutePath
         val downloadsDir = File(app.getExternalFilesDir(null) ?: app.filesDir, "Music")
@@ -52,6 +49,17 @@ object PythonBackend {
 
         thread(name = "python-backend", isDaemon = true) {
             try {
+                // Python.start() belongs HERE, not on the caller's thread.
+                //
+                // It was called straight from start(), which runs in
+                // MainApplication.onCreate() — so extracting the stdlib,
+                // dlopen'ing libpython and installing the asset importer all
+                // happened on the MAIN thread, blocking the first frame and
+                // risking an ANR on a slow device. Only start_server() was ever
+                // backgrounded, and start_server is the cheap half.
+                if (!Python.isStarted()) {
+                    Python.start(AndroidPlatform(app))
+                }
                 Log.i(TAG, "starting Python backend on 127.0.0.1:$port")
                 Python.getInstance()
                     .getModule("mobile_server")
@@ -63,6 +71,10 @@ object PythonBackend {
                 Log.i(TAG, "Python backend stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Python backend crashed", e)
+                // Let a later call try again. The flag was set before the thread
+                // even started, so a crash in here used to latch the backend
+                // off for the whole process lifetime with nothing to retry it.
+                started = false
             }
         }
     }

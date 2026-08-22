@@ -23,6 +23,7 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional, List, Dict, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, Future
+from components.http import SESSION
 
 try:
     import mutagen
@@ -134,7 +135,11 @@ class DownloadQueueConfig:
     retry_backoff: float = 2.0
     max_retry_delay: float = 60.0
     timeout_seconds: float = 300.0
-    chunk_size: int = 8192
+    # 64KB, not 8KB. Two download loops run in the SAME CPython process as the
+    # audio proxy, so every chunk boundary is a GIL round-trip that playback has
+    # to contend with — which is exactly when stutter shows up. Eight times fewer
+    # boundaries per megabyte, same bytes.
+    chunk_size: int = 65536
     overwrite_existing: bool = False
     skip_existing: bool = False
     auto_start: bool = True
@@ -824,7 +829,7 @@ class MetadataEmbedder:
             try:
                 import requests
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     mime = "image/jpeg"
                     if cover_url.lower().endswith(".png"):
@@ -875,7 +880,7 @@ class MetadataEmbedder:
             try:
                 import requests
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     from mutagen.flac import Picture
 
@@ -926,7 +931,7 @@ class MetadataEmbedder:
             try:
                 import requests
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     mime = (
                         "image/jpeg"
@@ -979,7 +984,7 @@ class MetadataEmbedder:
                 import base64
                 import struct
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     pic_data = resp.content
                     mime = (
