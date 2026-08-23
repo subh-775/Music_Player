@@ -53,7 +53,11 @@ export function Seekbar({
     Animated.timing(grow, {
       toValue: scrubbing ? 1 : 0,
       duration: scrubbing ? 120 : 180,
-      useNativeDriver: false, // animates width/height, which the driver can't
+      // NATIVE. This used to animate width/height/borderRadius, which the
+      // driver cannot handle — so the grab animation ran on the JS thread, at
+      // precisely the moment the JS thread is busiest (you are mid-scrub). It
+      // is a `scale` on a fixed-size thumb now, which the driver can.
+      useNativeDriver: true,
     }).start();
   }, [scrubbing, grow]);
 
@@ -69,7 +73,10 @@ export function Seekbar({
   // Follow engine progress when not dragging and not holding a just-seeked spot.
   useEffect(() => {
     if (draggingRef.current || heldRef.current !== null) {
-      if (heldRef.current !== null && Math.abs(position - heldRef.current) < 1.5) {
+      if (
+        heldRef.current !== null &&
+        Math.abs(position - heldRef.current) < 1.5
+      ) {
         heldRef.current = null; // engine caught up — resume following
       } else {
         return;
@@ -136,19 +143,29 @@ export function Seekbar({
         <View style={styles.track}>
           <Animated.View style={[styles.fill, {width: widthPct}]} />
         </View>
+        {/* Two nodes on purpose: the OUTER one is positioned with a percentage
+            `left`, which only the JS driver can animate, and the INNER one
+            scales natively. Putting both on one node makes React Native refuse
+            the native driver outright. */}
         <Animated.View
-          style={[
-            styles.thumb,
-            {
-              left: widthPct,
-              width: grow.interpolate({inputRange: [0, 1], outputRange: [13, 17]}),
-              height: grow.interpolate({inputRange: [0, 1], outputRange: [13, 17]}),
-              marginLeft: grow.interpolate({inputRange: [0, 1], outputRange: [-6.5, -8.5]}),
-              borderRadius: grow.interpolate({inputRange: [0, 1], outputRange: [7, 9]}),
-            },
-          ]}
-          pointerEvents="none"
-        />
+          style={[styles.thumbAnchor, {left: widthPct}]}
+          pointerEvents="none">
+          <Animated.View
+            style={[
+              styles.thumb,
+              {
+                transform: [
+                  {
+                    scale: grow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, 1.32],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+        </Animated.View>
       </View>
       <View style={styles.times}>
         <Text style={styles.time}>{clock(label)}</Text>
@@ -168,8 +185,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fill: {height: '100%', backgroundColor: C.text, borderRadius: 2},
+  // Half the thumb's width, so the thumb sits centred on the playhead.
+  thumbAnchor: {position: 'absolute', marginLeft: -6.5},
   thumb: {
-    position: 'absolute',
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
     backgroundColor: C.text,
     shadowColor: '#000',
     shadowOpacity: 0.3,

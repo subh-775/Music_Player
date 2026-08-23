@@ -19,7 +19,7 @@ import {
 import {Check, ChevronLeft, Play, Plus} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import type {Track} from '../backend';
-import {cleanText, normalizeTracks} from '../tracks';
+import {cleanText, getTrackId, normalizeTracks} from '../tracks';
 import {startImport, useSpotifyImport} from '../spotifyImport';
 import {addTracksToPlaylist, createPlaylist} from '../playlists';
 import {TrackRow} from '../components/TrackRow';
@@ -153,7 +153,7 @@ export function SpotifyImportScreen({
 
           <FlatList
             data={tracks}
-            keyExtractor={(t, i) => `${t.title}-${i}`}
+            keyExtractor={t => getTrackId(t)}
             contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
             renderItem={({item}) => (

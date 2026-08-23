@@ -11,6 +11,7 @@
 import {useSyncExternalStore} from 'react';
 import {NativeEventEmitter, NativeModules} from 'react-native';
 import {createStore} from './storage';
+import {readSettings} from './store';
 import {diag} from './diag';
 
 /**
@@ -166,6 +167,10 @@ export function checkUpdate(): void {
  * so a release still reaches everyone on their very next launch.
  */
 export function checkUpdateOnLaunch(): void {
+  if (!readSettings().autoUpdateCheck) {
+    diag('update', 'launch check skipped — automatic updates are off');
+    return;
+  }
   if (Date.now() - lastAllClear.get() < DAY_MS) {
     diag('update', 'launch check skipped — all clear less than a day ago');
     return;

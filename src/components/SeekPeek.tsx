@@ -10,16 +10,40 @@
  */
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
-import {ChevronLeft, ChevronRight} from 'lucide-react-native';
+import Svg, {Path} from 'react-native-svg';
 import {C} from '../theme';
 
-export function SeekPeek({
+/**
+ * One solid seek triangle.
+ *
+ * NOT a lucide chevron. Chevrons are stroked OPEN paths (`>`), so they can't be
+ * filled — which is why the mark read as three thin outlines instead of the
+ * heavy solid `◀◀◀` the reference has. A closed path with `fill` is the only
+ * way to get that, and react-native-svg is already a dependency.
+ *
+ * `side` 1 = forward (points right), -1 = back.
+ */
+function SeekTriangle({
   side,
-  seconds,
+  size = 21,
+  color = C.text,
 }: {
   side: 1 | -1;
-  seconds: number;
+  size?: number;
+  color?: string;
 }) {
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      style={side === 1 ? undefined : styles.mirror}>
+      <Path d="M5 4.2 L5 19.8 L19 12 Z" fill={color} />
+    </Svg>
+  );
+}
+
+export function SeekPeek({side, seconds}: {side: 1 | -1; seconds: number}) {
   // Presence: blooms in on mount, holds at 1. Only `side` re-arms it, because a
   // tap on the OTHER edge is a genuinely new gesture; a bigger number is not.
   const bloom = useRef(new Animated.Value(0)).current;
@@ -36,10 +60,16 @@ export function SeekPeek({
 
   useEffect(() => {
     // One continuous chase, looping for as long as the disc is up.
+    //
+    // The order FLIPS with direction. Animated.stagger always runs the array
+    // left-to-right, so a fixed order chased rightward even when seeking
+    // backward — the animation pointed one way and ran the other. Reversed for
+    // `side === -1`, both directions now chase outward, away from the artwork.
+    const order = side === 1 ? chevrons : [...chevrons].reverse();
     const loop = Animated.loop(
       Animated.stagger(
         140,
-        chevrons.map(c =>
+        order.map(c =>
           Animated.sequence([
             Animated.timing(c, {
               toValue: 1,
@@ -59,9 +89,7 @@ export function SeekPeek({
     );
     loop.start();
     return () => loop.stop();
-  }, [chevrons]);
-
-  const Chevron = side === 1 ? ChevronRight : ChevronLeft;
+  }, [chevrons, side]);
 
   return (
     <Animated.View
@@ -83,13 +111,37 @@ export function SeekPeek({
       ]}>
       <View style={styles.row}>
         {chevrons.map((c, i) => (
-          <Animated.View key={i} style={{opacity: c.interpolate({inputRange: [0, 1], outputRange: [0.35, 1]})}}>
-            <Chevron size={22} color={C.text} strokeWidth={2.6} />
+          <Animated.View
+            key={i}
+            style={[
+              // Each triangle overlaps the one before it, which is what makes
+              // the three read as a single heavy mark rather than three
+              // separate icons. A single margin on the container did not.
+              i === 0 ? null : styles.overlap,
+              {
+                opacity: c.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.3, 1],
+                }),
+                transform: [
+                  {
+                    scale: c.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.92, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <SeekTriangle side={side} />
           </Animated.View>
         ))}
       </View>
+      {/* ASCII '+' and '-'. The label used U+2212 (true minus) against an ASCII
+          plus; they render at different widths, so the whole text block shifted
+          sideways between forward and backward. */}
       <Text style={styles.label}>
-        {side === 1 ? '+' : '−'}
+        {side === 1 ? '+' : '-'}
         {seconds} seconds
       </Text>
     </Animated.View>
@@ -116,6 +168,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 999,
     borderBottomLeftRadius: 999,
   },
-  row: {flexDirection: 'row', alignItems: 'center', marginLeft: -6},
+  mirror: {transform: [{scaleX: -1}]},
+  row: {flexDirection: 'row', alignItems: 'center'},
+  overlap: {marginLeft: -7},
   label: {color: C.text, fontSize: 13, fontWeight: '600', marginTop: 6},
 });

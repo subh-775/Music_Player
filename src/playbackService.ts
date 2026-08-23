@@ -10,6 +10,7 @@
  */
 import TrackPlayer, {Event, State} from 'react-native-track-player';
 import {setPausedByDuck, wasPausedByDuck} from './duckState';
+import {topUpFromRadio} from './player';
 
 /**
  * Did WE pause because we lost audio focus, or did the user?
@@ -40,6 +41,31 @@ module.exports = async function playbackService() {
   TrackPlayer.addEventListener(Event.RemoteSeek, ({position}) =>
     TrackPlayer.seekTo(position),
   );
+
+  /**
+   * The queue ran dry — last line of defence for autoplay.
+   *
+   * The top-up normally happens on PlaybackActiveTrackChanged, a few songs
+   * ahead. If that missed (a slow radio response, a queue emptied by a manual
+   * skip), this catches it: it runs HERE, in the foreground service, so it
+   * still fires with the app backgrounded and the screen off — which is the
+   * exact situation where the UI's JS timer is frozen and playback used to just
+   * stop until you pressed next.
+   */
+  TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async () => {
+    try {
+      await topUpFromRadio();
+      const queue = await TrackPlayer.getQueue();
+      const index = await TrackPlayer.getActiveTrackIndex();
+      // Only if the top-up actually appended something past where we stopped.
+      if (queue.length && index != null && index < queue.length - 1) {
+        await TrackPlayer.skipToNext();
+        await TrackPlayer.play();
+      }
+    } catch {
+      /* nothing to continue with — leave playback stopped */
+    }
+  });
 
   TrackPlayer.addEventListener(Event.RemoteNext, async () => {
     try {

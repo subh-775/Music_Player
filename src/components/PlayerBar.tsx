@@ -37,10 +37,23 @@ import {toward, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
 
+/**
+ * The hairline under the mini player, and the only part of it on a clock.
+ *
+ * PlayerBar is mounted above ALL THREE tabs for the life of the app, so
+ * subscribing to progress in the bar itself meant a 1Hz re-render of a
+ * component containing a Marquee, forever, on every screen. Here it re-renders
+ * one 2px view.
+ */
+const MiniProgress = React.memo(function MiniProgress() {
+  const {position, duration} = useProgress(1000);
+  const pct = duration > 0 ? Math.min(1, position / duration) : 0;
+  return <View style={[styles.progressFill, {width: `${pct * 100}%`}]} />;
+});
+
 export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const active = useActiveTrack();
   const playing = useIsPlaying();
-  const {position, duration} = useProgress(1000);
   const output = useAudioOutput();
 
   const track = useMemo(() => sourceTrackFor(active), [active]);
@@ -93,7 +106,6 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   }
 
   const artwork = artworkForColor;
-  const pct = duration > 0 ? Math.min(1, position / duration) : 0;
 
   return (
     <View
@@ -175,7 +187,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
       </View>
 
       <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, {width: `${pct * 100}%`}]} />
+        <MiniProgress />
       </View>
     </View>
   );

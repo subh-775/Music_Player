@@ -13,7 +13,7 @@
 import {useSyncExternalStore} from 'react';
 import {apiUrl, getDownloadStatus, startDownload, type Track} from './backend';
 import {getBestArtworkUrl, getTrackId} from './tracks';
-import {createStore, asArray, useStoreValue} from './storage';
+import {createStore, asArray, useStoreSelector, useStoreValue} from './storage';
 import {toast} from './toast';
 
 /**
@@ -78,7 +78,9 @@ export function overlayDownloadArtwork(tracks: Track[]): Track[] {
  * cheerfully downloading the same song five times.
  */
 const downloadedIds = createStore<string[]>('mp.downloadedIds.v1', [], raw =>
-  asArray<string>(raw).filter(x => typeof x === 'string').slice(0, 2000),
+  asArray<string>(raw)
+    .filter(x => typeof x === 'string')
+    .slice(0, 2000),
 );
 
 export function isDownloaded(track: Track | null | undefined): boolean {
@@ -101,6 +103,22 @@ export function markDownloaded(tracks: Track[]): void {
 
 export function useDownloadedIds(): string[] {
   return useStoreValue(downloadedIds);
+}
+
+/**
+ * Is THIS track on disk — as a boolean subscription.
+ *
+ * useDownloadedIds() hands back the whole id array, so any download finishing
+ * re-rendered every row that called it. This re-renders a row only when that
+ * row's own answer changes.
+ */
+export function useIsDownloaded(track: Track | null | undefined): boolean {
+  const id = track ? getTrackId(track) : '';
+  const onDisk = !!track?.file_path;
+  return useStoreSelector(
+    downloadedIds,
+    ids => onDisk || (!!id && ids.includes(id)),
+  );
 }
 
 export type DownloadJob = {
@@ -134,7 +152,9 @@ function ensurePolling() {
     return;
   }
   timer = setInterval(async () => {
-    const active = jobs.filter(j => j.status === 'queued' || j.status === 'downloading');
+    const active = jobs.filter(
+      j => j.status === 'queued' || j.status === 'downloading',
+    );
     if (!active.length) {
       stopPolling();
       return;
@@ -145,7 +165,9 @@ function ensurePolling() {
           const t = await getDownloadStatus(job.taskId);
           const raw = Number(t.progress);
           // The backend reports 0..100; normalise once, here.
-          job.progress = Number.isFinite(raw) ? Math.min(1, raw / 100) : job.progress;
+          job.progress = Number.isFinite(raw)
+            ? Math.min(1, raw / 100)
+            : job.progress;
           if (t.status === 'completed' || t.status === 'done') {
             job.status = 'done';
             job.progress = 1;
@@ -194,7 +216,10 @@ export async function enqueueDownload(track: Track): Promise<void> {
     return;
   }
   rememberArtwork(track);
-  jobs = [...jobs, {taskId: res.task_id, track, progress: null, status: 'queued'}];
+  jobs = [
+    ...jobs,
+    {taskId: res.task_id, track, progress: null, status: 'queued'},
+  ];
   emit();
   ensurePolling();
 }

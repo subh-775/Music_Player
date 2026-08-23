@@ -23,7 +23,7 @@ import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
 import {UpdateModal} from './src/components/UpdateModal';
-import {checkUpdateOnLaunch} from './src/update';
+import {checkUpdateOnLaunch, useUpdateAvailable} from './src/update';
 import {
   TrackActionSheet,
   type SheetContext,
@@ -86,6 +86,9 @@ function Shell() {
   const [artistChoices, setArtistChoices] = useState<string[]>([]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Which part of Settings to land on. Set when the update dot is what sent
+   *  you there, so you arrive at the update instead of the top of the list. */
+  const [settingsFocus, setSettingsFocus] = useState<'update' | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** Shortcuts, opened from the drawer. Its own overlay, not nested inside
    *  Settings — see navigateFromDrawer. */
@@ -97,6 +100,7 @@ function Shell() {
   /** The drawer's Recents / Your sound pages. null = closed. */
   const [activity, setActivity] = useState<'recents' | 'stats' | null>(null);
   const likes = useLikes();
+  const updateWaiting = useUpdateAvailable();
   const exitArmedAt = useRef(0);
 
   /**
@@ -357,6 +361,7 @@ function Shell() {
       }
       if (settingsOpen) {
         setSettingsOpen(false);
+        setSettingsFocus(null);
         return true;
       }
       if (tipsOpen) {
@@ -451,21 +456,28 @@ function Shell() {
     });
   }, []);
 
-  const navigateFromDrawer = useCallback((dest: SidebarDest) => {
-    if (dest === 'settings') {
-      setSettingsOpen(true);
-    } else if (dest === 'shortcuts') {
-      // Its OWN overlay, not a panel pushed inside Settings. It used to be —
-      // Settings would mount underneath with panel='tips' — so back from
-      // Shortcuts revealed a full Settings LIST the user never asked to open,
-      // landing them somewhere unrelated to what they tapped in the drawer.
-      // Shortcuts is reached from the drawer; its back should return to
-      // wherever the drawer was opened from, same as every other drawer item.
-      setTipsOpen(true);
-    } else {
-      setActivity(dest);
-    }
-  }, []);
+  const navigateFromDrawer = useCallback(
+    (dest: SidebarDest) => {
+      if (dest === 'settings') {
+        setSettingsFocus(updateWaiting ? 'update' : null);
+        setSettingsOpen(true);
+      } else if (dest === 'shortcuts') {
+        // Its OWN overlay, not a panel pushed inside Settings. It used to be —
+        // Settings would mount underneath with panel='tips' — so back from
+        // Shortcuts revealed a full Settings LIST the user never asked to open,
+        // landing them somewhere unrelated to what they tapped in the drawer.
+        // Shortcuts is reached from the drawer; its back should return to
+        // wherever the drawer was opened from, same as every other drawer item.
+        setTipsOpen(true);
+      } else {
+        setActivity(dest);
+      }
+      // updateWaiting is read above, so it has to be a dependency — with an empty
+      // array this closure would keep whatever the flag was on first render and
+      // the deep link would never fire.
+    },
+    [updateWaiting],
+  );
 
   const openSheet = useCallback((track: Track, from?: SheetContext) => {
     setSheetTrack(track);
@@ -573,7 +585,15 @@ function Shell() {
             Here it stays inside the body, so playback controls remain visible. */}
         {settingsOpen && (
           <View style={StyleSheet.absoluteFill}>
-            <SettingsScreen onClose={() => setSettingsOpen(false)} />
+            <SettingsScreen
+              focus={settingsFocus}
+              onClose={() => {
+                setSettingsOpen(false);
+                // Cleared on the way out, or opening Settings normally next
+                // time would scroll to the update again.
+                setSettingsFocus(null);
+              }}
+            />
           </View>
         )}
 

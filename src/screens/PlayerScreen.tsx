@@ -16,7 +16,14 @@
  * The pane toggles sit ABOVE the transport rather than in the header, so the
  * play controls never move when you switch panes.
  */
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -52,7 +59,7 @@ import {
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {C, T} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
-import {enqueueDownload, isDownloaded, useDownloadedIds} from '../downloads';
+import {enqueueDownload, useIsDownloaded} from '../downloads';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {
   RepeatMode,
@@ -110,34 +117,33 @@ export function PlayerScreen({
 }) {
   const active = useActiveTrack();
   const playing = useIsPlaying();
-  const {position: enginePosition, duration} = useProgress(250);
   const output = useAudioOutput();
 
   /**
-   * Where the bar should SAY we are.
+   * Progress is NOT subscribed to here any more.
    *
-   * useProgress only samples the engine periodically, so after a double-tap
-   * seek the bar sat at the old spot until the next sample landed — the seek
-   * felt like it lagged the tap. A seek now publishes its target immediately
-   * and that value wins until the engine's own reading catches up to it, at
-   * which point the engine is authoritative again.
+   * `useProgress(250)` at the top of this component made `position` state on a
+   * 1,100-line tree, so the ENTIRE player re-rendered four times a second — the
+   * artwork, the controls, the pane tabs, the lyrics scan, all of it — and it
+   * did so while you were mid-drag trying to dismiss the sheet. That is most of
+   * why minimising felt heavy.
+   *
+   * It now lives in two leaves that actually need it: <ProgressArea> (the
+   * seekbar, 250ms) and <LyricsPane> (line highlighting, 500ms is plenty). Both
+   * are memoised, so a progress tick re-renders a seekbar or a lyric list and
+   * nothing else.
+   *
+   * The double-tap seek still needs to know where we are, but only at the
+   * moment of a tap — never during render. ProgressArea writes each sample into
+   * this ref for it.
    */
-  const [seekEcho, setSeekEcho] = useState<{at: number; to: number} | null>(
-    null,
-  );
-  const position =
-    seekEcho &&
-    Math.abs(enginePosition - seekEcho.to) > 1.2 &&
-    Date.now() - seekEcho.at < 1500
-      ? seekEcho.to
-      : enginePosition;
-
-  /** Seek AND move the bar in the same frame. */
-  const seekAndShow = useCallback((to: number) => {
-    const target = Math.max(0, to);
-    setSeekEcho({at: Date.now(), to: target});
-    seekTo(target);
+  const progressRef = useRef({position: 0, duration: 0});
+  const onProgressSample = useCallback((pos: number, dur: number) => {
+    progressRef.current = {position: pos, duration: dur};
   }, []);
+  /** Lets the double-tap seek move the bar in the same frame it seeks, even
+   *  though the bar's state now lives inside <ProgressArea>. */
+  const progressApi = useRef<ProgressHandle>(null);
 
   // The engine's queue item is a reduced shape; the badges, download and like
   // all need the real backend Track behind it.
@@ -168,7 +174,7 @@ export function PlayerScreen({
   const lyricsState = useLyrics(
     cleanText(String(active?.title ?? '')),
     String(active?.artist ?? ''),
-    duration ? duration * 1000 : undefined,
+    active?.duration ? Number(active.duration) * 1000 : undefined,
     visible,
   );
 
@@ -179,9 +185,10 @@ export function PlayerScreen({
   const shuffled = useShuffle();
   const [downloading, setDownloading] = useState(false);
   // Subscribed so the button flips to the green tick the moment the download
-  // completes, and stays a tick on a song that's already on disk.
-  useDownloadedIds();
-  const downloaded = isDownloaded(track);
+  // completes, and stays a tick on a song that's already on disk. A boolean
+  // subscription, so an unrelated download finishing does not re-render the
+  // whole player.
+  const downloaded = useIsDownloaded(track);
 
   // Double-tap seek: consecutive taps on the same side stack (10s, 20s, 30s…),
   // the way YouTube does, so a quick triple-tap jumps further.
@@ -192,42 +199,40 @@ export function PlayerScreen({
   const tapRef = useRef<{t: number; side: 1 | -1; secs: number} | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const doubleTapSeek = useCallback(
-    (side: 1 | -1) => {
-      const target = position + side * 10;
-      // Dashing PAST the ends changes the song — and a track change from a
-      // deliberate gesture should always PLAY, even if you were paused. (Seeking
-      // WITHIN a song leaves play/pause alone, so scrubbing a paused song stays
-      // paused.) skipNext/skipPrevious both resume.
-      if (side === 1 && duration > 0 && target >= duration - 0.5) {
-        setSeekFlash(null);
-        tapRef.current = null;
-        skipNext();
-        return;
-      }
-      if (side === -1 && position <= 0.5) {
-        setSeekFlash(null);
-        tapRef.current = null;
-        skipPrevious();
-        return;
-      }
+  const doubleTapSeek = useCallback((side: 1 | -1) => {
+    const {position, duration} = progressRef.current;
+    const target = position + side * 10;
+    // Dashing PAST the ends changes the song — and a track change from a
+    // deliberate gesture should always PLAY, even if you were paused. (Seeking
+    // WITHIN a song leaves play/pause alone, so scrubbing a paused song stays
+    // paused.) skipNext/skipPrevious both resume.
+    if (side === 1 && duration > 0 && target >= duration - 0.5) {
+      setSeekFlash(null);
+      tapRef.current = null;
+      skipNext();
+      return;
+    }
+    if (side === -1 && position <= 0.5) {
+      setSeekFlash(null);
+      tapRef.current = null;
+      skipPrevious();
+      return;
+    }
 
-      const now = Date.now();
-      const prev = tapRef.current;
-      const stacked =
-        prev && prev.side === side && now - prev.t < 900 ? prev.secs + 10 : 10;
-      tapRef.current = {t: now, side, secs: stacked};
+    const now = Date.now();
+    const prev = tapRef.current;
+    const stacked =
+      prev && prev.side === side && now - prev.t < 900 ? prev.secs + 10 : 10;
+    tapRef.current = {t: now, side, secs: stacked};
 
-      seekAndShow(position + side * stacked);
-      // The disc holds steady while it's up; only the number changes here.
-      setSeekFlash({side, secs: stacked});
-      if (flashTimer.current) {
-        clearTimeout(flashTimer.current);
-      }
-      flashTimer.current = setTimeout(() => setSeekFlash(null), 800);
-    },
-    [position, duration, seekAndShow],
-  );
+    progressApi.current?.seek(position + side * stacked);
+    // The disc holds steady while it's up; only the number changes here.
+    setSeekFlash({side, secs: stacked});
+    if (flashTimer.current) {
+      clearTimeout(flashTimer.current);
+    }
+    flashTimer.current = setTimeout(() => setSeekFlash(null), 800);
+  }, []);
 
   useEffect(
     () => () => {
@@ -533,11 +538,7 @@ export function PlayerScreen({
               re-ran their whole load every pane switch, which is the 1-2s
               "loading again" the pane tabs kept showing. */}
             <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
-              <LyricsPane
-                state={lyricsState}
-                position={position}
-                visible={pane === 'lyrics'}
-              />
+              <LyricsPane state={lyricsState} visible={pane === 'lyrics'} />
             </View>
             <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
               <QueuePane />
@@ -682,11 +683,7 @@ export function PlayerScreen({
               </View>
             </View>
 
-            <Seekbar
-              position={position}
-              duration={duration}
-              onSeek={seekAndShow}
-            />
+            <ProgressArea ref={progressApi} onSample={onProgressSample} />
 
             {/* Pane toggles left, audio output right — above the transport so
               the play controls never shift. */}
@@ -906,20 +903,79 @@ function useLyrics(
   };
 }
 
+type ProgressHandle = {seek: (to: number) => void};
+
+/**
+ * The seekbar, and the ONLY thing in the player that re-renders on the clock.
+ *
+ * This subscription used to sit at the top of PlayerScreen, which made a
+ * 1,100-line tree re-render four times a second — including while you were
+ * dragging the sheet down. Here it re-renders a seekbar and nothing else.
+ *
+ * `onSample` mirrors each reading into the parent's ref so the double-tap seek
+ * can read the position on a tap without the parent subscribing to it, and the
+ * imperative `seek` lets that tap move the bar instantly rather than waiting up
+ * to 250ms for the next sample.
+ */
+const ProgressArea = React.memo(
+  React.forwardRef<ProgressHandle, {onSample: (p: number, d: number) => void}>(
+    function ProgressArea({onSample}, ref) {
+      const {position: enginePosition, duration} = useProgress(250);
+
+      /**
+       * Where the bar should SAY we are.
+       *
+       * useProgress only samples periodically, so after a double-tap seek the
+       * bar sat at the old spot until the next sample landed and the seek felt
+       * like it lagged the tap. A seek publishes its target immediately and
+       * that value wins until the engine's own reading catches up to it, at
+       * which point the engine is authoritative again.
+       */
+      const [seekEcho, setSeekEcho] = useState<{at: number; to: number} | null>(
+        null,
+      );
+      const position =
+        seekEcho &&
+        Math.abs(enginePosition - seekEcho.to) > 1.2 &&
+        Date.now() - seekEcho.at < 1500
+          ? seekEcho.to
+          : enginePosition;
+
+      useEffect(() => {
+        onSample(enginePosition, duration);
+      }, [enginePosition, duration, onSample]);
+
+      /** Seek AND move the bar in the same frame. */
+      const seekAndShow = useCallback((to: number) => {
+        const target = Math.max(0, to);
+        setSeekEcho({at: Date.now(), to: target});
+        seekTo(target);
+      }, []);
+
+      useImperativeHandle(ref, () => ({seek: seekAndShow}), [seekAndShow]);
+
+      return (
+        <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
+      );
+    },
+  ),
+);
+
 /**
  * Synced lyrics scroll themselves and can be tapped to jump; plain text is
  * shown when that's all the sources have.
  */
-function LyricsPane({
+const LyricsPane = React.memo(function LyricsPane({
   state,
-  position,
   visible = true,
 }: {
   state: LyricsState;
-  position: number;
   /** Mounted-but-hidden panes must not scroll a view nobody can see. */
   visible?: boolean;
 }) {
+  // Its own subscription, at half the seekbar's rate — highlighting a line does
+  // not need 4Hz, and this way a lyric tick re-renders only the lyric list.
+  const {position} = useProgress(500);
   const {lyrics, busy, err} = state;
   const scroller = useRef<ScrollView>(null);
 
@@ -1004,7 +1060,7 @@ function LyricsPane({
           ))}
     </ScrollView>
   );
-}
+});
 
 const styles = StyleSheet.create({
   ghRoot: {flex: 1},

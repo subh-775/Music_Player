@@ -1,14 +1,15 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   Image,
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import {runOnJS} from 'react-native-reanimated';
 import {Menu} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
@@ -20,7 +21,12 @@ import {
 } from '../backend';
 import {Greeting} from '../components/Greeting';
 import {useRecentlyPlayed} from '../recentlyPlayed';
-import {getBestArtworkUrl, cleanText, upgradeArtwork} from '../tracks';
+import {
+  getBestArtworkUrl,
+  cleanText,
+  getTrackId,
+  upgradeArtwork,
+} from '../tracks';
 import {createStore, asArray, useStoreValue} from '../storage';
 import {usePlaylists} from '../playlists';
 import {useLikes} from '../store';
@@ -32,7 +38,7 @@ import {
   type Collection,
 } from '../collections';
 import {useUpdateAvailable} from '../update';
-import {dragDrawer, isDrawerPull, resetDrawer, shouldOpen} from '../drawer';
+import {DRAWER_GRAB, DRAWER_W, drawerX, shouldOpen} from '../drawer';
 
 /**
  * Last Home rows, persisted. Showing these instantly on the next launch is
@@ -91,43 +97,55 @@ export function HomeScreen({
     : 'boot';
 
   /**
-   * Drag right anywhere on Home to pull the drawer in — and the panel follows
-   * the finger the whole way, the way Gmail, Twitter and ChatGPT do it.
+   * Drag right anywhere on Home to pull the drawer in, with the panel following
+   * the finger the whole way — Gmail / Twitter / ChatGPT behaviour.
    *
-   * The panel is mounted the instant the gesture is claimed (onBeginDrag), then
-   * every move writes the finger's distance straight to the shared drawerX. The
-   * previous version only called onOpenMenu on RELEASE, so the drawer played
-   * its own animation after the gesture was already over — you dragged, nothing
-   * happened, then a panel appeared.
+   * Recognised NATIVELY. As a PanResponder this lost the same race TrackRow's
+   * swipe did: the JS predicate was evaluated after the native scroller had
+   * already claimed a fast flick, and its `dx > |dy| * 2` ratio failed on the
+   * large first delta a fast flick delivers. activeOffsetX/failOffsetY are
+   * evaluated on the raw touch stream, so speed stops mattering.
    *
-   * Deliberately NOT a capture handler. Without capture, a child that has
-   * already claimed the touch keeps it — so dragging a "Recently played" row
-   * still scrolls that row, and dragging vertically still scrolls the page.
-   * The gesture only lands when nothing else wanted it, which is exactly the
-   * empty space between and around the rows.
+   * failOffsetY is what leaves vertical page scrolling and the horizontal
+   * "Recently played" rows alone.
+   *
+   * Every move writes straight to the shared drawerX on the UI thread — JS is
+   * touched only twice per gesture, to mount the panel and to settle it.
    */
-  const dragRef = useRef(onBeginDrag);
-  dragRef.current = onBeginDrag;
+  const beginRef = useRef(onBeginDrag);
+  beginRef.current = onBeginDrag;
   const endRef = useRef(onEndDrag);
   endRef.current = onEndDrag;
 
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => isDrawerPull(g.dx, g.dy),
-      onPanResponderGrant: () => {
-        // Mount it closed, right now, so the very next move already moves a
-        // panel that is on screen.
-        resetDrawer();
-        dragRef.current();
-      },
-      onPanResponderMove: (_e, g) => dragDrawer(g.dx),
-      onPanResponderRelease: (_e, g) =>
-        endRef.current(shouldOpen(g.dx, g.vx), Math.abs(g.vx)),
-      // A cancelled gesture (a call arriving, the OS taking over) must not leave
-      // the panel stranded half open.
-      onPanResponderTerminate: () => endRef.current(false, 0),
-    }),
-  ).current;
+  const begin = useCallback(() => beginRef.current(), []);
+  const end = useCallback(
+    (open: boolean, velocity: number) => endRef.current(open, velocity),
+    [],
+  );
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-1000, DRAWER_GRAB])
+        .failOffsetY([-16, 16])
+        .onBegin(() => {
+          drawerX.value = -DRAWER_W; // start from closed, whatever came before
+          runOnJS(begin)();
+        })
+        .onUpdate(e => {
+          drawerX.value = Math.max(
+            -DRAWER_W,
+            Math.min(0, -DRAWER_W + e.translationX),
+          );
+        })
+        .onEnd(e => {
+          runOnJS(end)(
+            shouldOpen(e.translationX, e.velocityX),
+            Math.abs(e.velocityX) / 1000,
+          );
+        }),
+    [begin, end],
+  );
 
   const load = useCallback(async () => {
     setError('');
@@ -173,96 +191,104 @@ export function HomeScreen({
   }
 
   return (
-    <View style={styles.fill} {...pan.panHandlers}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        overScrollMode="never"
-        bounces={false}>
-        {/* Hamburger FIRST: the drawer slides in from the left, so its handle
+    <GestureDetector gesture={pan}>
+      <View style={styles.fill}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          bounces={false}>
+          {/* Hamburger FIRST: the drawer slides in from the left, so its handle
           belongs on the left — a right-hand button that opens a left-hand panel
           reads backwards, and it's the far corner for a right thumb. */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={onOpenMenu}
-            hitSlop={14}
-            style={styles.gear}>
-            <Menu size={25} color={C.text} strokeWidth={2.4} />
-            {/* A waiting update has to stay findable after the popup is
+          <View style={styles.header}>
+            <TouchableOpacity
+              onPress={onOpenMenu}
+              hitSlop={14}
+              style={styles.gear}>
+              <Menu size={25} color={C.text} strokeWidth={2.4} />
+              {/* A waiting update has to stay findable after the popup is
               dismissed — this is the only thing that says so. */}
-            {updateWaiting && <View style={styles.dot} />}
-          </TouchableOpacity>
-          <View style={styles.headerText}>
-            <Greeting />
+              {updateWaiting && (
+                <View
+                  style={styles.dot}
+                  accessibilityLabel="Update available"
+                  accessible
+                />
+              )}
+            </TouchableOpacity>
+            <View style={styles.headerText}>
+              <Greeting />
+            </View>
           </View>
-        </View>
 
-        {/* Quick access. The two things everyone opens most (Liked, Downloaded)
+          {/* Quick access. The two things everyone opens most (Liked, Downloaded)
           plus the newest playlists, one tap from the top of Home instead of a
           trip through the Library tab. Two columns, so four fit above the fold
           without pushing the content rows off screen. */}
-        <View style={styles.quickGrid}>
-          <QuickTile
-            collection={likedCollection(likes)}
-            sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
-            onPress={() => onOpenQuick({kind: 'liked'})}
-          />
-          <QuickTile
-            collection={downloadsCollection([])}
-            sub="Offline"
-            onPress={() => onOpenQuick({kind: 'downloads'})}
-          />
-          {playlists.slice(0, 4).map(p => (
+          <View style={styles.quickGrid}>
             <QuickTile
-              key={p.id}
-              collection={playlistToCollection(p)}
-              sub={`${p.tracks?.length ?? 0} song${
-                (p.tracks?.length ?? 0) === 1 ? '' : 's'
-              }`}
-              onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
+              collection={likedCollection(likes)}
+              sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
+              onPress={() => onOpenQuick({kind: 'liked'})}
             />
-          ))}
-        </View>
-
-        {recent.length > 0 && (
-          <View style={styles.row}>
-            <Text style={styles.rowTitle}>Recently played</Text>
-            <FlatList
-              horizontal
-              data={recent}
-              keyExtractor={(t, i) => `${t.title}-${i}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rowList}
-              renderItem={({item}) => (
-                <TouchableOpacity
-                  style={styles.card}
-                  activeOpacity={0.7}
-                  onPress={() => onPlayTrack(item, recent)}>
-                  <View style={styles.artWrap}>
-                    {getBestArtworkUrl(item) ? (
-                      <Image
-                        source={{uri: getBestArtworkUrl(item)}}
-                        style={styles.art}
-                      />
-                    ) : (
-                      <View style={[styles.art, styles.artFallback]} />
-                    )}
-                  </View>
-                  <Text style={styles.cardTitle} numberOfLines={2}>
-                    {cleanText(item.title)}
-                  </Text>
-                </TouchableOpacity>
-              )}
+            <QuickTile
+              collection={downloadsCollection([])}
+              sub="Offline"
+              onPress={() => onOpenQuick({kind: 'downloads'})}
             />
+            {playlists.slice(0, 4).map(p => (
+              <QuickTile
+                key={p.id}
+                collection={playlistToCollection(p)}
+                sub={`${p.tracks?.length ?? 0} song${
+                  (p.tracks?.length ?? 0) === 1 ? '' : 's'
+                }`}
+                onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
+              />
+            ))}
           </View>
-        )}
 
-        {rows.map(row => (
-          <Row key={row.title} row={row} onPick={onPickTrack} />
-        ))}
-        <View style={styles.tail} />
-      </ScrollView>
-    </View>
+          {recent.length > 0 && (
+            <View style={styles.row}>
+              <Text style={styles.rowTitle}>Recently played</Text>
+              <FlatList
+                horizontal
+                data={recent}
+                keyExtractor={t => getTrackId(t)}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowList}
+                renderItem={({item}) => (
+                  <TouchableOpacity
+                    style={styles.card}
+                    activeOpacity={0.7}
+                    onPress={() => onPlayTrack(item, recent)}>
+                    <View style={styles.artWrap}>
+                      {getBestArtworkUrl(item) ? (
+                        <Image
+                          source={{uri: getBestArtworkUrl(item)}}
+                          style={styles.art}
+                        />
+                      ) : (
+                        <View style={[styles.art, styles.artFallback]} />
+                      )}
+                    </View>
+                    <Text style={styles.cardTitle} numberOfLines={2}>
+                      {cleanText(item.title)}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
+
+          {rows.map(row => (
+            <Row key={row.title} row={row} onPick={onPickTrack} />
+          ))}
+          <View style={styles.tail} />
+        </ScrollView>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -309,7 +335,12 @@ function Row({row, onPick}: {row: HomeRow; onPick: (i: HomeItem) => void}) {
       <FlatList
         horizontal
         data={row.items}
-        keyExtractor={(_, i) => String(i)}
+        // Stable per card. Index-based keys meant any refresh that shifted the
+        // row re-keyed every card after it, remounting each one and throwing
+        // away its decoded <Image> — which is the artwork flash on refresh.
+        keyExtractor={item =>
+          item.perma_url || `${item.type}|${item.title || item.name}`
+        }
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.rowList}
         renderItem={({item}) => <Card item={item} onPick={onPick} />}

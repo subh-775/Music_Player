@@ -12,7 +12,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   Image,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,6 +37,7 @@ import {isLiked, toggleLike} from '../store';
 import {removeTrackFromPlaylist} from '../playlists';
 import {addToQueue} from '../player';
 import {toast} from '../toast';
+import {Sheet} from './Sheet';
 
 export type SheetContext = {
   playlistId?: string;
@@ -61,12 +61,21 @@ export function TrackActionSheet({
 }) {
   const [liked, setLiked] = useState(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * The last track this was opened for, held through the close animation.
+   *
+   * `track` goes null the instant the sheet is dismissed. Rendering straight
+   * off it would empty the sheet mid-slide, so an EMPTY panel would finish
+   * sliding away — which the Modal hid, because a Modal is torn down whole.
+   */
+  const [shown, setShown] = useState<Track | null>(track);
 
   useEffect(() => {
     setLiked(track ? isLiked(track) : false);
+    if (track) {
+      setShown(track);
+    }
   }, [track]);
-
-  const downloaded = !!track?.file_path;
 
   const run = useCallback(
     (fn: () => void) => () => {
@@ -97,15 +106,19 @@ export function TrackActionSheet({
       return;
     }
     const ok = await deleteDownload(track.file_path);
-    toast(ok ? 'Removed from downloads' : 'Removed (the file was already gone)');
+    toast(
+      ok ? 'Removed from downloads' : 'Removed (the file was already gone)',
+    );
     onClose();
   }, [track, onClose]);
 
-  if (!track) {
+  if (!shown) {
     return null;
   }
-
-  const artwork = getBestArtworkUrl(track);
+  // Everything below renders from `shown`, not `track` — see the note on it.
+  const t = shown;
+  const downloaded = !!t.file_path;
+  const artwork = getBestArtworkUrl(t);
 
   const items: Array<{
     key: string;
@@ -123,7 +136,7 @@ export function TrackActionSheet({
       tint: liked ? C.accent : undefined,
       stay: true,
       onPress: () => {
-        toggleLike(track);
+        toggleLike(t);
         setLiked(v => !v);
       },
     },
@@ -145,7 +158,7 @@ export function TrackActionSheet({
       Icon: ListPlus,
       label: 'Add to queue',
       onPress: run(() => {
-        addToQueue(track)
+        addToQueue(t)
           .then(() => toast('Added to queue'))
           .catch(() => toast('Nothing is playing yet'));
       }),
@@ -154,16 +167,18 @@ export function TrackActionSheet({
       key: 'playlist',
       Icon: ListPlus,
       label: 'Add to playlist',
-      onPress: run(() => onAddToPlaylist(track)),
+      onPress: run(() => onAddToPlaylist(t)),
     },
     ...(from?.playlistId
       ? [
           {
             key: 'remove',
             Icon: ListX,
-            label: `Remove from ${cleanText(from.playlistName) || 'this playlist'}`,
+            label: `Remove from ${
+              cleanText(from.playlistName) || 'this playlist'
+            }`,
             onPress: run(() => {
-              removeTrackFromPlaylist(from.playlistId as string, track);
+              removeTrackFromPlaylist(from.playlistId as string, t);
               toast('Removed from playlist');
             }),
           },
@@ -173,81 +188,57 @@ export function TrackActionSheet({
       key: 'artist',
       Icon: User,
       label: 'Go to artist',
-      onPress: run(() => onOpenArtist(track)),
+      onPress: run(() => onOpenArtist(t)),
     },
-    ...(track.album
+    ...(t.album
       ? [
           {
             key: 'album',
             Icon: Disc3,
             label: 'Go to album',
-            onPress: run(() => onOpenAlbum(track)),
+            onPress: run(() => onOpenAlbum(t)),
           },
         ]
       : []),
   ];
 
   return (
-    <Modal
-      visible
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent>
-      <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose} />
-      <View style={styles.sheet}>
-        <View style={styles.handle} />
-
-        <View style={styles.head}>
-          {artwork ? (
-            <Image source={{uri: artwork}} style={styles.art} />
-          ) : (
-            <View style={[styles.art, styles.artEmpty]} />
-          )}
-          <View style={styles.headText}>
-            <Text style={styles.headTitle} numberOfLines={1}>
-              {cleanText(track.title)}
-            </Text>
-            <Text style={styles.headSub} numberOfLines={1}>
-              {cleanText(track.artist)}
-            </Text>
-          </View>
+    <Sheet open={!!track} onClose={onClose} style={styles.sheet}>
+      <View style={styles.head}>
+        {artwork ? (
+          <Image source={{uri: artwork}} style={styles.art} />
+        ) : (
+          <View style={[styles.art, styles.artEmpty]} />
+        )}
+        <View style={styles.headText}>
+          <Text style={styles.headTitle} numberOfLines={1}>
+            {cleanText(t.title)}
+          </Text>
+          <Text style={styles.headSub} numberOfLines={1}>
+            {cleanText(t.artist)}
+          </Text>
         </View>
-
-        <ScrollView style={styles.list} bounces={false}>
-          {items.map(({key, Icon, label, onPress, tint}) => (
-            <TouchableOpacity
-              key={key}
-              style={styles.row}
-              activeOpacity={0.7}
-              onPress={onPress}>
-              <Icon size={20} color={tint || C.sub} />
-              <Text style={styles.rowLabel}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
       </View>
-    </Modal>
+
+      <ScrollView style={styles.list} bounces={false}>
+        {items.map(({key, Icon, label, onPress, tint}) => (
+          <TouchableOpacity
+            key={key}
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={onPress}>
+            <Icon size={20} color={tint || C.sub} />
+            <Text style={styles.rowLabel}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  scrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
-  sheet: {
-    maxHeight: '72%',
-    backgroundColor: C.surfaceHi,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 26,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    marginTop: 8,
-  },
+  // Scrim, handle, rounded top and the slide all live in <Sheet> now.
+  sheet: {maxHeight: '72%'},
   head: {
     flexDirection: 'row',
     alignItems: 'center',

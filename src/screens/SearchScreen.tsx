@@ -36,8 +36,8 @@ import {
   type Track,
 } from '../backend';
 import {useStats} from '../stats';
-import {normalizeTracks} from '../tracks';
-import {TrackRow} from '../components/TrackRow';
+import {getTrackId, normalizeTracks} from '../tracks';
+import {TrackRow, listWindowing} from '../components/TrackRow';
 import {forgetSearch, rememberSearch, useSearchHistory} from '../searchHistory';
 
 /** A public Spotify playlist/album link (or spotify: URI). */
@@ -100,6 +100,7 @@ export function SearchScreen({
 
   // Guards against a slow response for an old query overwriting a newer one.
   const latest = useRef(0);
+  const inputRef = useRef<TextInput>(null);
 
   const runSearch = useCallback(async (q: string) => {
     const text = q.trim();
@@ -159,6 +160,36 @@ export function SearchScreen({
     }
   }, []);
 
+  /**
+   * Back to a clean search — the field, the results, the artist strip and any
+   * in-flight request.
+   *
+   * ONE function for both paths, because they had drifted: leaving the tab did
+   * the full reset, but the X in the field only cleared `query`. That left
+   * `results` populated, so `idle` stayed false, `showBrowse` stayed false, and
+   * — since tapping the X does not focus the field — `showHistory` stayed false
+   * too. Nothing could render except the stale result list you had just tried
+   * to clear.
+   *
+   * `refocus` is what makes the X land on Recent searches immediately rather
+   * than on a blank screen.
+   */
+  const resetSearch = useCallback((refocus: boolean) => {
+    latest.current++; // any in-flight response is now stale
+    setQuery('');
+    setResults([]);
+    setArtists([]);
+    setSuggestions([]);
+    setError('');
+    setBusy(false);
+    if (refocus) {
+      setFocused(true);
+      inputRef.current?.focus();
+    } else {
+      setFocused(false);
+    }
+  }, []);
+
   // Debounced suggestions while typing.
   useEffect(() => {
     const text = query.trim();
@@ -191,18 +222,10 @@ export function SearchScreen({
    * repopulate the list we just cleared.
    */
   useEffect(() => {
-    if (visible) {
-      return;
+    if (!visible) {
+      resetSearch(false);
     }
-    latest.current++;
-    setQuery('');
-    setResults([]);
-    setArtists([]);
-    setSuggestions([]);
-    setError('');
-    setBusy(false);
-    setFocused(false);
-  }, [visible]);
+  }, [visible, resetSearch]);
 
   // Browse tiles load once, lazily — nobody needs them until the field is idle,
   // and they're cached server-side for 6h anyway.
@@ -244,6 +267,7 @@ export function SearchScreen({
       <View style={styles.field}>
         <SearchIcon size={20} color={C.bg} strokeWidth={2.4} />
         <TextInput
+          ref={inputRef}
           value={query}
           onChangeText={setQuery}
           placeholder="What do you want to play?"
@@ -256,7 +280,7 @@ export function SearchScreen({
           onSubmitEditing={() => runSearch(query)}
         />
         {!!query && (
-          <TouchableOpacity onPress={() => setQuery('')} hitSlop={10}>
+          <TouchableOpacity onPress={() => resetSearch(true)} hitSlop={10}>
             <X size={19} color={C.bg} />
           </TouchableOpacity>
         )}
@@ -318,7 +342,7 @@ export function SearchScreen({
       {showSuggestions && (
         <FlatList
           data={suggestions}
-          keyExtractor={(s, i) => `${s.title}-${s.artist}-${i}`}
+          keyExtractor={s => `${s.title}|${s.artist}`}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
@@ -425,8 +449,9 @@ export function SearchScreen({
       {!busy && !showHistory && !showSuggestions && !showBrowse && (
         <FlatList
           data={results}
-          keyExtractor={(t, i) => `${t.title}-${t.artist}-${i}`}
+          keyExtractor={t => getTrackId(t)}
           keyboardShouldPersistTaps="handled"
+          {...listWindowing}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
@@ -441,7 +466,7 @@ export function SearchScreen({
                 <FlatList
                   horizontal
                   data={artists}
-                  keyExtractor={(a, i) => `${a.name}-${i}`}
+                  keyExtractor={a => a.name}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.artistStrip}
                   renderItem={({item}) => (

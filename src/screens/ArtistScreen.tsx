@@ -194,7 +194,7 @@ export function ArtistScreen({
               <FlatList
                 horizontal
                 data={albums}
-                keyExtractor={(a, i) => `${a.name}-${i}`}
+                keyExtractor={a => a.name}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.albums}
                 renderItem={({item}) => (

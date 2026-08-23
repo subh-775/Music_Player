@@ -92,5 +92,25 @@ export function useStoreValue<T>(store: Store<T>): T {
   return useSyncExternalStore(store.subscribe, store.get);
 }
 
-export const asArray = <T,>(raw: unknown): T[] =>
+/**
+ * Subscribe to a DERIVED VALUE of a store rather than the whole thing.
+ *
+ * This is what stops one change re-rendering every subscriber. A list row that
+ * reads the whole likes array re-renders whenever ANY song is liked; a row that
+ * reads `liked: boolean` re-renders only when its own answer flips, because
+ * useSyncExternalStore bails out when the snapshot is Object.is-equal to the
+ * last one.
+ *
+ * `select` must return a primitive (or a stable reference). Returning a fresh
+ * object or array every call defeats the whole point — React would see a new
+ * value every time and re-render anyway.
+ */
+export function useStoreSelector<T, R>(
+  store: Store<T>,
+  select: (value: T) => R,
+): R {
+  return useSyncExternalStore(store.subscribe, () => select(store.get()));
+}
+
+export const asArray = <T>(raw: unknown): T[] =>
   Array.isArray(raw) ? (raw as T[]) : [];

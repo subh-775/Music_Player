@@ -7,7 +7,13 @@
  * now, in one place.
  */
 import {useCallback, useSyncExternalStore} from 'react';
-import {createStore, asArray, hydrateAll, useStoreValue} from './storage';
+import {
+  createStore,
+  asArray,
+  hydrateAll,
+  useStoreSelector,
+  useStoreValue,
+} from './storage';
 import {getTrackId} from './tracks';
 import type {Track} from './backend';
 // Imported for side effect: creating a store registers it for hydration, so a
@@ -23,6 +29,8 @@ export type Settings = {
   audioQuality: number; // 0 = auto, else kbps
   showSourceBadge: boolean;
   showQualityBadge: boolean;
+  /** Check GitHub for a new release on launch (at most once a day). */
+  autoUpdateCheck: boolean;
   autoplay: boolean;
   crossfadeDuration: number; // seconds; 0 = off
   normalizeVolume: boolean;
@@ -35,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   audioQuality: 320,
   showSourceBadge: true,
   showQualityBadge: true,
+  autoUpdateCheck: true,
   autoplay: true,
   crossfadeDuration: 0,
   normalizeVolume: false,
@@ -125,10 +134,13 @@ export function useStore(): {likes: Track[]; settings: Settings} {
 
 /** Liked state for one track, plus a toggle bound to it. */
 export function useLike(track: Track | null) {
-  const likes = useLikes();
-  const liked = track
-    ? likes.some(x => getTrackId(x) === getTrackId(track))
-    : false;
+  // A BOOLEAN subscription, not the whole array. Reading `likes` here meant
+  // liking one song re-rendered every row in every mounted list; now a row
+  // re-renders only when its own liked-ness actually changes.
+  const id = track ? getTrackId(track) : '';
+  const liked = useStoreSelector(likesStore, list =>
+    id ? list.some(x => getTrackId(x) === id) : false,
+  );
   const toggle = useCallback(() => {
     if (track) {
       toggleLike(track);

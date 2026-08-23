@@ -7,7 +7,6 @@
 import React, {useCallback, useState} from 'react';
 import {
   FlatList,
-  Modal,
   StyleSheet,
   Text,
   TextInput,
@@ -22,6 +21,7 @@ import {addTrackToPlaylist, createPlaylist, usePlaylists} from '../playlists';
 import {CollectionArt} from './CollectionArt';
 import {playlistToCollection} from '../collections';
 import {toast} from '../toast';
+import {Sheet} from './Sheet';
 
 export function AddToPlaylistSheet({
   track,
@@ -40,11 +40,7 @@ export function AddToPlaylistSheet({
         return;
       }
       const added = addTrackToPlaylist(id, track);
-      toast(
-        added
-          ? `Added to ${playlistName}`
-          : `Already in ${playlistName}`,
-      );
+      toast(added ? `Added to ${playlistName}` : `Already in ${playlistName}`);
       onClose();
     },
     [track, onClose],
@@ -60,113 +56,86 @@ export function AddToPlaylistSheet({
   }, [name, add]);
 
   return (
-    <Modal
-      visible={!!track}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}>
-      <TouchableOpacity
-        style={styles.scrim}
-        activeOpacity={1}
-        onPress={onClose}
-      />
-      <View style={styles.sheet}>
-        <View style={styles.handle} />
-        <Text style={styles.title} numberOfLines={1}>
-          Add "{cleanText(track?.title)}" to
-        </Text>
+    <Sheet open={!!track} onClose={onClose} style={styles.sheet}>
+      <Text style={styles.title} numberOfLines={1}>
+        Add "{cleanText(track?.title)}" to
+      </Text>
 
-        {creating ? (
-          <View style={styles.newRow}>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="Playlist name"
-              placeholderTextColor={C.faint}
-              style={styles.input}
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={createAndAdd}
-            />
-            <TouchableOpacity
-              onPress={createAndAdd}
-              disabled={!name.trim()}
-              style={styles.newBtn}>
-              <Check size={22} color={name.trim() ? C.accent : C.faint} />
-            </TouchableOpacity>
-          </View>
-        ) : (
+      {creating ? (
+        <View style={styles.newRow}>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Playlist name"
+            placeholderTextColor={C.faint}
+            style={styles.input}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={createAndAdd}
+          />
           <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.7}
-            onPress={() => setCreating(true)}>
-            <View style={styles.plusTile}>
-              <Plus size={22} color={C.text} />
-            </View>
-            <Text style={styles.rowTitle}>New playlist</Text>
+            onPress={createAndAdd}
+            disabled={!name.trim()}
+            style={styles.newBtn}>
+            <Check size={22} color={name.trim() ? C.accent : C.faint} />
           </TouchableOpacity>
-        )}
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.row}
+          activeOpacity={0.7}
+          onPress={() => setCreating(true)}>
+          <View style={styles.plusTile}>
+            <Plus size={22} color={C.text} />
+          </View>
+          <Text style={styles.rowTitle}>New playlist</Text>
+        </TouchableOpacity>
+      )}
 
-        <FlatList
-          data={playlists}
-          keyExtractor={p => p.id}
-          style={styles.list}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            creating ? null : (
-              <Text style={styles.empty}>
-                You haven't made a playlist yet.
-              </Text>
-            )
-          }
-          renderItem={({item}) => {
-            const has = track
-              ? (item.tracks || []).some(
-                  x => getTrackId(x) === getTrackId(track),
-                )
-              : false;
-            return (
-              <TouchableOpacity
-                style={styles.row}
-                activeOpacity={0.7}
-                onPress={() => add(item.id, item.name)}>
-                <CollectionArt collection={playlistToCollection(item)} size={46} />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowTitle} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  <Text style={styles.rowSub}>
-                    {item.tracks.length} song
-                    {item.tracks.length === 1 ? '' : 's'}
-                  </Text>
-                </View>
-                {has && <Check size={19} color={C.accent} />}
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-    </Modal>
+      <FlatList
+        data={playlists}
+        keyExtractor={p => p.id}
+        style={styles.list}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          creating ? null : (
+            <Text style={styles.empty}>You haven't made a playlist yet.</Text>
+          )
+        }
+        renderItem={({item}) => {
+          const has = track
+            ? (item.tracks || []).some(x => getTrackId(x) === getTrackId(track))
+            : false;
+          return (
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={() => add(item.id, item.name)}>
+              <CollectionArt
+                collection={playlistToCollection(item)}
+                size={46}
+              />
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Text style={styles.rowSub}>
+                  {item.tracks.length} song
+                  {item.tracks.length === 1 ? '' : 's'}
+                </Text>
+              </View>
+              {has && <Check size={19} color={C.accent} />}
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  scrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
-  sheet: {
-    maxHeight: '70%',
-    backgroundColor: C.surfaceHi,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    marginTop: 8,
-  },
+  // Scrim, handle, rounded top and the slide all live in <Sheet> now.
+  sheet: {maxHeight: '70%'},
   title: {
     ...T.rowTitle,
     color: C.text,

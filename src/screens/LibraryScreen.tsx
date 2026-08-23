@@ -42,6 +42,8 @@ import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
 import {markDownloaded, overlayDownloadArtwork} from '../downloads';
 import {useActiveTrack} from '../player';
 import {toast} from '../toast';
+import {Sheet} from '../components/Sheet';
+import {listWindowing} from '../components/TrackRow';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
 
@@ -281,6 +283,7 @@ export function LibraryScreen({
         <FlatList
           data={rows}
           keyExtractor={c => c.id}
+          {...listWindowing}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
 
@@ -326,19 +329,12 @@ export function LibraryScreen({
       {/* Long-press options: pin, and for your own playlists rename / cover /
           delete. A sheet, not an instant action — pinning by accident was
           worse than one extra tap. */}
-      <Modal
-        visible={!!menuFor}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setMenuFor(null)}>
-        <TouchableOpacity
-          style={styles.sheetScrim}
-          activeOpacity={1}
-          onPress={() => setMenuFor(null)}
-        />
+      <Sheet
+        open={!!menuFor}
+        onClose={() => setMenuFor(null)}
+        style={styles.sheet}>
         {menuFor && (
-          <View style={styles.sheet}>
-            <View style={styles.sheetHandle} />
+          <View>
             <Text style={styles.sheetTitle} numberOfLines={1}>
               {menuFor.name}
             </Text>
@@ -386,9 +382,13 @@ export function LibraryScreen({
             )}
           </View>
         )}
-      </Modal>
+      </Sheet>
 
-      {/* Rename dialog — same shape as "New playlist". */}
+      {/* Rename dialog — same shape as "New playlist". These two stay <Modal>
+          on purpose: a dialog with a TextInput wants a real window so the soft
+          keyboard gets proper focus and inset handling. What a Modal costs is
+          its open/close window transaction, and that matters for a sheet you
+          flick open constantly, not for a dialog you type into. */}
       <Modal
         visible={!!renaming}
         transparent
@@ -554,21 +554,8 @@ const styles = StyleSheet.create({
   dialogCancel: {color: C.sub, fontSize: 14, fontWeight: '700'},
   dialogOk: {color: C.accent, fontSize: 14, fontWeight: '700'},
   dialogDisabled: {color: C.faint},
-  sheetScrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
-  sheet: {
-    backgroundColor: C.surfaceHi,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 26,
-  },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    marginTop: 8,
-  },
+  // Background, rounded top, padding, scrim and handle all live in <Sheet>.
+  sheet: {},
   sheetTitle: {
     ...T.rowTitle,
     color: C.text,

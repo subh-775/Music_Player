@@ -187,6 +187,20 @@ export async function setupPlayer(): Promise<boolean> {
       // A native event, so the sleep timer's deadline is honoured even when the
       // screen has been off long enough for JS timers to be throttled.
       sleepTimerOnTrackChange();
+      // Autoplay top-up rides the same native event, for the same reason.
+      //
+      // It used to be driven ONLY by the 1s JS interval in
+      // startCrossfadeWatcher — and Android freezes JS timers once the app is
+      // backgrounded or the screen is off, which this file already documents
+      // for the old volume ramp. So the last song of a queue ended with the
+      // screen off, the tick never fired, nothing was appended, and playback
+      // just stopped. Pressing next thawed the JS thread, the tick finally ran,
+      // and the queue filled — exactly the "it only continues after I press
+      // skip" report.
+      //
+      // Cheap to call: topUpFromRadio() returns immediately unless the queue is
+      // nearly out.
+      topUpFromRadio().catch(() => {});
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
@@ -620,6 +634,36 @@ export function peekAdjacentTrack(delta: 1 | -1): RNTPTrack | null {
   return engineQueue[activeIndex + delta] ?? null;
 }
 
+/**
+ * Is THIS title+artist the track currently playing?
+ *
+ * A BOOLEAN subscription, so a track change re-renders only the row that gained
+ * the highlight and the one that lost it. Every list row calling
+ * useActiveTrack() instead meant one track change re-rendered every visible row
+ * — twenty rows each redoing a pair of toLowerCase comparisons — which is a
+ * good part of why scrolling a long list while music played felt sticky.
+ *
+ * useSyncExternalStore bails out when the snapshot is Object.is-equal, and
+ * `false === false`, so the rows that were not involved never re-render.
+ */
+export function useIsActiveTrack(
+  title: string | null | undefined,
+  artist: string | null | undefined,
+): boolean {
+  const t = String(title ?? '').toLowerCase();
+  const a = String(artist ?? '').toLowerCase();
+  return useSyncExternalStore(
+    l => {
+      trackListeners.add(l);
+      return () => trackListeners.delete(l);
+    },
+    () =>
+      !!trackSnapshot &&
+      String(trackSnapshot.title ?? '').toLowerCase() === t &&
+      String(trackSnapshot.artist ?? '').toLowerCase() === a,
+  );
+}
+
 /** The track the UI should show: optimistic on gesture, reconciled by the
  *  engine event. Drop-in replacement for RNTP's useActiveTrack. */
 export function useActiveTrack(): RNTPTrack | null {
@@ -815,7 +859,9 @@ let radioBusy = false;
  *  behind an already-playing first track. */
 let buildingQueue = false;
 
-async function topUpFromRadio(): Promise<void> {
+/** Exported for the playback service's PlaybackQueueEnded backstop — that
+ *  runs outside the UI, which is exactly when the JS timer is frozen. */
+export async function topUpFromRadio(): Promise<void> {
   // buildingQueue: playTrack starts the song on a one-track queue and appends
   // the rest a moment later. Without this, a watcher tick landing in that gap
   // sees "only one track left" and appends radio picks BETWEEN the tapped song
@@ -827,7 +873,10 @@ async function topUpFromRadio(): Promise<void> {
     TrackPlayer.getQueue(),
     TrackPlayer.getActiveTrackIndex(),
   ]);
-  if (!queue.length || index == null || queue.length - index > 2) {
+  // Three songs of headroom, not two. Radio is a live network call; starting it
+  // with two left meant a slow response still arrived after the queue had run
+  // out. One extra song is roughly three more minutes to answer in.
+  if (!queue.length || index == null || queue.length - index > 3) {
     return;
   }
   const seed =

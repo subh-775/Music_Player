@@ -50,7 +50,7 @@ import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
 import {SOURCE_META} from '../components/Badges';
-import {checkUpdate, useUpdate} from '../update';
+import {checkUpdate, startUpdateInstall, useUpdate} from '../update';
 import {
   cancelSleepTimer,
   sleepAtEndOfTrack,
@@ -113,10 +113,18 @@ const QUALITIES = [
 function Section({
   title,
   Icon,
+  footer,
+  highlight,
   children,
 }: {
   title: string;
   Icon?: typeof HardDrive;
+  /** One line under the card, for the explanation that would otherwise be
+   *  crammed into a row's `hint`. */
+  footer?: string;
+  /** Briefly ring the card — used when Settings is opened straight at a
+   *  specific section, so it is obvious which one you were sent to. */
+  highlight?: boolean;
   children: React.ReactNode;
 }) {
   const items = React.Children.toArray(children);
@@ -126,14 +134,20 @@ function Section({
         {!!Icon && <Icon size={13} color={C.faint} strokeWidth={2.6} />}
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
-      <View style={styles.card}>
+      <View style={[styles.card, !!highlight && styles.cardHighlight]}>
         {items.map((child, i) => (
-          <React.Fragment key={i}>
+          // child.key, not the index. These children are conditional (the
+          // update row's states, the sources list), and an index key makes
+          // React reuse the wrong instance when one appears or disappears —
+          // component state leaks across rows. React.Children.toArray already
+          // assigns stable keys; use them.
+          <React.Fragment key={(child as {key?: string}).key ?? i}>
             {i > 0 && <View style={styles.sep} />}
             {child}
           </React.Fragment>
         ))}
       </View>
+      {!!footer && <Text style={styles.sectionFooter}>{footer}</Text>}
     </View>
   );
 }
@@ -161,6 +175,10 @@ function Row({
           {value}
         </Text>
       )}
+      {/* A row that DOES something has to look different from one that just
+          reports a number. Without this, "Streaming quality — Very High" was
+          indistinguishable from a read-only line, so nobody knew it opened. */}
+      {!!onPress && <ChevronRight size={17} color={C.faint} />}
     </Wrap>
   );
 }
@@ -263,7 +281,15 @@ function NavRow({
   );
 }
 
-export function SettingsScreen({onClose}: {onClose: () => void}) {
+export function SettingsScreen({
+  onClose,
+  focus,
+}: {
+  onClose: () => void;
+  /** Open the screen AT something. 'update' scrolls to Software update and
+   *  rings it briefly — what the dot on the hamburger now points at. */
+  focus?: 'update' | null;
+}) {
   const [panel, setPanel] = useState<'equalizer' | 'tips' | 'playback' | null>(
     null,
   );
@@ -286,6 +312,9 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   const [ytBusy, setYtBusy] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const sleep = useSleepTimer();
+  const scrollRef = useRef<ScrollView>(null);
+  const updateY = useRef(0);
+  const [glow, setGlow] = useState(false);
 
   // A sub-panel (Equalizer, Tips) must catch the hardware back itself and
   // return to Settings — NOT fall through to the app-level handler, which would
@@ -488,6 +517,33 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
   });
   const checkUpdates = useCallback(() => checkUpdate(), []);
 
+  /**
+   * Land ON the update rather than at the top of the list.
+   *
+   * The dot said "there is an update"; tapping it opened Settings and left you
+   * to scroll eight sections looking for it. The short delay lets the overlay
+   * finish appearing first — scrolling a view that is still animating in lands
+   * in the wrong place.
+   */
+  useEffect(() => {
+    if (focus !== 'update') {
+      return;
+    }
+    const t = setTimeout(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, updateY.current - 80),
+        animated: true,
+      });
+      setGlow(true);
+    }, 260);
+    // Long enough to say "this one", gone before it nags.
+    const off = setTimeout(() => setGlow(false), 2100);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(off);
+    };
+  }, [focus]);
+
   // Anything with more than a switch's worth of choice gets its OWN screen,
   // not an inline expander — the list stays scannable.
   if (panel === 'equalizer') {
@@ -509,6 +565,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           <Text style={styles.barTitle}>Playback</Text>
         </View>
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
@@ -516,7 +573,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           <Section title="Listening controls">
             <ToggleRow
               label="Autoplay"
-              hint="Similar songs keep playing when your queue ends."
+              hint="Similar songs keep playing when your queue ends"
               value={settings.autoplay}
               onChange={v => writeSetting('autoplay', v)}
             />
@@ -531,7 +588,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
             />
           </Section>
 
-          <Section title="Track transitions">
+          <Section title="Crossfade">
             <CrossfadeStepper
               value={settings.crossfadeDuration}
               onChange={secs => writeSetting('crossfadeDuration', secs)}
@@ -581,18 +638,19 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
     );
   }
 
+  const updateAvailable = update.info?.available === true;
   const updateStatusText =
     update.phase === 'checking'
       ? 'Checking…'
-      : update.phase === 'found'
-      ? `Version ${update.info?.version} available`
+      : updateAvailable
+      ? `Version ${update.info?.version} is ready to install`
       : update.phase === 'downloading'
-      ? `Downloading… ${update.pct}%`
+      ? 'Keep the app open until this finishes'
       : update.phase === 'failed'
       ? 'Check failed — tap to retry'
       : update.phase === 'current'
-      ? 'No update available'
-      : 'Check whether a new version is available';
+      ? 'You are up to date'
+      : 'See whether a newer version is out';
 
   return (
     <View style={styles.wrap}>
@@ -718,22 +776,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
             })}
         </Section>
 
-        <Section title="Appearance" Icon={Eye}>
-          <ToggleRow
-            label="Source badge"
-            hint="Show which source a track came from"
-            value={settings.showSourceBadge}
-            onChange={v => writeSetting('showSourceBadge', v)}
-          />
-          <ToggleRow
-            label="Quality badge"
-            hint="Show the streaming bitrate"
-            value={settings.showQualityBadge}
-            onChange={v => writeSetting('showQualityBadge', v)}
-          />
-        </Section>
-
-        <Section title="Storage" Icon={HardDrive}>
+        <Section title="Downloads" Icon={HardDrive}>
           <View style={styles.row}>
             <HardDrive size={20} color={C.text} strokeWidth={1.9} />
             <View style={styles.rowText}>
@@ -761,7 +804,7 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
                   style={styles.ghostBtn}
                   onPress={useDefaultFolder}
                   activeOpacity={0.7}>
-                  <Text style={styles.ghostBtnText}>Use default</Text>
+                  <Text style={styles.ghostBtnText}>Reset to default</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -791,36 +834,88 @@ export function SettingsScreen({onClose}: {onClose: () => void}) {
           </View>
         </Section>
 
+        <Section title="Appearance" Icon={Eye}>
+          <ToggleRow
+            label="Source badge"
+            hint="Show which source a track came from"
+            value={settings.showSourceBadge}
+            onChange={v => writeSetting('showSourceBadge', v)}
+          />
+          <ToggleRow
+            label="Quality badge"
+            hint="Show the streaming bitrate"
+            value={settings.showQualityBadge}
+            onChange={v => writeSetting('showQualityBadge', v)}
+          />
+        </Section>
+
+        {/* Its OWN section, not a composite row buried in "About".
+              The update was a RefreshCw icon, an "Installed" label, a version,
+              a status line and a nested button all inside one styles.row —
+              nothing else on this screen looked like that. And the update dot
+              on the hamburger dropped you at the top of an eight-section list
+              to go hunting for it; see `focus`. */}
+        <View onLayout={e => (updateY.current = e.nativeEvent.layout.y)}>
+          <Section
+            title="Software update"
+            Icon={RefreshCw}
+            highlight={glow}
+            footer={
+              update.phase === 'failed'
+                ? 'The last check could not reach GitHub. Check your connection and try again.'
+                : undefined
+            }>
+            <Row label="App version" value={appVersion || '—'} />
+            {/* ONE row, four states — check / found / downloading / failed.
+                That is the pattern both iOS and Android use, and it means the
+                thing you came here to press is always in the same place. */}
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={updateAvailable ? startUpdateInstall : checkUpdates}
+              disabled={checking || update.phase === 'downloading'}>
+              <Animated.View style={{transform: [{rotate: spinDeg}]}}>
+                <RefreshCw
+                  size={19}
+                  color={updateAvailable ? C.accent : C.sub}
+                  strokeWidth={2}
+                />
+              </Animated.View>
+              <View style={styles.rowText}>
+                <Text
+                  style={[
+                    styles.rowLabel,
+                    updateAvailable && styles.rowLabelAccent,
+                  ]}>
+                  {update.phase === 'downloading'
+                    ? `Downloading… ${update.pct}%`
+                    : updateAvailable
+                    ? 'Download and install'
+                    : 'Check for updates'}
+                </Text>
+                <Text style={styles.rowHint}>{updateStatusText}</Text>
+              </View>
+              {!updateAvailable && <ChevronRight size={17} color={C.faint} />}
+            </TouchableOpacity>
+            <ToggleRow
+              label="Automatic updates"
+              hint="Check once a day when the app opens"
+              value={settings.autoUpdateCheck}
+              onChange={v => writeSetting('autoUpdateCheck', v)}
+            />
+          </Section>
+        </View>
+
         {/* Shortcuts used to live here as well as in the drawer. One home
               each: gestures are in the drawer, this screen is settings. */}
         <Section title="About" Icon={Info}>
-          <View style={styles.row}>
-            <RefreshCw size={19} color={C.sub} strokeWidth={2} />
-            <View style={styles.rowText}>
-              <View style={styles.updateHead}>
-                <Text style={styles.rowLabel}>Installed</Text>
-                <Text style={styles.rowValue}>{appVersion || '—'}</Text>
-              </View>
-              <Text style={styles.rowHint}>{updateStatusText}</Text>
-              <TouchableOpacity
-                style={[styles.setBtn, styles.checkBtn]}
-                onPress={checkUpdates}
-                disabled={checking}
-                activeOpacity={0.85}>
-                <Animated.View style={{transform: [{rotate: spinDeg}]}}>
-                  <RefreshCw size={14} color={C.text} strokeWidth={2.2} />
-                </Animated.View>
-                <Text style={styles.setBtnText}>
-                  {checking ? 'Checking…' : 'Check again'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
           <TouchableOpacity
             style={styles.row}
             activeOpacity={0.7}
             onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
-            <Text style={[styles.rowLabel, styles.rowText]}>Documentation</Text>
+            <Text style={[styles.rowLabel, styles.rowText]}>
+              Help &amp; documentation
+            </Text>
             <ExternalLink size={18} color={C.faint} />
           </TouchableOpacity>
         </Section>
@@ -911,6 +1006,15 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     overflow: 'hidden',
   },
+  // A brief accent ring, for "this is the thing you came here for".
+  cardHighlight: {borderWidth: 1.5, borderColor: C.accent},
+  sectionFooter: {
+    ...T.sub,
+    color: C.faint,
+    paddingHorizontal: S.gutter + 4,
+    paddingTop: 7,
+    lineHeight: 16,
+  },
   sep: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: C.border,
@@ -934,6 +1038,7 @@ const styles = StyleSheet.create({
   choiceOn: {color: C.accent},
   rowText: {flex: 1, minWidth: 0},
   rowLabel: {...T.body, color: C.text},
+  rowLabelAccent: {color: C.accent},
   rowHint: {...T.sub, color: C.sub, marginTop: 3, lineHeight: 17},
   rowValue: {...T.sub, color: C.sub, maxWidth: 140, textAlign: 'right'},
   reset: {

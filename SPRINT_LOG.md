@@ -302,6 +302,58 @@ gesture. Same pattern the rest of this app already uses for overlays.
 - `/api/connectivity` (§5.2) is never called by the app — left alone rather than
   optimised.
 
+### v1.0.8 batch — UI-thread audit (round 2)
+
+The auditor's one-line diagnosis was right and worth repeating: gesture-handler
+and Reanimated were both in package.json and **neither was used for any gesture
+in the app**. Every drag — swipe-to-queue, the drawer, the player dismiss — was
+PanResponder + Animated, so recognition and every frame ran on the JS thread.
+The one drag nobody complained about (the Queue reorder) is the one that already
+used Reanimated, via react-native-draggable-flatlist.
+
+**Reported**
+| # | Report | Root cause |
+|---|---|---|
+| A1 | ⋮ sheet opens and closes late | `<Modal animationType="slide">`. On Android a Modal is a whole new Dialog **window**, so a tap meant: mount the subtree, hand WindowManager a cross-process transaction, THEN play a ~300ms native slide — and the reverse on close. New `<Sheet>` is a plain overlay with a transform; six Modals now share it. The two dialogs with a TextInput stay Modals on purpose (a real window handles soft-keyboard focus and insets). |
+| A2 | Playback stops at the end of the queue until you press ⏭ | Autoplay top-up was reachable ONLY from the 1s JS interval — and Android freezes JS timers when the screen is off, which this file already documented for the old volume ramp. Last song ends with the screen off → no tick → nothing appended. Now it also runs on `PlaybackActiveTrackChanged` (a native event), with a `PlaybackQueueEnded` backstop in the foreground service, and three songs of headroom instead of two. |
+| A3 | Settings restructure | Navigable rows had no chevron, so "Streaming quality — Very High" looked identical to a read-only line. Update was a composite row buried in About. Terminology pass ("Source badge" → "Show source label", "Stop playing" → "Sleep timer", "Track transitions" → "Crossfade", …). Downloads regrouped next to Sources. `Section` gained a `footer`, and keys off `child.key` instead of the index (conditional children were making React reuse the wrong instance). |
+| A4 | Clearing the field keeps the old results | The X cleared `query` and nothing else, so `results` stayed populated → `idle` false → `showBrowse` false; and since tapping the X doesn't focus the field, `showHistory` was false too. Nothing could render but the stale list. One `resetSearch(refocus)` now serves both the X and the tab-leave path. |
+| A5 | Update dot should jump to the update | It did nothing but open Settings at the top. `focus="update"` scrolls to the new Software update section and rings it for ~2s. The dot also got an `accessibilityLabel`. |
+| A6 | Swipe-to-queue and the drawer slip on a fast finger | Two stacked failures. The JS predicate was evaluated after the native FlatList scroller had already claimed a fast flick — and once a native scroll view claims a gesture, PanResponder cannot take it back. And `dx > \|dy\| * 2` fails on a fast flick's large first delta (dx 40, dy 25 → `40 > 50` false) while a slow drag's dx 6, dy 1 sails through. That is literally "I have to move my finger slowly". Now `Gesture.Pan` with `activeOffsetX`/`failOffsetY`, evaluated natively. The Sidebar is also **permanently mounted** — it used to mount DURING the gesture, so reconciliation for the panel, scrim and rows landed in exactly the frames that should have been moving it. |
+| A7 | Minimising the player is laggy | `useProgress(250)` sat at the top of a 1,100-line component, so the whole player re-rendered 4×/sec — including mid-drag. Split into `<ProgressArea>` (memoised, owns the seekbar and the seek echo via an imperative handle) and `<LyricsPane>` (its own 500ms subscription). The double-tap seek reads position from a ref instead of render state. |
+| A8 | Seek-peek icon | Lucide chevrons are stroked OPEN paths and cannot be filled, which is why it read as three thin outlines. Now solid SVG triangles, overlapping by 7px so they read as one `◀◀◀`, with the stagger order MIRRORED (it always chased left-to-right, so the backward animation ran the wrong way) and ASCII `+`/`-` so the label stops shifting between directions. |
+
+**Not reported, found**
+- **B1** `TrackRow` was un-memoised and read three whole collections
+  (`useActiveTrack`, `useDownloadedIds`, `useLike`), so one track change
+  re-rendered every visible row. New `useStoreSelector` plus boolean hooks
+  (`useIsActiveTrack`, `useIsDownloaded`) mean a row re-renders only when its
+  own answer flips — `useSyncExternalStore` bails out on an Object.is-equal
+  snapshot.
+- **B2** No windowing anywhere. Shared `listWindowing` on the four long lists.
+  Deliberately NOT `getItemLayout`: a wrong row height breaks scrolling worse
+  than the render cost it saves.
+- **B3** Index-based keys in six places — any insert re-keyed everything after
+  it, remounting rows and throwing away decoded artwork. Now `getTrackId`.
+- **B4** Seekbar's grab animation ran on the JS thread (`useNativeDriver:false`,
+  animating width/height) at exactly the moment the JS thread is busiest. Now a
+  native `scale` on a fixed-size thumb, split across two nodes because a
+  percentage `left` and a native transform cannot share one.
+- **B5** `PlayerBar` re-rendered at 1Hz on every tab for the life of the app.
+  Progress pulled into a memoised `<MiniProgress>` leaf.
+- **B6** `Section` index keys — fixed with A3.
+
+**Deliberately not done**
+- Player dismiss (A7-ii/iii) still uses PanResponder + Animated. The row and
+  drawer gestures were converted because those are what you reported; the
+  player sheet's gesture is entangled with the horizontal skip, the artwork
+  preview and the axis lock, and half-migrating a view hierarchy is exactly
+  what the audit warns produces arbitration bugs. Next release, in one go.
+- **C1/C2** SoundCloud API v2, and the `_resolve_key` token prefilter. The
+  prefilter as specified is unsafe: an empty token intersection falls back to
+  `token_sort_ratio`, so "blindinglights" vs "blinding lights" would be gated
+  out and stop merging.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

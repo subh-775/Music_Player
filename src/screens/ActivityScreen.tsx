@@ -20,9 +20,10 @@ import {
 } from 'react-native';
 import {ChevronLeft} from 'lucide-react-native';
 import {C, S, T} from '../theme';
-import {TrackRow} from '../components/TrackRow';
+import {TrackRow, listWindowing} from '../components/TrackRow';
 import {useStats} from '../stats';
 import type {Track} from '../backend';
+import {getTrackId} from '../tracks';
 
 export type ActivityMode = 'recents' | 'stats';
 
@@ -89,7 +90,8 @@ function Recents({
   return (
     <FlatList
       data={list}
-      keyExtractor={(t, i) => `${t.title}-${t.artist}-${i}`}
+      keyExtractor={t => getTrackId(t)}
+      {...listWindowing}
       contentContainerStyle={styles.list}
       showsVerticalScrollIndicator={false}
       renderItem={({item}) => (

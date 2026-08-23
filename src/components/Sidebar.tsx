@@ -18,17 +18,21 @@
  * and it floats over the mini player. As a plain absolute overlay it can be
  * half-open, which is the whole feature.
  */
-import React, {useCallback, useEffect, useRef} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef} from 'react';
 import {
-  Animated,
   BackHandler,
   Image,
-  PanResponder,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+} from 'react-native-reanimated';
 import {
   ChevronRight,
   Clock,
@@ -95,28 +99,48 @@ export function Sidebar({
     return () => sub.remove();
   }, [visible, close]);
 
-  // Drag LEFT on the open panel to push it back out. The mirror image of the
-  // gesture that opened it, on the same Animated.Value.
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) =>
-        g.dx < -8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-      onPanResponderMove: (_e, g) => {
-        if (g.dx < 0) {
-          drawerX.setValue(Math.max(-DRAWER_W, g.dx));
-        }
-      },
-      onPanResponderRelease: (_e, g) => {
-        const shouldClose = g.dx < -DRAWER_W / 3 || g.vx < -0.5;
-        if (shouldClose) {
-          close(Math.abs(g.vx));
-        } else {
-          settleDrawer(true, Math.abs(g.vx));
-        }
-      },
-      onPanResponderTerminate: () => settleDrawer(true),
-    }),
-  ).current;
+  /**
+   * Drag LEFT on the open panel to push it back out — the mirror of the gesture
+   * that opened it, on the same shared value.
+   *
+   * Native recognition, like the pull: activeOffsetX/failOffsetY instead of a
+   * JS ratio test, so a quick flick closes it as reliably as a slow drag.
+   */
+  const settleFromGesture = useCallback(
+    (open: boolean, velocity: number) => {
+      if (open) {
+        settleDrawer(true, velocity);
+      } else {
+        close(velocity);
+      }
+    },
+    [close],
+  );
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-15, 1000])
+        .failOffsetY([-16, 16])
+        .onUpdate(e => {
+          drawerX.value = Math.max(-DRAWER_W, Math.min(0, e.translationX));
+        })
+        .onEnd(e => {
+          const stayOpen = !(
+            e.translationX < -DRAWER_W / 3 || e.velocityX < -500
+          );
+          runOnJS(settleFromGesture)(stayOpen, Math.abs(e.velocityX) / 1000);
+        }),
+    [settleFromGesture],
+  );
+
+  const panelStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: drawerX.value}],
+  }));
+  // One value drives both, so the dim and the slide can never disagree.
+  const scrimStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(drawerX.value, [-DRAWER_W, 0], [0, 1], 'clamp'),
+  }));
 
   const go = useCallback(
     (dest: SidebarDest) => {
@@ -128,23 +152,21 @@ export function Sidebar({
     [onNavigate, close],
   );
 
-  if (!visible) {
-    return null;
-  }
-
+  /**
+   * Rendered ALWAYS, never conditionally mounted.
+   *
+   * It used to mount when the drag began — which meant React reconciliation
+   * plus native view creation for the panel, the scrim, four rows and their
+   * icons all landed on the JS thread in exactly the frames that should have
+   * been moving the panel. On a fast pull you lost every one of them. Parked
+   * off-screen at -DRAWER_W it costs nothing to leave in the tree, and the
+   * first frame of a drag now moves something that already exists.
+   *
+   * `pointerEvents` is what keeps a closed drawer from eating touches.
+   */
   return (
-    <View style={styles.host} pointerEvents="box-none">
-      <Animated.View
-        style={[
-          styles.scrim,
-          {
-            opacity: drawerX.interpolate({
-              inputRange: [-DRAWER_W, 0],
-              outputRange: [0, 1],
-              extrapolate: 'clamp',
-            }),
-          },
-        ]}>
+    <View style={styles.host} pointerEvents={visible ? 'box-none' : 'none'}>
+      <Animated.View style={[styles.scrim, scrimStyle]}>
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
@@ -152,44 +174,44 @@ export function Sidebar({
         />
       </Animated.View>
 
-      <Animated.View
-        style={[styles.panel, {transform: [{translateX: drawerX}]}]}
-        {...pan.panHandlers}>
-        {/* The app's own mark, not just a word. A bare text line read as a
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[styles.panel, panelStyle]}>
+          {/* The app's own mark, not just a word. A bare text line read as a
             stray label; the icon is what makes the drawer feel like part of
             the product. */}
-        <View style={styles.brandRow}>
-          <Image source={ICON} style={styles.brandIcon} />
-          <View style={styles.brandText}>
-            <Text style={styles.brand}>Fix_Music</Text>
-            <Text style={styles.brandSub}>Your library, your sound</Text>
+          <View style={styles.brandRow}>
+            <Image source={ICON} style={styles.brandIcon} />
+            <View style={styles.brandText}>
+              <Text style={styles.brand}>Fix_Music</Text>
+              <Text style={styles.brandSub}>Your library, your sound</Text>
+            </View>
           </View>
-        </View>
 
-        <View style={styles.items}>
-          {ITEMS.map(item => (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.item}
-              activeOpacity={0.7}
-              onPress={() => go(item.id)}>
-              <item.Icon size={21} color={C.text} strokeWidth={2} />
-              <View style={styles.itemText}>
-                <Text style={styles.itemLabel}>{item.label}</Text>
-              </View>
-              {/* The update lives inside Settings, so the dot follows it here —
+          <View style={styles.items}>
+            {ITEMS.map(item => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.item}
+                activeOpacity={0.7}
+                onPress={() => go(item.id)}>
+                <item.Icon size={21} color={C.text} strokeWidth={2} />
+                <View style={styles.itemText}>
+                  <Text style={styles.itemLabel}>{item.label}</Text>
+                </View>
+                {/* The update lives inside Settings, so the dot follows it here —
                   the one on the hamburger only says "look inside". */}
-              {item.id === 'settings' && updateWaiting && (
-                <View style={styles.dot} />
-              )}
-              <ChevronRight size={17} color={C.faint} />
-            </TouchableOpacity>
-          ))}
-        </View>
+                {item.id === 'settings' && updateWaiting && (
+                  <View style={styles.dot} />
+                )}
+                <ChevronRight size={17} color={C.faint} />
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        {/* Version, centred, and nothing else — as specified. */}
-        <Text style={styles.version}>v{appVersion || '—'}</Text>
-      </Animated.View>
+          {/* Version, centred, and nothing else — as specified. */}
+          <Text style={styles.version}>v{appVersion || '—'}</Text>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }

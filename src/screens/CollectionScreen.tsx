@@ -45,7 +45,7 @@ import {
   type Collection,
 } from '../collections';
 import {CollectionArt} from '../components/CollectionArt';
-import {TrackRow} from '../components/TrackRow';
+import {TrackRow, listWindowing} from '../components/TrackRow';
 import {toast} from '../toast';
 import {
   enqueueDownload,
@@ -70,6 +70,7 @@ import {
 } from '../playlists';
 import {getLocalLibrary} from '../backend';
 import {ConfirmModal} from '../components/ConfirmModal';
+import {Sheet} from '../components/Sheet';
 
 export function CollectionScreen({
   collection,
@@ -401,7 +402,8 @@ export function CollectionScreen({
 
       <Animated.FlatList
         data={tracks}
-        keyExtractor={(t, i) => `${getTrackId(t)}-${i}`}
+        keyExtractor={t => getTrackId(t)}
+        {...listWindowing}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         onScroll={Animated.event(
@@ -566,18 +568,11 @@ export function CollectionScreen({
 
       {/* Manage this playlist — same options as the library's long-press sheet,
           reachable from inside the playlist too. */}
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setMenuOpen(false)}>
-        <TouchableOpacity
-          style={styles.sheetScrim}
-          activeOpacity={1}
-          onPress={() => setMenuOpen(false)}
-        />
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
+      <Sheet
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        style={styles.sheet}>
+        <View>
           <Text style={styles.sheetTitle} numberOfLines={1}>
             {displayName}
           </Text>
@@ -612,9 +607,11 @@ export function CollectionScreen({
             </Text>
           </TouchableOpacity>
         </View>
-      </Modal>
+      </Sheet>
 
-      {/* Rename dialog. */}
+      {/* Rename dialog. Stays a <Modal>: a TextInput dialog wants a real window
+          for soft-keyboard focus and insets. See LibraryScreen for the full
+          reasoning. */}
       <Modal
         visible={renaming}
         transparent
@@ -725,21 +722,8 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   loadingBox: {alignItems: 'center', paddingTop: 26},
-  sheetScrim: {flex: 1, backgroundColor: 'rgba(0,0,0,0.6)'},
-  sheet: {
-    backgroundColor: C.surfaceHi,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 26,
-  },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    marginTop: 8,
-  },
+  // Background, rounded top, padding, scrim and handle all live in <Sheet>.
+  sheet: {},
   sheetTitle: {
     ...T.rowTitle,
     color: C.text,
