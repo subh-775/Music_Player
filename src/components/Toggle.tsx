@@ -7,7 +7,7 @@
  * a spring — no shadow, no ripple, no platform chrome.
  */
 import React, {useEffect, useRef} from 'react';
-import {Animated, Pressable, StyleSheet} from 'react-native';
+import {Animated, Pressable, StyleSheet, View} from 'react-native';
 import {C} from '../theme';
 
 const W = 46;
@@ -29,7 +29,12 @@ export function Toggle({
   useEffect(() => {
     Animated.spring(anim, {
       toValue: value ? 1 : 0,
-      useNativeDriver: false, // backgroundColor can't run on the native driver
+      // NATIVE. This was the last useNativeDriver:false animation in the app,
+      // and it ran on every row of the Settings list. The blocker was
+      // backgroundColor, which the driver genuinely cannot interpolate — so the
+      // colour change is a CROSS-FADE between two stacked tracks instead, which
+      // it can. Same look, none of it on the JS thread.
+      useNativeDriver: true,
       speed: 18,
       bounciness: 4,
     }).start();
@@ -43,16 +48,12 @@ export function Toggle({
       android_ripple={null}
       style={disabled ? styles.disabled : undefined}
       hitSlop={8}>
-      <Animated.View
-        style={[
-          styles.track,
-          {
-            backgroundColor: anim.interpolate({
-              inputRange: [0, 1],
-              outputRange: ['rgba(255,255,255,0.16)', C.accent],
-            }),
-          },
-        ]}>
+      <View style={styles.track}>
+        {/* The "on" colour, faded in over the off colour underneath. */}
+        <Animated.View
+          style={[styles.on, {opacity: anim}]}
+          pointerEvents="none"
+        />
         <Animated.View
           style={[
             styles.thumb,
@@ -68,7 +69,7 @@ export function Toggle({
             },
           ]}
         />
-      </Animated.View>
+      </View>
     </Pressable>
   );
 }
@@ -80,6 +81,12 @@ const styles = StyleSheet.create({
     borderRadius: H / 2,
     padding: PAD,
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  on: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: H / 2,
+    backgroundColor: C.accent,
   },
   thumb: {
     width: THUMB,

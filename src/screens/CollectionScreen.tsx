@@ -616,6 +616,7 @@ export function CollectionScreen({
         visible={renaming}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setRenaming(false)}>
         <View style={styles.dialogScrim}>
           <View style={styles.dialog}>

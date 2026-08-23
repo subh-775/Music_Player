@@ -37,22 +37,38 @@ import {
   ChevronRight,
   Clock,
   Keyboard,
+  ListMusic,
+  Moon,
   Settings as SettingsIcon,
   Sparkles,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
 import {useUpdateAvailable} from '../update';
+import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {DRAWER_W, drawerX, settleDrawer} from '../drawer';
 
 const ICON = require('../assets/app-icon.png');
 
-export type SidebarDest = 'recents' | 'settings' | 'shortcuts' | 'stats';
+export type SidebarDest =
+  | 'recents'
+  | 'settings'
+  | 'shortcuts'
+  | 'stats'
+  | 'queue'
+  | 'sleep';
 
 // No per-item hint text any more — "Everything you have listened to" under
 // "Recents" was explaining a label that already explains itself, and it made
 // every row two lines for no reason. The label is enough.
+//
+// Queue and Sleep timer are both NOW actions and sit above the reference-y
+// ones: the queue could only be reached from inside the player, and the sleep
+// timer only from inside Settings, which is the wrong depth for something you
+// reach for with the phone already face-down.
 const ITEMS: {id: SidebarDest; label: string; Icon: typeof Clock}[] = [
+  {id: 'queue', label: 'Queue', Icon: ListMusic},
+  {id: 'sleep', label: 'Sleep timer', Icon: Moon},
   {id: 'recents', label: 'Recents', Icon: Clock},
   {id: 'stats', label: 'Your sound', Icon: Sparkles},
   {id: 'shortcuts', label: 'Shortcuts', Icon: Keyboard},
@@ -198,6 +214,7 @@ export function Sidebar({
                 <View style={styles.itemText}>
                   <Text style={styles.itemLabel}>{item.label}</Text>
                 </View>
+                {item.id === 'sleep' && <SleepValue />}
                 {/* The update lives inside Settings, so the dot follows it here —
                   the one on the hamburger only says "look inside". */}
                 {item.id === 'settings' && updateWaiting && (
@@ -216,10 +233,23 @@ export function Sidebar({
   );
 }
 
+/**
+ * The armed sleep timer's remaining time, as its own leaf.
+ *
+ * Subscribing to the timer in Sidebar itself would have re-rendered a
+ * permanently-mounted six-row panel once a SECOND for as long as a timer was
+ * running — including the whole time the drawer is shut. The countdown ticks
+ * here and nowhere else.
+ */
+const SleepValue = React.memo(function SleepValue() {
+  const label = sleepLabel(useSleepTimer());
+  return label ? <Text style={styles.itemValue}>{label}</Text> : null;
+});
+
 const styles = StyleSheet.create({
   // Covers the whole app, above everything, but box-none so only the scrim and
   // the panel themselves take touches.
-  host: {...StyleSheet.absoluteFillObject, zIndex: 40},
+  host: {...StyleSheet.absoluteFillObject, zIndex: 45},
   scrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -272,6 +302,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   itemLabel: {color: C.text, fontSize: 15.5, fontWeight: '700'},
+  itemValue: {color: C.accent, fontSize: 12.5, fontWeight: '700'},
   version: {
     color: C.faint,
     fontSize: 12,

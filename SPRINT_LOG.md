@@ -354,6 +354,104 @@ used Reanimated, via react-native-draggable-flatlist.
   `token_sort_ratio`, so "blindinglights" vs "blinding lights" would be gated
   out and stop merging.
 
+---
+
+## v1.0.9 batch — audit round 3
+
+Round 2's deferral came due. `PlayerScreen` was the last thing still on
+PanResponder + `<Modal>`, and it was the direct cause of three separate reports.
+
+**Reported**
+
+| # | Report | Root cause |
+|---|---|---|
+| A1 | Volume jumps loud for a moment on the first play | `setEqualizer(false, …)` and `setNormalize(false)` both called `ensureAttached()` first, which **creates** an `Equalizer` and a `LoudnessEnhancer` on the live session and then immediately disables them. Inserting an `AudioEffect` makes the audio HAL re-route the mix, which is audible as a level step whether or not the effect does anything — and both settings default to off, so on a default install that insertion was the *only* thing happening. Both setters now no-op when off and not already attached. On top of that, a native `fadeInPlayer(130)` covers the genuine start-of-stream transient (ExoPlayer opening the output, a Bluetooth codec still negotiating). Native, one-shot, and force-restores 1.0 — a JS ramp is what left tracks stuck quiet before and must never come back. |
+| A2a | Minimising doesn't finish the slide | The artwork's release path called `onClose()` outright, which unmounted the sheet wherever the finger left it — release at 35% and it never travelled the other 65%. The header's path was already correct. Both now run the same settle. |
+| A2b | Minimising is harsh | `sheetY` was an `Animated.Value` written by `setValue()` from a PanResponder: one JS write and one bridge crossing per touch event, queued behind whatever React was doing — and dragging the player down is when React is busiest. Now a shared value written from a worklet. `setPreviewDir` went from ~60 JS crossings per drag to at most 2 (only when the drag's sign flips). |
+| A2c | — | `<Modal>` dropped. The manual axis lock (`artAxis`, set on the first move then obeyed) is gone with it: `Gesture.Race(dismiss, skip)` with `activeOffsetX`/`failOffsetY` arbitrates natively, before either gesture has taken a frame. |
+| A3 | Seek-peek overlay too bright | A flat 13% white slab over a bright cover with a `borderRadius: 999` edge — you could see the shape of the overlay itself, which is the one thing it must not do. Now a radial `<RadialGradient>` falloff from the tap point, no background and no radius, glyphs at 92% instead of pure white. |
+| A4 | Vertical scrolling loses grip | The drawer pull was armed across the whole of Home. A thumb-scroll *arcs*, so a drag could satisfy `activeOffsetX` before `failOffsetY` ruled it out — and the moment the pan activated, RNGH cancelled the scroll already under way. No threshold tuning removes that; the gestures genuinely overlap. The pull is now armed only in the leftmost 36dp (`hitSlop({left: 0, width: DRAWER_EDGE})`), which removes the contest instead of arbitrating it. Gmail, Chrome and Android's own back gesture all do this. |
+| A5 | Sheets still take a beat | Three things. (1) Reanimated's default easing is `inOut(quad)`, which spends the first ~60ms of a 210ms slide barely moving — the delay you feel was the *curve*. Now `out(cubic)` in, `in(cubic)` out. (2) `setPresent(true)` and the slide started in the same effect, so the animation was already partway through before React had committed the subtree. Sheets now mount on first open and never unmount. (3) The scrim interpolated over the full screen height, so the dim lingered after the sheet had gone; it now measures the sheet. |
+| A6 | The `+` playlist sheet opens behind the player | Confirmed exactly as described. Android windows stack by window type and creation order, so a `zIndex` in the main window can never beat a Dialog window — the sheet mounted, animated perfectly, and was invisible until the player was minimised. Falls out of A2c for free. New z-order: player 30, sheets 40, drawer 45, splash 60. |
+| A7 | Mini player looks nerdy | Nine points, all finishing rather than layout: elevation + hairline, a vertical gradient instead of one flat fill, concentric corners (bar 11 / art 6 / pad 5 — both were 8), an inset softer progress line, a solid play disc with the headphone slot deleted (it is status, and it already has a home in the subtitle — the title gains 40px), 14/600 over 11.5/400-at-62%, an artwork border, `SlideInDown`/`SlideOutDown`, and a whole-bar press scale. Also off `onMoveShouldSetPanResponderCapture`, which intercepted touches on the way down and could steal from the bar's own buttons. |
+| A8 | New sidebar features | **Queue** and **Sleep timer** promoted to the drawer (a *now* action buried one screen deep is the wrong depth), the sleep timer showing its remaining time inline. **Your sound** gained a real week: minutes actually listened, songs played, a 7-day bar, and a source breakdown. |
+| A9 | Some operations still feel slow | Seekbar and Toggle converted (below); Home's outer `ScrollView` → `FlatList`. Every row on Home is a horizontal `FlatList` of cards with remote images, and a ScrollView was building and holding all of them on the first frame. |
+
+**How the week stats are counted** — worth writing down, because the obvious
+implementation is wrong. The log records play *starts* only; how long each ran
+is derived as `min(track length, next start − this start)`. That cannot inflate
+(a song skipped after 5s counts 5s), it needs no write on pause/skip/end — every
+one of which is a chance to double-count or miss — and an app left closed
+overnight is capped at one track length instead of reporting eight hours.
+`__tests__/weekStats.test.ts` pins both failure directions.
+
+**Not reported, found**
+
+- **B1** `Seekbar` used `onStartShouldSetPanResponder: () => true`, claiming
+  *every* touch in its 44px strip — including one that was the start of a
+  downward drag meant to dismiss the player. The JS responder system has no way
+  to hand a granted touch back, so that drag simply died, on the most-touched
+  control in the app. Now `Gesture.Race(tap, pan)` with `failOffsetY`, and the
+  two-node thumb collapses to one (a shared value has no native-driver
+  restriction, so percentage `left` and `scale` can finally share a view).
+- **B2** `Toggle` was the last `useNativeDriver: false` in the app, on every
+  Settings row. The blocker was `backgroundColor`, which the driver genuinely
+  cannot interpolate — so the colour change is a cross-fade between two stacked
+  tracks instead, which it can.
+- **B3** `Dimensions.get('window').height` read at module load in three places.
+  The activity handles rotation itself (`configChanges` lists `orientation`), so
+  a portrait height captured in landscape left "closed" halfway down the screen.
+  All three now derive from `max(w, h)` / `min(w, h)`, which are the same number
+  in either orientation.
+- **B4** The EQ screen showed the same "play something first" line whether the
+  device had nothing playing or had flatly *refused* effects on an offloaded
+  session. `getCapabilities` now returns native's own reason.
+- **B5** Adding `useSleepTimer()` to the permanently-mounted Sidebar would have
+  re-rendered a six-row panel once a second for as long as a timer ran,
+  including while the drawer was shut. Isolated to a memoised `<SleepValue>`
+  leaf — the same shape as `<MiniProgress>`.
+- **B6** The three TextInput dialogs were missing `statusBarTranslucent`, which
+  every other dialog sets, leaving an un-scrimmed band across the top.
+- **B7** `ArtistPickerSheet` cleared its photos on close (`Promise.all([])`
+  resolves immediately), blanking every face to an initial while the panel was
+  still sliding away.
+
+**Caught while building, not shipped broken**
+
+- The A1 short-circuit would have broken **every volume ramp**. `ensureAttached()`
+  was the only caller of `MusicServiceRef.ensureBound()`, and that binding is how
+  `PlaybackSession` reaches the ExoPlayer instance — so skipping past it on a
+  default install would have left `setExoVolume()` silently returning false
+  forever, taking the crossfade fade-out and the new fade-in with it. Both
+  setters now bind *before* the short-circuit.
+- Keeping the player mounted means its two `useProgress` subscriptions would
+  have polled the engine forever, on every screen, for a sheet nobody can see.
+  Both are parked at `PARKED_POLL` while it is closed.
+- `AddToPlaylistSheet` kept a half-typed new-playlist name across opens once the
+  sheet stopped unmounting. What used to be reset by unmounting is reset on
+  close now.
+
+**Deliberately not done**
+
+- `removeClippedSubviews` on Home's new FlatList. Virtualisation is what
+  actually unmounts the off-screen rows and it does so in JS where it is
+  predictable; `removeClippedSubviews` is a separate native detach with a long
+  history of blanking content inside nested horizontal lists — which is exactly
+  what every row on Home is.
+- **Following** (A8). Listening stats and the two now-actions went in; the
+  followed-artists screen is its own piece of work.
+- **C1** SoundCloud stream resolution still goes through a full `yt-dlp`
+  extraction per play.
+- **C2** The `_resolve_key` token prefilter stays refused, and round 3 agrees
+  it should: an empty token intersection falls back to `token_sort_ratio`, so
+  "blindinglights" vs "blinding lights" would be gated out and stop merging.
+- The EQ screen's `getCapabilities` is now the one place that still attaches the
+  chain unconditionally. It has to — the real band count and gain range can only
+  be read off a live `Equalizer` — so opening that screen mid-song can still
+  cost the momentary step A1 removes everywhere else. On the Equalizer screen
+  specifically that is a fair trade for telling the truth about the device.
+
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

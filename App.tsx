@@ -31,6 +31,7 @@ import {
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
+import {SleepSheet} from './src/components/SleepSheet';
 import {resetDrawer, settleDrawer} from './src/drawer';
 import {C} from './src/theme';
 import {
@@ -94,6 +95,16 @@ function Shell() {
    *  Settings — see navigateFromDrawer. */
   const [tipsOpen, setTipsOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
+  /**
+   * Which pane the player should land on, bumped so the SAME request twice in a
+   * row still takes. A bare 'queue' | null would be swallowed the second time:
+   * the value never changes, so the effect inside the player never re-runs.
+   */
+  const [playerPane, setPlayerPane] = useState<{
+    pane: 'song' | 'queue';
+    nonce: number;
+  } | null>(null);
+  const [sleepOpen, setSleepOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
@@ -461,6 +472,13 @@ function Shell() {
       if (dest === 'settings') {
         setSettingsFocus(updateWaiting ? 'update' : null);
         setSettingsOpen(true);
+      } else if (dest === 'queue') {
+        // The queue could only be reached from inside the player before, which
+        // meant opening the player to find out what was coming next.
+        setPlayerPane(p => ({pane: 'queue', nonce: (p?.nonce ?? 0) + 1}));
+        setPlayerOpen(true);
+      } else if (dest === 'sleep') {
+        setSleepOpen(true);
       } else if (dest === 'shortcuts') {
         // Its OWN overlay, not a panel pushed inside Settings. It used to be —
         // Settings would mount underneath with panel='tips' — so back from
@@ -469,7 +487,7 @@ function Shell() {
         // Shortcuts is reached from the drawer; its back should return to
         // wherever the drawer was opened from, same as every other drawer item.
         setTipsOpen(true);
-      } else {
+      } else if (dest === 'recents' || dest === 'stats') {
         setActivity(dest);
       }
       // updateWaiting is read above, so it has to be a dependency — with an empty
@@ -633,11 +651,14 @@ function Shell() {
       {engine && (
         <PlayerScreen
           visible={playerOpen}
+          focusPane={playerPane}
           onClose={() => setPlayerOpen(false)}
           onAddToPlaylist={setAddTo}
           onOpenArtist={openArtistCredit}
         />
       )}
+
+      <SleepSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
 
       <UpdateModal />
 
@@ -684,7 +705,9 @@ export default function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   body: {flex: 1},
-  splash: {...StyleSheet.absoluteFillObject, zIndex: 50, backgroundColor: C.bg},
+  // Above every overlay: player 30, sheets 40, drawer 45. The splash is the
+  // one thing that must cover a half-built app.
+  splash: {...StyleSheet.absoluteFillObject, zIndex: 60, backgroundColor: C.bg},
   tabShown: {...StyleSheet.absoluteFillObject},
   tabHidden: {...StyleSheet.absoluteFillObject, display: 'none'},
 });

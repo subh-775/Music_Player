@@ -19,6 +19,7 @@ type AudioNative = {
   crossfadePosition?: () => Promise<number>;
   stopCrossfade?: () => Promise<boolean>;
   fadeOutPlayer?: (durationMs: number) => Promise<boolean>;
+  fadeInPlayer?: (durationMs: number) => Promise<boolean>;
   restorePlayerVolume?: () => Promise<boolean>;
   getDiagnostics?: () => Promise<AudioDiagnostics>;
 };
@@ -49,6 +50,8 @@ export type EqCapabilities = {
   bands: number;
   minDb?: number;
   maxDb?: number;
+  /** Native's own words for why not, when `available` is false. */
+  reason?: string;
 };
 
 const native = (NativeModules.Audio ?? {}) as AudioNative;
@@ -109,6 +112,26 @@ export async function fadeOutPlayer(durationMs: number): Promise<void> {
     await native.fadeOutPlayer?.(durationMs);
   } catch {
     /* older APK without the native ramp — no fade, full volume, still correct */
+  }
+}
+
+/**
+ * Ramp UP over `durationMs` at the start of a track (native; self-restoring).
+ *
+ * Awaited on purpose at the one call site: the promise resolves only after the
+ * native side has already dropped the volume to its floor, so awaiting it is
+ * what guarantees the floor is in place BEFORE play() is called. Fire-and-forget
+ * would race play() and produce a dip after the first audible moment, which is
+ * worse than no fade at all.
+ *
+ * On an older APK without the method this resolves immediately and playback
+ * starts at full volume — the pre-existing behaviour, not a broken one.
+ */
+export async function fadeInPlayer(durationMs: number): Promise<void> {
+  try {
+    await native.fadeInPlayer?.(durationMs);
+  } catch {
+    /* no native ramp in this build — full volume, still correct */
   }
 }
 

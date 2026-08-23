@@ -32,6 +32,7 @@ import {
   crossfadePosition,
   crossfadeSupported,
   endCrossfade,
+  fadeInPlayer,
   fadeOutPlayer,
   restorePlayerVolume,
 } from './audioEffects';
@@ -58,6 +59,15 @@ let queueSource: Track[] = [];
 // each other, so several adds keep their order and all play SOON — not at the
 // bottom of a long album/playlist. Reset whenever the active track changes.
 let queuedAhead = 0;
+
+/**
+ * How long the native volume ramp at the start of a track takes.
+ *
+ * Deliberately short. Past ~200ms a rise stops reading as "a clean start" and
+ * starts reading as a fade, which is not what this is for — it exists to cover
+ * the first few frames while ExoPlayer's output path settles, not to be noticed.
+ */
+const FADE_IN_MS = 130;
 
 /** The full Track behind an engine queue item, or null if it isn't ours. */
 export function sourceTrackFor(
@@ -421,11 +431,21 @@ export async function playTrack(
     // rest costs nothing once sound is out.
     await TrackPlayer.add([items[startAt].q]);
 
-    // Full volume, always. Starting silent and ramping up in JS (a previous
-    // attempt at softening a Bluetooth start-of-track blip) is what left tracks
-    // stuck quiet whenever the ramp was interrupted — never trade a guaranteed
-    // silence bug for a cosmetic one.
+    // Full volume, always — but the RISE is native.
+    //
+    // The warning this comment used to carry still stands and is the reason the
+    // ramp is where it is: a ramp written in JS stalls the instant Android
+    // throttles RN's timers, and leaves the track stuck quiet. That is not a
+    // cosmetic bug and it must never come back. A ramp on the audio thread
+    // cannot stall, and it force-restores 1.0 afterwards either way.
+    //
+    // What it hides is the start-of-stream transient: ExoPlayer has just opened
+    // the output, a Bluetooth codec is still negotiating, and the effects chain
+    // attaches a beat later. FADE_IN_MS is under the threshold where a rise is
+    // perceptible AS a fade — it reads as a clean start, not a fade-in.
     await TrackPlayer.setVolume(1);
+    // Awaited, so the floor is set before play() rather than racing it.
+    await fadeInPlayer(FADE_IN_MS);
     // Publish the tapped track immediately — waiting for the engine event showed
     // the old song's title for a beat. The mirror is seeded from the FULL list we
     // are about to build, not from the one-track queue that exists right now, so

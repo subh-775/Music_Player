@@ -1,24 +1,39 @@
 /**
  * A draggable seek bar.
  *
- * The fill and thumb are driven by an Animated.Value updated straight from the
- * gesture — no React re-render per frame, so the scrub is smooth even under a
- * busy JS thread. Seeking only happens on release (one Range request, not one
- * per pixel), and the released position is HELD until the engine's own progress
- * catches up, so the thumb never snaps back to the old spot for a frame.
+ * The fill and thumb are driven by ONE shared value written straight from the
+ * gesture on the UI thread — no React re-render per frame and no bridge crossing
+ * per frame, so the scrub is smooth even while the JS thread is busy. Seeking
+ * happens on release (one Range request, not one per pixel), and the released
+ * position is HELD until the engine's own progress catches up, so the thumb
+ * never snaps back to the old spot for a frame.
+ *
+ * ## Why this is not a PanResponder
+ *
+ * It was, with `onStartShouldSetPanResponder: () => true` — which claimed EVERY
+ * touch landing anywhere in the 44px strip, including one that was the start of
+ * a downward drag meant to minimise the player. Once the JS responder system has
+ * granted a touch there is no handing it back, so that drag simply died. This is
+ * the most-touched control in the app and it sat in the middle of a sheet with
+ * its own dismiss gesture.
+ *
+ * A tap and a scrub are now two declarations that race natively: `failOffsetY`
+ * lets a clearly-vertical drag fall through to the player's dismiss, while a
+ * horizontal one still takes the bar immediately.
  *
  * The time label updates on whole-second changes only — cheap, and all the eye
- * needs while scrubbing.
+ * needs while scrubbing. It is the only thing here that touches JS mid-drag, at
+ * most once a second.
  */
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {
-  Animated,
-  PanResponder,
-  StyleSheet,
-  Text,
-  View,
-  type LayoutChangeEvent,
-} from 'react-native';
+import {StyleSheet, Text, View, type LayoutChangeEvent} from 'react-native';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {C} from '../theme';
 
 function clock(sec: number): string {
@@ -31,7 +46,8 @@ function clock(sec: number): string {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+/** How long a tap on the bar may last before it counts as a press, not a jump. */
+const TAP_MS = 400;
 
 export function Seekbar({
   position,
@@ -42,28 +58,30 @@ export function Seekbar({
   duration: number;
   onSeek: (seconds: number) => void;
 }) {
-  const t = useRef(new Animated.Value(0)).current;
-  const [label, setLabel] = useState(0);
-  const [scrubbing, setScrubbing] = useState(false);
-  // Grow, don't recolor. Swapping the thumb's fill white -> accent green (and
-  // back) landed in a single frame each way — a hard color flip reads as a
-  // glitch. Size is what says "this is now grabbed"; the colour never moves.
-  const grow = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(grow, {
-      toValue: scrubbing ? 1 : 0,
-      duration: scrubbing ? 120 : 180,
-      // NATIVE. This used to animate width/height/borderRadius, which the
-      // driver cannot handle — so the grab animation ran on the JS thread, at
-      // precisely the moment the JS thread is busiest (you are mid-scrub). It
-      // is a `scale` on a fixed-size thumb now, which the driver can.
-      useNativeDriver: true,
-    }).start();
-  }, [scrubbing, grow]);
+  /** 0..1 along the bar. The single source of truth for fill and thumb. */
+  const t = useSharedValue(0);
+  /**
+   * Grow, don't recolor. Swapping the thumb's fill white → accent green (and
+   * back) landed in a single frame each way — a hard colour flip reads as a
+   * glitch. Size is what says "this is now grabbed"; the colour never moves.
+   *
+   * No React state behind it any more: a `scrubbing` boolean re-rendered this
+   * component twice per drag for something the UI thread can own outright.
+   */
+  const grow = useSharedValue(0);
 
-  const widthRef = useRef(0);
-  const durationRef = useRef(0);
-  durationRef.current = duration;
+  const [label, setLabel] = useState(0);
+
+  // Measured width and the current duration, readable from the gesture worklet.
+  const barW = useSharedValue(1);
+  const dur = useSharedValue(0);
+  /** Last whole second handed to JS, so the label costs at most 1 crossing/sec. */
+  const shownSec = useSharedValue(-1);
+
+  useEffect(() => {
+    dur.value = duration;
+  }, [duration, dur]);
+
   const draggingRef = useRef(false);
   // Held target after release, until the engine reports it caught up.
   const heldRef = useRef<number | null>(null);
@@ -82,91 +100,119 @@ export function Seekbar({
         return;
       }
     }
-    const frac = duration > 0 ? clamp01(position / duration) : 0;
-    t.setValue(frac);
+    const frac = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
+    t.value = frac;
     setLabel(position);
   }, [position, duration, t]);
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    widthRef.current = Math.max(1, e.nativeEvent.layout.width);
-  }, []);
-
-  const apply = useCallback(
-    (x: number) => {
-      const frac = clamp01(x / widthRef.current);
-      t.setValue(frac);
-      const secs = frac * (durationRef.current || 0);
-      setLabel(prev => (Math.floor(prev) === Math.floor(secs) ? prev : secs));
-      return secs;
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      barW.value = Math.max(1, e.nativeEvent.layout.width);
     },
-    [t],
+    [barW],
   );
 
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: e => {
-        draggingRef.current = true;
-        setScrubbing(true);
-        apply(e.nativeEvent.locationX);
-      },
-      onPanResponderMove: e => apply(e.nativeEvent.locationX),
-      onPanResponderRelease: e => {
-        const secs = apply(e.nativeEvent.locationX);
-        draggingRef.current = false;
-        setScrubbing(false);
-        heldRef.current = secs;
-        onSeekRef.current(secs);
-        // Failsafe: never pin the thumb forever if the seek never lands.
-        setTimeout(() => {
-          heldRef.current = null;
-        }, 2500);
-      },
-      onPanResponderTerminate: () => {
-        draggingRef.current = false;
-        setScrubbing(false);
-      },
-    }),
-  ).current;
+  const beginDrag = useCallback(() => {
+    draggingRef.current = true;
+  }, []);
 
-  const widthPct = t.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
+  const cancelDrag = useCallback(() => {
+    draggingRef.current = false;
+  }, []);
+
+  const commitSeek = useCallback((secs: number) => {
+    draggingRef.current = false;
+    heldRef.current = secs;
+    setLabel(secs);
+    onSeekRef.current(secs);
+    // Failsafe: never pin the thumb forever if the seek never lands.
+    setTimeout(() => {
+      heldRef.current = null;
+    }, 2500);
+  }, []);
+
+  /** Where along the bar a touch at `x` sits, 0..1. */
+  const fracAt = useCallback(
+    (x: number) => {
+      'worklet';
+      return Math.max(0, Math.min(1, x / barW.value));
+    },
+    [barW],
+  );
+
+  const scrub = Gesture.Pan()
+    // A short horizontal move takes the bar; a vertical one falls through, which
+    // is what lets a downward drag starting here dismiss the player instead of
+    // dying in a responder that had already claimed it.
+    .activeOffsetX([-4, 4])
+    .failOffsetY([-14, 14])
+    .onBegin(() => {
+      runOnJS(beginDrag)();
+    })
+    .onStart(e => {
+      grow.value = withTiming(1, {duration: 120});
+      t.value = fracAt(e.x);
+    })
+    .onUpdate(e => {
+      t.value = fracAt(e.x);
+      const secs = Math.floor(t.value * dur.value);
+      if (secs !== shownSec.value) {
+        shownSec.value = secs;
+        runOnJS(setLabel)(secs);
+      }
+    })
+    .onEnd((e, success) => {
+      if (success) {
+        runOnJS(commitSeek)(fracAt(e.x) * dur.value);
+      }
+    })
+    .onFinalize((_e, success) => {
+      grow.value = withTiming(0, {duration: 180});
+      if (!success) {
+        // Never activated (or was cancelled) — release the follow lock that
+        // onBegin took, or the bar would stop tracking the engine for good.
+        runOnJS(cancelDrag)();
+      }
+    });
+
+  // Tap to jump. A Pan cannot serve this without activating on touch-down, and
+  // activating on touch-down is exactly the behaviour being removed.
+  const jump = Gesture.Tap()
+    .maxDuration(TAP_MS)
+    .onEnd((e, success) => {
+      if (success) {
+        t.value = fracAt(e.x);
+        runOnJS(commitSeek)(fracAt(e.x) * dur.value);
+      }
+    });
+
+  const gesture = Gesture.Race(scrub, jump);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${t.value * 100}%`,
+  }));
+  // One node, not two: a shared value has no native-driver restriction, so the
+  // percentage `left` and the `scale` can finally live on the same view. The
+  // JS-driven outer anchor that used to be required for that is gone.
+  const thumbStyle = useAnimatedStyle(() => ({
+    left: `${t.value * 100}%`,
+    transform: [{scale: 1 + grow.value * 0.32}],
+  }));
 
   return (
     <View style={styles.wrap}>
       {/* ~28px visual, 44px touch (Fitts') — a 4px bar is unhittable. */}
-      <View style={styles.touch} onLayout={onLayout} {...pan.panHandlers}>
-        <View style={styles.track}>
-          <Animated.View style={[styles.fill, {width: widthPct}]} />
-        </View>
-        {/* Two nodes on purpose: the OUTER one is positioned with a percentage
-            `left`, which only the JS driver can animate, and the INNER one
-            scales natively. Putting both on one node makes React Native refuse
-            the native driver outright. */}
-        <Animated.View
-          style={[styles.thumbAnchor, {left: widthPct}]}
-          pointerEvents="none">
+      <GestureDetector gesture={gesture}>
+        <View style={styles.touch} onLayout={onLayout}>
+          <View style={styles.track}>
+            <Animated.View style={[styles.fill, fillStyle]} />
+          </View>
           <Animated.View
-            style={[
-              styles.thumb,
-              {
-                transform: [
-                  {
-                    scale: grow.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [1, 1.32],
-                    }),
-                  },
-                ],
-              },
-            ]}
+            style={[styles.thumb, thumbStyle]}
+            pointerEvents="none"
           />
-        </Animated.View>
-      </View>
+        </View>
+      </GestureDetector>
       <View style={styles.times}>
         <Text style={styles.time}>{clock(label)}</Text>
         <Text style={styles.time}>{clock(duration)}</Text>
@@ -185,9 +231,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fill: {height: '100%', backgroundColor: C.text, borderRadius: 2},
-  // Half the thumb's width, so the thumb sits centred on the playhead.
-  thumbAnchor: {position: 'absolute', marginLeft: -6.5},
   thumb: {
+    position: 'absolute',
+    // Half the thumb's width, so it sits centred on the playhead.
+    marginLeft: -6.5,
     width: 13,
     height: 13,
     borderRadius: 6.5,

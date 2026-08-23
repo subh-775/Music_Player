@@ -7,18 +7,35 @@
  *
  * Swiping it left or right skips, matching the gesture on the full player's
  * artwork, so the same motion means the same thing in both places.
+ *
+ * ## What makes it read as a floating bar rather than a toolbar
+ *
+ * Four things, and they are all finishing rather than layout:
+ *
+ *   - It has ELEVATION. A background and a radius with no shadow sits flat
+ *     against the page; a bar that floats has to look like it does.
+ *   - The fill is a vertical GRADIENT, lighter at the top where the light is.
+ *     One solid darkened colour is the flattest a surface can look.
+ *   - The corners are CONCENTRIC: outer radius = inner radius + padding. Bar
+ *     and artwork were both 8, which is what made it read as two rectangles
+ *     that happen to overlap.
+ *   - One control DOMINATES. Three glyphs at the same optical weight in three
+ *     identical slots is a toolbar. Play is what the bar is for, so it gets a
+ *     solid disc and the others do not.
  */
-import React, {useMemo, useRef} from 'react';
-import {
-  Animated,
-  Image,
-  PanResponder,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import {Bluetooth, Headphones, Heart, Pause, Play} from 'lucide-react-native';
+import React, {useCallback, useMemo} from 'react';
+import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Animated, {
+  SlideInDown,
+  SlideOutDown,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
+import {Bluetooth, Heart, Pause, Play} from 'lucide-react-native';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {Marquee} from './Marquee';
@@ -36,6 +53,11 @@ import {useAudioOutput} from '../audioOutput';
 import {toward, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
+
+/** Concentric corners: PAD + ART_R = BAR_R, so the two curves are parallel. */
+const PAD = 5;
+const ART_R = 6;
+const BAR_R = PAD + ART_R;
 
 /**
  * The hairline under the mini player, and the only part of it on a clock.
@@ -62,37 +84,55 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   // Only the TITLE slides — the artwork just swaps to the new song, per the
   // request. And the skip is fired IMMEDIATELY, not behind the animation, so
   // the new song appears at once instead of a beat later.
-  const titleSlide = useRef(new Animated.Value(0)).current;
+  const titleSlide = useSharedValue(0);
+  /** Whole-bar press feedback. Tiny, and it is what connects the tap to the
+   *  expansion that follows — without it the bar feels like a static strip. */
+  const press = useSharedValue(0);
 
-  const pan = useMemo(
-    () =>
-      PanResponder.create({
-        // CAPTURE, not the plain variant. The bar's contents are Touchables,
-        // and a child that has already claimed the touch never hands it back —
-        // which is why the swipe silently did nothing. Capturing lets the bar
-        // take over the moment the movement is clearly horizontal, while a
-        // straight tap still falls through to the child.
-        onMoveShouldSetPanResponderCapture: (_e, g) =>
-          Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderRelease: (_e, g) => {
-          const commit = (dir: 1 | -1, go: () => void) => {
-            go(); // fire the skip NOW — the engine advances while this animates
-            titleSlide.setValue(dir * 90);
-            Animated.timing(titleSlide, {
-              toValue: 0,
-              duration: 220,
-              useNativeDriver: true,
-            }).start();
-          };
-          if (g.dx <= -SWIPE_COMMIT) {
-            commit(1, skipNext);
-          } else if (g.dx >= SWIPE_COMMIT) {
-            commit(-1, skipPrevious);
-          }
-        },
-      }),
+  const commit = useCallback(
+    (dir: 1 | -1) => {
+      // Fire the skip NOW — the engine advances while this animates.
+      (dir === 1 ? skipNext() : skipPrevious()).catch(() => {});
+      titleSlide.value = dir * 90;
+      titleSlide.value = withTiming(0, {duration: 220});
+    },
     [titleSlide],
   );
+
+  /**
+   * Recognised natively.
+   *
+   * This used `onMoveShouldSetPanResponderCapture` — a CAPTURE handler, which
+   * intercepts touches on the way down and can take one from a child Touchable
+   * that was about to handle it. It was there because the plain variant could
+   * never win against the bar's own buttons. activeOffsetX needs neither trick:
+   * a stationary press goes to whichever button is under it, and a horizontal
+   * drag is claimed the moment it is unambiguously horizontal.
+   */
+  const swipe = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-14, 14])
+        .failOffsetY([-18, 18])
+        .onEnd((e, success) => {
+          if (!success) {
+            return;
+          }
+          if (e.translationX <= -SWIPE_COMMIT) {
+            runOnJS(commit)(1);
+          } else if (e.translationX >= SWIPE_COMMIT) {
+            runOnJS(commit)(-1);
+          }
+        }),
+    [commit],
+  );
+
+  const titleStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: titleSlide.value}],
+  }));
+  const barStyle = useAnimatedStyle(() => ({
+    transform: [{scale: 1 - press.value * 0.015}],
+  }));
 
   const artworkForColor = track
     ? getBestArtworkUrl(track)
@@ -108,88 +148,115 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
   const artwork = artworkForColor;
 
   return (
-    <View
-      style={[styles.wrap, !!tint && {backgroundColor: toward(tint, 0.45)}]}
-      {...pan.panHandlers}>
-      {/* The BAR and ARTWORK stay put; only the title travels. */}
-      <View style={styles.slider}>
-        <TouchableOpacity
-          style={styles.main}
-          activeOpacity={0.85}
-          onPress={onExpand}>
-          {artwork ? (
-            <Image
-              key={artwork}
-              source={{uri: artwork}}
-              style={styles.art}
-              fadeDuration={0}
-            />
-          ) : (
-            <View style={[styles.art, styles.artFallback]} />
+    /* Rises in rather than appearing. The bar arrives when the first song
+       starts, which is a change worth showing rather than blinking.
+
+       Its own view, OUTSIDE the GestureDetector on purpose: an exiting
+       animation needs the animated view to outlive its parent for the length of
+       the exit, and it cannot do that if an ancestor is unmounting in the same
+       commit. */
+    <Animated.View
+      entering={SlideInDown.duration(240)}
+      exiting={SlideOutDown.duration(180)}>
+      <GestureDetector gesture={swipe}>
+        <Animated.View style={[styles.wrap, barStyle]}>
+          {/* A vertical gradient, not a flat fill: lighter at the top where the
+            light would be. Falls back to the flat surface when the artwork's
+            colour isn't known yet, which is a beat at most. */}
+          {!!tint && (
+            <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+              <Defs>
+                <LinearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={toward(tint, 0.34)} />
+                  <Stop offset="1" stopColor={toward(tint, 0.58)} />
+                </LinearGradient>
+              </Defs>
+              <Rect width="100%" height="100%" fill="url(#barFill)" />
+            </Svg>
           )}
 
-          <Animated.View
-            style={[styles.text, {transform: [{translateX: titleSlide}]}]}>
-            <Marquee
-              text={cleanText(String(active.title ?? ''))}
-              style={styles.title}
-            />
-            {output ? (
-              <View style={styles.outputRow}>
-                <Bluetooth size={10} color={C.accent} />
-                <Text style={styles.output} numberOfLines={1}>
-                  {output}
-                </Text>
-              </View>
-            ) : (
-              <Text style={styles.artist} numberOfLines={1}>
-                {cleanText(String(active.artist ?? ''))}
-              </Text>
-            )}
-          </Animated.View>
-        </TouchableOpacity>
-      </View>
+          {/* The BAR and ARTWORK stay put; only the title travels. */}
+          <View style={styles.slider}>
+            <TouchableOpacity
+              style={styles.main}
+              activeOpacity={1}
+              onPressIn={() => {
+                press.value = withTiming(1, {duration: 90});
+              }}
+              onPressOut={() => {
+                press.value = withTiming(0, {duration: 160});
+              }}
+              onPress={onExpand}>
+              {artwork ? (
+                <Image
+                  key={artwork}
+                  source={{uri: artwork}}
+                  style={styles.art}
+                  fadeDuration={0}
+                />
+              ) : (
+                <View style={[styles.art, styles.artFallback]} />
+              )}
 
-      {/* Headphones, like, play — evenly spaced and all on the same optical
-          size. The headphone glyph keeps its slot even when it isn't shown, so
-          the other two don't shuffle sideways the moment a headset connects. */}
-      <View style={styles.controls}>
-        <View style={styles.ctl}>
-          {!!output && (
-            <Headphones size={22} color={C.accent} strokeWidth={2} />
-          )}
-        </View>
+              <Animated.View style={[styles.text, titleStyle]}>
+                <Marquee
+                  text={cleanText(String(active.title ?? ''))}
+                  style={styles.title}
+                />
+                {output ? (
+                  <View style={styles.outputRow}>
+                    <Bluetooth size={10} color={C.accent} />
+                    <Text style={styles.output} numberOfLines={1}>
+                      {output}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.artist} numberOfLines={1}>
+                    {cleanText(String(active.artist ?? ''))}
+                  </Text>
+                )}
+              </Animated.View>
+            </TouchableOpacity>
+          </View>
 
-        <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.ctl}>
-          <Heart
-            size={22}
-            color={liked ? C.accent : C.text}
-            fill={liked ? C.accent : 'transparent'}
-            strokeWidth={2}
-          />
-        </TouchableOpacity>
+          {/* Like, then play. The headphone glyph that used to hold a third slot
+            here is gone: it is STATUS, not an action, and it already has a home
+            in the subtitle line above. Dropping the slot also hands the title
+            40px it did not have. */}
+          <View style={styles.controls}>
+            <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.ctl}>
+              <Heart
+                size={21}
+                color={liked ? C.accent : C.text}
+                fill={liked ? C.accent : 'transparent'}
+                strokeWidth={2}
+              />
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => togglePlay()}
-          hitSlop={10}
-          style={styles.ctl}>
-          {playing ? (
-            <Pause size={26} color={C.text} fill={C.text} />
-          ) : (
-            <Play
-              size={26}
-              color={C.text}
-              fill={C.text}
-              style={styles.playNudge}
-            />
-          )}
-        </TouchableOpacity>
-      </View>
+            <TouchableOpacity
+              onPress={() => togglePlay()}
+              activeOpacity={0.85}
+              hitSlop={8}
+              style={styles.playBtn}>
+              {playing ? (
+                <Pause size={20} color={C.bg} fill={C.bg} />
+              ) : (
+                <Play
+                  size={20}
+                  color={C.bg}
+                  fill={C.bg}
+                  style={styles.playNudge}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
 
-      <View style={styles.progressTrack}>
-        <MiniProgress />
-      </View>
-    </View>
+          <View style={styles.progressTrack}>
+            <MiniProgress />
+          </View>
+        </Animated.View>
+      </GestureDetector>
+    </Animated.View>
   );
 }
 
@@ -199,9 +266,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 8,
     marginBottom: 6,
-    borderRadius: 8,
+    borderRadius: BAR_R,
     backgroundColor: C.surfaceHi,
     overflow: 'hidden',
+    // Elevation is what makes it float. Without it the bar is a coloured
+    // rectangle lying flat on the page.
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+    shadowOffset: {width: 0, height: 6},
+    // Catches light along the top edge, which is what separates the bar from
+    // whatever is scrolling behind it.
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   slider: {flex: 1, minWidth: 0, flexDirection: 'row'},
   main: {
@@ -209,16 +287,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    // Tight, even gap on all sides — the artwork now fills almost the whole
-    // bar height instead of sitting in an 8px frame.
-    padding: 5,
+    padding: PAD,
     minWidth: 0,
   },
-  art: {width: 54, height: 54, borderRadius: 8, backgroundColor: C.surface},
+  art: {
+    width: 54,
+    height: 54,
+    borderRadius: ART_R,
+    backgroundColor: C.surface,
+    // Stops a cover with a light background from bleeding into the bar.
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+  },
   artFallback: {backgroundColor: C.bg},
   text: {flex: 1, minWidth: 0},
-  title: {fontSize: 13, fontWeight: '700', color: C.text, letterSpacing: 0.1},
-  artist: {fontSize: 12, color: C.sub, marginTop: 1.5},
+  // 14/600 over 11.5/400-at-62%. The old pair was 13/700 and 12/400 — one pixel
+  // apart, which is no hierarchy at all. The contrast gap does more work here
+  // than the size gap.
+  title: {fontSize: 14, fontWeight: '600', color: C.text, letterSpacing: 0.1},
+  artist: {fontSize: 11.5, color: C.text, opacity: 0.62, marginTop: 2},
   outputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -229,25 +316,41 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: S.gutter - 10,
+    paddingRight: S.gutter - 8,
   },
-  // Fixed-width slots, so the three sit on an even rhythm and nothing shifts
-  // when the headphone glyph appears or disappears.
   ctl: {
-    width: 40,
-    height: 40,
+    width: 38,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // A solid disc with a dark glyph — the one control that outranks everything
+  // else on the bar, and the only filled shape on it.
+  playBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: C.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   playNudge: {marginLeft: 2}, // optical centring for the triangle
   progressTrack: {
     position: 'absolute',
-    left: 8,
-    right: 8,
-    bottom: 2,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    // Inset, so it stops clipping against the bar's rounded corners.
+    left: 12,
+    right: 12,
+    bottom: 4,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
-  progressFill: {height: '100%', borderRadius: 1, backgroundColor: C.text},
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
+    // Not pure white: at the very bottom edge of a coloured bar, C.text read as
+    // a second, brighter border rather than as progress.
+    backgroundColor: 'rgba(255,255,255,0.85)',
+  },
 });

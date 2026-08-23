@@ -55,6 +55,13 @@ export function ArtistPickerSheet({
   // either end.
 
   useEffect(() => {
+    if (!names.length) {
+      // Closing. Promise.all([]) resolves immediately with nothing, which used
+      // to blank every photo back to an initial while the panel was still
+      // sliding away — the same "renders off the prop, not off `shown`" trap
+      // the note above describes, one level down.
+      return;
+    }
     let alive = true;
     // One lookup per credited name, in parallel — there are rarely more than
     // three or four, and they're independent.

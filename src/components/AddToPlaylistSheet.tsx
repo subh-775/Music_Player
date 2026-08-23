@@ -4,7 +4,7 @@
  * Creating a playlist from here adds the song to it immediately, because
  * that's the only reason you'd be creating one at this moment.
  */
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   FlatList,
   StyleSheet,
@@ -33,6 +33,26 @@ export function AddToPlaylistSheet({
   const playlists = usePlaylists();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  /**
+   * The track held through the close animation.
+   *
+   * `track` goes null the instant this is dismissed and <Sheet> keeps the panel
+   * on screen while it slides away, so reading the prop directly flashed
+   * `Add "" to` for the length of the exit.
+   */
+  const [shown, setShown] = useState<Track | null>(track);
+
+  useEffect(() => {
+    if (track) {
+      setShown(track);
+      return;
+    }
+    // Closed. A half-typed new-playlist name must NOT still be sitting there
+    // the next time this opens — the sheet is no longer torn down between
+    // opens, so what used to be reset by unmounting has to be reset here.
+    setCreating(false);
+    setName('');
+  }, [track]);
 
   const add = useCallback(
     (id: string, playlistName: string) => {
@@ -58,7 +78,7 @@ export function AddToPlaylistSheet({
   return (
     <Sheet open={!!track} onClose={onClose} style={styles.sheet}>
       <Text style={styles.title} numberOfLines={1}>
-        Add "{cleanText(track?.title)}" to
+        Add "{cleanText(shown?.title)}" to
       </Text>
 
       {creating ? (

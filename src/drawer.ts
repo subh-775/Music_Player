@@ -22,13 +22,41 @@ import {
   type SharedValue,
 } from 'react-native-reanimated';
 
-export const DRAWER_W = Math.min(320, Dimensions.get('window').width * 0.82);
+/**
+ * Panel width. Derived from the SHORT edge, not from `width`.
+ *
+ * Read once at module load, which is only safe because min(w, h) is the same
+ * number in both orientations. The activity handles rotation itself
+ * (configChanges lists `orientation`), so a plain `width` read taken in
+ * landscape produced a 320-wide panel on a phone whose portrait width could not
+ * hold it.
+ */
+export const DRAWER_W = (({width, height}) =>
+  Math.min(320, Math.min(width, height) * 0.82))(Dimensions.get('window'));
 
 /** -DRAWER_W = fully closed (off-screen left), 0 = fully open. */
 export const drawerX: SharedValue<number> = makeMutable(-DRAWER_W);
 
 /** How far right the finger must travel before the drag counts as a drawer pull. */
 export const DRAWER_GRAB = 12;
+
+/**
+ * How wide the strip at the left edge that starts a drawer pull is, in dp.
+ *
+ * The pull used to be armed across the WHOLE of Home, which put it in a
+ * permanent contest with the page's own vertical scrolling: a thumb-scroll arcs
+ * rather than travelling straight up, so a drag could satisfy activeOffsetX
+ * before failOffsetY ruled it out — and the moment the pan activated, RNGH
+ * cancelled the scroll that was already under way. That is the "vertical
+ * scrolling loses grip" report, and no threshold tuning removes it, because the
+ * two gestures genuinely overlap.
+ *
+ * Restricting where the pull can BEGIN removes the contest instead of
+ * arbitrating it, which is what Gmail, Chrome and YouTube all do — and what
+ * Android's own system back gesture does, at a comparable inset. Everything
+ * outside this strip now scrolls with nothing else even listening.
+ */
+export const DRAWER_EDGE = 36;
 
 /**
  * Let go: run the rest of the way to open or closed.

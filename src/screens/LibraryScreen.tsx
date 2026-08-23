@@ -393,6 +393,11 @@ export function LibraryScreen({
         visible={!!renaming}
         transparent
         animationType="fade"
+        // statusBarTranslucent, like every other dialog in the app. Without
+        // it the modal window stops at the status bar and leaves an
+        // un-scrimmed band across the top, which reads as the dialog being
+        // misaligned rather than as a window boundary.
+        statusBarTranslucent
         onRequestClose={() => setRenaming(null)}>
         <View style={styles.scrim}>
           <View style={styles.dialog}>
@@ -437,6 +442,7 @@ export function LibraryScreen({
         visible={creating}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setCreating(false)}>
         <View style={styles.scrim}>
           <View style={styles.dialog}>

@@ -10,8 +10,10 @@
  */
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
-import Svg, {Path} from 'react-native-svg';
-import {C} from '../theme';
+import Svg, {Defs, Path, Rect, RadialGradient, Stop} from 'react-native-svg';
+/** Not pure white. C.text against a dark cover glared; 92% sits on the artwork
+ *  instead of burning a hole in it, and is still far past AA on both. */
+const GLYPH = 'rgba(255,255,255,0.92)';
 
 /**
  * One solid seek triangle.
@@ -26,7 +28,7 @@ import {C} from '../theme';
 function SeekTriangle({
   side,
   size = 21,
-  color = C.text,
+  color = GLYPH,
 }: {
   side: 1 | -1;
   size?: number;
@@ -109,6 +111,28 @@ export function SeekPeek({side, seconds}: {side: 1 | -1; seconds: number}) {
           ],
         },
       ]}>
+      {/* The wash, as a RADIAL falloff rather than a flat fill.
+          A flat 13% white slab over a bright cover read as a visible grey
+          rectangle with a hard rounded edge — you could see the shape of the
+          overlay itself, which is the one thing this effect must not do. The
+          gradient is brightest where the finger actually tapped (the inner
+          edge) and reaches zero before the outer edge, so there is no edge to
+          see. Same trick YouTube uses. */}
+      <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Defs>
+          <RadialGradient
+            id="peek"
+            cx={side === 1 ? '100%' : '0%'}
+            cy="50%"
+            r="85%">
+            <Stop offset="0" stopColor="#fff" stopOpacity="0.14" />
+            <Stop offset="0.55" stopColor="#fff" stopOpacity="0.05" />
+            <Stop offset="1" stopColor="#fff" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#peek)" />
+      </Svg>
+
       <View style={styles.row}>
         {chevrons.map((c, i) => (
           <Animated.View
@@ -156,20 +180,23 @@ const styles = StyleSheet.create({
     width: '48%',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.13)',
+    // No backgroundColor and no borderRadius: the radial gradient above IS the
+    // shape. A rounded rect needs a hard edge to be rounded, and that edge was
+    // the whole complaint.
+    overflow: 'hidden',
   },
-  left: {
-    left: 0,
-    borderTopRightRadius: 999,
-    borderBottomRightRadius: 999,
-  },
-  right: {
-    right: 0,
-    borderTopLeftRadius: 999,
-    borderBottomLeftRadius: 999,
-  },
+  left: {left: 0},
+  right: {right: 0},
   mirror: {transform: [{scaleX: -1}]},
   row: {flexDirection: 'row', alignItems: 'center'},
   overlap: {marginLeft: -7},
-  label: {color: C.text, fontSize: 13, fontWeight: '600', marginTop: 6},
+  label: {
+    color: GLYPH,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 6,
+    // Legible over a light cover, invisible over a dark one.
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowRadius: 3,
+  },
 });

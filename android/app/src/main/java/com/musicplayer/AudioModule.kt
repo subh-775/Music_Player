@@ -156,13 +156,26 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         return 0.0
     }
 
-    /** Report what this device can actually do, so the UI can say so honestly. */
+    /**
+     * Report what this device can actually do, so the UI can say so honestly.
+     *
+     * This is the ONE place that still attaches the chain unconditionally — it
+     * has to, because the real band count and gain range can only be read off a
+     * live Equalizer. That means opening this screen mid-song can cost the same
+     * momentary level step the setters now avoid; on the Equalizer screen
+     * specifically, that is a fair trade for telling the truth about the device.
+     *
+     * `reason` is what makes a refusal legible: without it, a device that flatly
+     * refuses effects and a device with nothing playing yet produced the exact
+     * same empty answer, and the screen guessed.
+     */
     @ReactMethod
     fun getCapabilities(promise: Promise) {
         if (!ensureAttached()) {
             promise.resolve(com.facebook.react.bridge.Arguments.createMap().apply {
                 putBoolean("available", false)
                 putInt("bands", 0)
+                putString("reason", lastError)
             })
             return
         }
@@ -182,6 +195,27 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      */
     @ReactMethod
     fun setEqualizer(enabled: Boolean, gainsDb: ReadableArray, promise: Promise) {
+        // Bind FIRST, always — before the short-circuit below.
+        // ensureAttached() was the only thing in this file that ever called
+        // ensureBound(), and MusicServiceRef.instance is what PlaybackSession
+        // reaches the ExoPlayer through. Short-circuiting straight past it would
+        // have left instance null on a default install, and taken every volume
+        // ramp (the crossfade fade-out and the new fade-in) down with it —
+        // setExoVolume() would silently return false forever. Idempotent and a
+        // no-op once bound.
+        MusicServiceRef.ensureBound(ctx)
+        // Nothing to attach FOR. Creating an Equalizer only to set enabled=false
+        // inserts an effect into a LIVE audio session, and inserting one makes
+        // the audio HAL re-route the mix — audible as a brief level step whether
+        // or not the effect does anything. Both eqEnabled and normalizeVolume
+        // default to false, so on a default install that insertion was the ONLY
+        // thing happening, and it is the "volume jumps for a moment on the first
+        // play" artefact. An already-attached chain still gets the call, so
+        // turning the EQ off mid-song works exactly as before.
+        if (!enabled && equalizer == null) {
+            promise.resolve(true)
+            return
+        }
         if (!ensureAttached()) {
             promise.resolve(false)
             return
@@ -246,6 +280,20 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      */
     @ReactMethod
     fun setNormalize(enabled: Boolean, promise: Promise) {
+        // Bind FIRST, always — before the short-circuit below.
+        // ensureAttached() was the only thing in this file that ever called
+        // ensureBound(), and MusicServiceRef.instance is what PlaybackSession
+        // reaches the ExoPlayer through. Short-circuiting straight past it would
+        // have left instance null on a default install, and taken every volume
+        // ramp (the crossfade fade-out and the new fade-in) down with it —
+        // setExoVolume() would silently return false forever. Idempotent and a
+        // no-op once bound.
+        MusicServiceRef.ensureBound(ctx)
+        // Same reasoning as setEqualizer: off + never attached = do nothing.
+        if (!enabled && loudness == null) {
+            promise.resolve(true)
+            return
+        }
         if (!ensureAttached()) {
             promise.resolve(false)
             return
@@ -601,6 +649,62 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     // the audio. Cut the overlap first, then come back to full.
                     stopCfInternal()
                 }
+                setExoVolume(1f)
+            }
+            volRestore = restore
+            volHandler.postDelayed(restore, durationMs.toLong() + RESTORE_GRACE_MS)
+            promise.resolve(true)
+        }
+    }
+
+    /**
+     * Ramp the volume UP over [durationMs] at the start of a track.
+     *
+     * The mirror of fadeOutPlayer, and the reason it exists is the same reason
+     * every other music player does this: the first moments of a stream are when
+     * the output path is still settling — ExoPlayer has just opened the audio
+     * track, the effects chain attaches a beat later, and a Bluetooth codec is
+     * still negotiating. Coming in from near-silence hides all of it.
+     *
+     * It is NATIVE for the reason the comment on fadeOutPlayer gives: a JS ramp
+     * stalls the moment Android throttles RN's timers and leaves the track stuck
+     * quiet. This runs on the main looper, which the mediaPlayback foreground
+     * service keeps alive, and — like every ramp here — it FORCES full volume
+     * afterwards, so an interrupted rise can never leave audio quiet.
+     */
+    @ReactMethod
+    fun fadeInPlayer(durationMs: Int, promise: Promise) {
+        volHandler.post {
+            cancelVolWork()
+            val steps = 12
+            val stepMs = (durationMs / steps).coerceAtLeast(8).toLong()
+            setExoVolume(FADE_FLOOR)
+            var i = 0
+            val ramp = object : Runnable {
+                override fun run() {
+                    i++
+                    // Ease-OUT: most of the rise happens in the first third, so
+                    // this reads as "instant but soft" rather than as a fade.
+                    val t = i.toFloat() / steps
+                    val eased = 1f - (1f - t) * (1f - t)
+                    setExoVolume(FADE_FLOOR + (1f - FADE_FLOOR) * eased)
+                    if (i < steps) {
+                        volHandler.postDelayed(this, stepMs)
+                    } else {
+                        volRamp = null
+                    }
+                }
+            }
+            volRamp = ramp
+            volHandler.postDelayed(ramp, stepMs)
+
+            // Fail-safe, exactly as the fade-out has one. No crossfade check
+            // here: a fade-IN only ever runs at the start of a fresh play, and
+            // playTrack cancels any crossfade before it calls this.
+            val restore = Runnable {
+                volRamp?.let { volHandler.removeCallbacks(it) }
+                volRamp = null
+                volRestore = null
                 setExoVolume(1f)
             }
             volRestore = restore

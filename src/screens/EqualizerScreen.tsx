@@ -117,7 +117,14 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
               {!eqSupported
                 ? 'Not available in this build — install the newest APK.'
                 : caps && !caps.available
-                ? 'Play something first, then come back — the effect attaches to the audio that’s running.'
+                ? // Native's own reason, when it has one. A device that flatly
+                  // REFUSES effects (some do, on an offloaded audio session) and
+                  // a device with nothing playing yet used to get the identical
+                  // "play something first" line, so the first case looked like a
+                  // bug in the app and left the sliders sitting there doing
+                  // nothing with no explanation.
+                  caps.reason ||
+                  'Play something first, then come back — the effect attaches to the audio that’s running.'
                 : caps
                 ? `Shaping ${caps.bands} hardware bands from these eight.`
                 : 'Shape the sound across eight frequency bands'}

@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   Image,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -38,7 +37,13 @@ import {
   type Collection,
 } from '../collections';
 import {useUpdateAvailable} from '../update';
-import {DRAWER_GRAB, DRAWER_W, drawerX, shouldOpen} from '../drawer';
+import {
+  DRAWER_EDGE,
+  DRAWER_GRAB,
+  DRAWER_W,
+  drawerX,
+  shouldOpen,
+} from '../drawer';
 
 /**
  * Last Home rows, persisted. Showing these instantly on the next launch is
@@ -70,6 +75,26 @@ type Props = {
   onReady?: () => void;
 };
 
+/**
+ * Virtualisation for the OUTER list.
+ *
+ * Not TrackRow's `listWindowing`: these items are whole carousels, each holding
+ * ~10 cards with remote images, so three of them is already more than a screen
+ * and twelve would be the entire page mounted at once — which is exactly what
+ * the ScrollView this replaces was doing.
+ *
+ * `removeClippedSubviews` is deliberately NOT set. Virtualisation
+ * (windowSize/initialNumToRender) is what actually unmounts the off-screen
+ * rows, and it does so in JS where it is predictable; removeClippedSubviews is
+ * a separate native detach that has a long history of blanking content inside
+ * nested horizontal lists, which is precisely what every row here is.
+ */
+const HOME_WINDOWING = {
+  initialNumToRender: 3,
+  maxToRenderPerBatch: 2,
+  windowSize: 5,
+} as const;
+
 export function HomeScreen({
   onPickTrack,
   onPlayTrack,
@@ -89,8 +114,11 @@ export function HomeScreen({
   const [fresh, setFresh] = useState<HomeRow[] | null>(null);
   const [error, setError] = useState('');
 
-  const rows = fresh ?? cachedRows;
-  const phase: 'boot' | 'ready' | 'error' = rows.length
+  const allRows = fresh ?? cachedRows;
+  // Empty rows used to render as null inside the ScrollView. As list DATA they
+  // would each cost a cell for nothing, and they throw the windowing counts off.
+  const rows = useMemo(() => allRows.filter(r => !!r.items?.length), [allRows]);
+  const phase: 'boot' | 'ready' | 'error' = allRows.length
     ? 'ready'
     : error
     ? 'error'
@@ -106,8 +134,16 @@ export function HomeScreen({
    * large first delta a fast flick delivers. activeOffsetX/failOffsetY are
    * evaluated on the raw touch stream, so speed stops mattering.
    *
-   * failOffsetY is what leaves vertical page scrolling and the horizontal
-   * "Recently played" rows alone.
+   * ARMED ONLY AT THE LEFT EDGE (see DRAWER_EDGE). hitSlop with an explicit
+   * {left, width} shrinks the region in which this gesture will even begin, so a
+   * touch that starts anywhere else is never arbitrated against the page's
+   * scrolling at all — it goes straight to the list as if this handler did
+   * not exist. That is a stronger guarantee than any activeOffset/failOffset
+   * pair can give, because those still have to LOSE a race that has already
+   * started, and losing it late is what cancelled a scroll in progress.
+   *
+   * failOffsetY still matters inside the strip: a vertical scroll that happens
+   * to begin at the left edge has to stay a scroll.
    *
    * Every move writes straight to the shared drawerX on the UI thread — JS is
    * touched only twice per gesture, to mount the panel and to settle it.
@@ -127,7 +163,8 @@ export function HomeScreen({
     () =>
       Gesture.Pan()
         .activeOffsetX([-1000, DRAWER_GRAB])
-        .failOffsetY([-16, 16])
+        .failOffsetY([-14, 14])
+        .hitSlop({left: 0, width: DRAWER_EDGE})
         .onBegin(() => {
           drawerX.value = -DRAWER_W; // start from closed, whatever came before
           runOnJS(begin)();
@@ -190,103 +227,123 @@ export function HomeScreen({
     );
   }
 
-  return (
-    <GestureDetector gesture={pan}>
-      <View style={styles.fill}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          overScrollMode="never"
-          bounces={false}>
-          {/* Hamburger FIRST: the drawer slides in from the left, so its handle
+  /**
+   * Everything above the content rows, as one header.
+   *
+   * An element rather than a component: React reconciles it by type, so it
+   * re-renders in place instead of remounting — passing an inline arrow as
+   * ListHeaderComponent is what tears the greeting and the quick tiles down and
+   * rebuilds them on every parent render.
+   */
+  const header = (
+    <>
+      {/* Hamburger FIRST: the drawer slides in from the left, so its handle
           belongs on the left — a right-hand button that opens a left-hand panel
           reads backwards, and it's the far corner for a right thumb. */}
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={onOpenMenu}
-              hitSlop={14}
-              style={styles.gear}>
-              <Menu size={25} color={C.text} strokeWidth={2.4} />
-              {/* A waiting update has to stay findable after the popup is
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onOpenMenu} hitSlop={14} style={styles.gear}>
+          <Menu size={25} color={C.text} strokeWidth={2.4} />
+          {/* A waiting update has to stay findable after the popup is
               dismissed — this is the only thing that says so. */}
-              {updateWaiting && (
-                <View
-                  style={styles.dot}
-                  accessibilityLabel="Update available"
-                  accessible
-                />
-              )}
-            </TouchableOpacity>
-            <View style={styles.headerText}>
-              <Greeting />
-            </View>
-          </View>
+          {updateWaiting && (
+            <View
+              style={styles.dot}
+              accessibilityLabel="Update available"
+              accessible
+            />
+          )}
+        </TouchableOpacity>
+        <View style={styles.headerText}>
+          <Greeting />
+        </View>
+      </View>
 
-          {/* Quick access. The two things everyone opens most (Liked, Downloaded)
+      {/* Quick access. The two things everyone opens most (Liked, Downloaded)
           plus the newest playlists, one tap from the top of Home instead of a
           trip through the Library tab. Two columns, so four fit above the fold
           without pushing the content rows off screen. */}
-          <View style={styles.quickGrid}>
-            <QuickTile
-              collection={likedCollection(likes)}
-              sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
-              onPress={() => onOpenQuick({kind: 'liked'})}
-            />
-            <QuickTile
-              collection={downloadsCollection([])}
-              sub="Offline"
-              onPress={() => onOpenQuick({kind: 'downloads'})}
-            />
-            {playlists.slice(0, 4).map(p => (
-              <QuickTile
-                key={p.id}
-                collection={playlistToCollection(p)}
-                sub={`${p.tracks?.length ?? 0} song${
-                  (p.tracks?.length ?? 0) === 1 ? '' : 's'
-                }`}
-                onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
-              />
-            ))}
-          </View>
+      <View style={styles.quickGrid}>
+        <QuickTile
+          collection={likedCollection(likes)}
+          sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
+          onPress={() => onOpenQuick({kind: 'liked'})}
+        />
+        <QuickTile
+          collection={downloadsCollection([])}
+          sub="Offline"
+          onPress={() => onOpenQuick({kind: 'downloads'})}
+        />
+        {playlists.slice(0, 4).map(p => (
+          <QuickTile
+            key={p.id}
+            collection={playlistToCollection(p)}
+            sub={`${p.tracks?.length ?? 0} song${
+              (p.tracks?.length ?? 0) === 1 ? '' : 's'
+            }`}
+            onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
+          />
+        ))}
+      </View>
 
-          {recent.length > 0 && (
-            <View style={styles.row}>
-              <Text style={styles.rowTitle}>Recently played</Text>
-              <FlatList
-                horizontal
-                data={recent}
-                keyExtractor={t => getTrackId(t)}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.rowList}
-                renderItem={({item}) => (
-                  <TouchableOpacity
-                    style={styles.card}
-                    activeOpacity={0.7}
-                    onPress={() => onPlayTrack(item, recent)}>
-                    <View style={styles.artWrap}>
-                      {getBestArtworkUrl(item) ? (
-                        <Image
-                          source={{uri: getBestArtworkUrl(item)}}
-                          style={styles.art}
-                        />
-                      ) : (
-                        <View style={[styles.art, styles.artFallback]} />
-                      )}
-                    </View>
-                    <Text style={styles.cardTitle} numberOfLines={2}>
-                      {cleanText(item.title)}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              />
-            </View>
-          )}
+      {recent.length > 0 && (
+        <View style={styles.row}>
+          <Text style={styles.rowTitle}>Recently played</Text>
+          <FlatList
+            horizontal
+            data={recent}
+            keyExtractor={t => getTrackId(t)}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rowList}
+            renderItem={({item}) => (
+              <TouchableOpacity
+                style={styles.card}
+                activeOpacity={0.7}
+                onPress={() => onPlayTrack(item, recent)}>
+                <View style={styles.artWrap}>
+                  {getBestArtworkUrl(item) ? (
+                    <Image
+                      source={{uri: getBestArtworkUrl(item)}}
+                      style={styles.art}
+                    />
+                  ) : (
+                    <View style={[styles.art, styles.artFallback]} />
+                  )}
+                </View>
+                <Text style={styles.cardTitle} numberOfLines={2}>
+                  {cleanText(item.title)}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+    </>
+  );
 
-          {rows.map(row => (
-            <Row key={row.title} row={row} onPick={onPickTrack} />
-          ))}
-          <View style={styles.tail} />
-        </ScrollView>
+  return (
+    <GestureDetector gesture={pan}>
+      <View style={styles.fill}>
+        {/*
+          A FlatList, not a ScrollView.
+
+          A ScrollView renders every child immediately and keeps them all
+          mounted — and every child here is a horizontal FlatList of cards with
+          remote images. The whole of Home, however far down it went, was being
+          built and held on the first frame. Virtualised, the rows below the fold
+          do not mount their cards until you scroll to them.
+        */}
+        <FlatList
+          data={rows}
+          keyExtractor={row => row.title}
+          renderItem={({item}) => <Row row={item} onPick={onPickTrack} />}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          bounces={false}
+          ListHeaderComponent={header}
+          ListFooterComponent={<View style={styles.tail} />}
+          {...HOME_WINDOWING}
+        />
       </View>
     </GestureDetector>
   );

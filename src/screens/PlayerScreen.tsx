@@ -26,12 +26,9 @@ import React, {
 } from 'react';
 import {
   ActivityIndicator,
-  Animated,
+  BackHandler,
   Dimensions,
-  Easing,
   Image,
-  Modal,
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -56,7 +53,15 @@ import {
   SkipForward,
   Type,
 } from 'lucide-react-native';
-import {GestureHandlerRootView} from 'react-native-gesture-handler';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import {C, T} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
 import {enqueueDownload, useIsDownloaded} from '../downloads';
@@ -87,8 +92,28 @@ import {QueuePane} from './QueueScreen';
 import {Toaster} from '../components/Toaster';
 import {toast} from '../toast';
 
-/** Full sheet travel for the open/close slide. */
-const SCREEN_H = Dimensions.get('window').height;
+/**
+ * Full sheet travel for the open/close slide — the LONGEST edge, not the height.
+ *
+ * max(w, h) is the same number in both orientations; a plain `height` read is
+ * not, and this activity handles rotation itself rather than being recreated.
+ * A portrait height captured in landscape left "closed" only halfway down a
+ * portrait screen, with the player still visible.
+ */
+const HIDE_Y = (({width, height}) => Math.max(width, height))(
+  Dimensions.get('window'),
+);
+
+/**
+ * How often the parked (closed) player polls progress.
+ *
+ * The player is no longer torn down when it closes — it is a view now, parked
+ * off-screen — so its two progress subscriptions would otherwise poll the
+ * engine forever, on every screen, for a sheet nobody can see. RNTP's
+ * useProgress is a recursive setTimeout keyed on its interval, so handing it an
+ * hour is how you stop it without unmounting it.
+ */
+const PARKED_POLL = 3600000;
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
 // How far the artwork (and now the title) travels off-screen on a full swipe.
@@ -106,11 +131,21 @@ type Pane = (typeof PANES)[number]['id'];
 
 export function PlayerScreen({
   visible,
+  focusPane,
   onClose,
   onAddToPlaylist,
   onOpenArtist,
 }: {
   visible: boolean;
+  /**
+   * Land on a particular pane — set when the drawer's Queue entry is what
+   * opened the player, so you arrive at the queue rather than at the artwork.
+   *
+   * Carries a nonce because the request is an EVENT, not a state: asking for
+   * the queue twice in a row is two requests, and a bare string would only
+   * ever fire the first.
+   */
+  focusPane?: {pane: Pane; nonce: number} | null;
   onClose: () => void;
   onAddToPlaylist: (track: Track) => void;
   onOpenArtist: (credit: string) => void;
@@ -243,111 +278,175 @@ export function PlayerScreen({
     [],
   );
 
-  // Artwork follows the finger, then leaves and re-enters on a change.
-  const slide = useRef(new Animated.Value(0)).current;
+  /**
+   * Artwork position, and the sheet's own position — both on the UI thread.
+   *
+   * These were Animated.Values written with setValue() from a PanResponder,
+   * which meant one JS-thread write and one bridge crossing per touch event,
+   * queued behind whatever React happened to be doing. Dragging the player down
+   * is exactly when React is busiest, which is why minimising felt heavy while
+   * the drawer — already on a shared value — did not.
+   */
+  const slide = useSharedValue(0);
+  const sheetY = useSharedValue(HIDE_Y);
+  /** Which neighbour a horizontal drag is heading toward: 1 next, -1 prev, 0
+   *  none. A shared value so the incoming title can track the finger without
+   *  the direction having to be React state read from a worklet. */
+  const dir = useSharedValue(0);
 
   /**
-   * The sheet's own position. The Modal no longer animates itself.
+   * Mounted from the first open, and never unmounted.
    *
-   * With `animationType="slide"`, releasing a drag called onClose() and the
-   * Modal restarted its OWN slide from the top — ignoring where the finger had
-   * dragged to. That restart is the hitch: the sheet jumped back up and then
-   * slid away. Now the drag, the fling and the button all move this one value,
-   * so a dismiss simply carries on from wherever the sheet already is.
-   *
-   * Safe to drive ourselves only because the Modal is `transparent`; an opaque
-   * one showed white behind the translated content.
+   * The Modal this replaces rendered nothing at all while closed, so every open
+   * paid to build a 1,100-line tree in the same frame the slide started. Parked
+   * off-screen it costs one view, and both progress subscriptions inside it are
+   * throttled to PARKED_POLL while `visible` is false, so an idle player is not
+   * on any clock.
    */
-  const sheetY = useRef(new Animated.Value(SCREEN_H)).current;
+  const [everOpened, setEverOpened] = useState(visible);
+  useEffect(() => {
+    if (visible) {
+      setEverOpened(true);
+    }
+  }, [visible]);
 
+  // onClose is an inline arrow from the app, so it changes identity on every
+  // app render. Held in a ref, the settle animation's completion callback does
+  // not have to be rebuilt (and re-armed) each time.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const finishClose = useCallback(() => closeRef.current(), []);
+
+  useEffect(() => {
+    if (!everOpened) {
+      return;
+    }
+    if (visible) {
+      sheetY.value = withTiming(0, {
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+      });
+    } else {
+      // Already parked by whatever ran the dismissal; this only catches a close
+      // that came from somewhere other than close() (navigating away, say).
+      sheetY.value = HIDE_Y;
+    }
+  }, [visible, everOpened, sheetY]);
+
+  /**
+   * Slide the rest of the way out, THEN tell the app — no restart, no jump.
+   *
+   * `velocity` is px/s, straight from the gesture. A firm flick finishes quicker
+   * than a slow drag, so the sheet keeps the speed the finger gave it.
+   */
+  const close = useCallback(
+    (velocity = 0) => {
+      sheetY.value = withTiming(
+        HIDE_Y,
+        {
+          duration: velocity > 1500 ? 190 : 280,
+          easing: Easing.out(Easing.cubic),
+        },
+        finished => {
+          if (finished) {
+            runOnJS(finishClose)();
+          }
+        },
+      );
+    },
+    [sheetY, finishClose],
+  );
+
+  // Hardware back closes the player. The Modal used to do this via
+  // onRequestClose; a view has to ask for it. Registered only while open, so a
+  // parked player never intercepts a press meant for the screen behind it.
   useEffect(() => {
     if (!visible) {
       return;
     }
-    sheetY.setValue(SCREEN_H);
-    Animated.timing(sheetY, {
-      toValue: 0,
-      duration: 260,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [visible, sheetY]);
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      close();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, close]);
 
-  const springBack = useCallback(() => {
-    // Lower tension + higher friction than the RN default: the old spring
-    // overshot and wobbled visibly on release, which read as jittery rather
-    // than smooth for a sheet this size.
-    Animated.spring(sheetY, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 60,
-      friction: 11,
-    }).start();
-  }, [sheetY]);
-
-  /** Slide the rest of the way out, THEN unmount — no restart, no jump. */
-  const close = useCallback(
-    (velocity = 0) => {
-      Animated.timing(sheetY, {
-        toValue: SCREEN_H,
-        // A firm flick finishes quicker than a slow drag, so the sheet keeps
-        // the speed the finger gave it instead of always taking the same time.
-        // Slightly longer than before — the previous timing was fast enough to
-        // read as a cut rather than a slide, especially on a slow drag.
-        duration: velocity > 1.5 ? 190 : 280,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({finished}) => {
-        if (finished) {
-          onClose();
-        }
-      });
-    },
-    [sheetY, onClose],
-  );
-
-  const dismissPan = useMemo(
+  /**
+   * Drag DOWN to dismiss.
+   *
+   * Built twice — once for the header, once as half of the artwork's race —
+   * because one Gesture object drives one handler. The travel and the settle are
+   * identical, so the shape lives here rather than being written out twice.
+   *
+   * activeOffsetY/failOffsetX are evaluated natively on the raw touch stream,
+   * which is what makes a fast flick work as reliably as a slow drag: the old
+   * `dy > |dx| * 1.5` predicate ran in JS after the fact, and a fast flick's
+   * large first delta could fail it outright.
+   */
+  const makeDismiss = useCallback(
     () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) =>
-          g.dy > 8 && g.dy > Math.abs(g.dx) * 1.5,
-        onPanResponderMove: (_e, g) => {
-          if (g.dy > 0) {
-            sheetY.setValue(g.dy);
-          }
-        },
-        onPanResponderRelease: (_e, g) => {
-          if (g.dy > 120 || g.vy > 0.8) {
-            close(g.vy);
+      Gesture.Pan()
+        .activeOffsetY([-1000, 10])
+        .failOffsetX([-18, 18])
+        .onUpdate(e => {
+          sheetY.value = Math.max(0, e.translationY);
+        })
+        .onEnd((e, success) => {
+          if (success && (e.translationY > 120 || e.velocityY > 800)) {
+            // Travel the FULL remaining distance. Releasing at 35% used to call
+            // onClose() outright from the artwork path, which unmounted the
+            // sheet where it stood — it never covered the other 65%, which is
+            // the "it doesn't completely minimize" report.
+            sheetY.value = withTiming(
+              HIDE_Y,
+              {
+                duration: e.velocityY > 1500 ? 170 : 240,
+                easing: Easing.out(Easing.cubic),
+              },
+              finished => {
+                if (finished) {
+                  runOnJS(finishClose)();
+                }
+              },
+            );
           } else {
-            springBack();
+            // Firm, and clamped: the old RN spring overshot and wobbled visibly
+            // on release, which read as jittery for a sheet this size.
+            sheetY.value = withSpring(0, {
+              damping: 22,
+              stiffness: 190,
+              overshootClamping: true,
+            });
           }
-        },
-        onPanResponderTerminate: springBack,
-      }),
-    [sheetY, close, springBack],
+        }),
+    [sheetY, finishClose],
   );
+
+  const headerDismiss = useMemo(() => makeDismiss(), [makeDismiss]);
 
   const commit = useCallback(
-    (dir: 'next' | 'prev') => {
+    (to: 'next' | 'prev') => {
       // Fire the skip IMMEDIATELY so the engine advances during the animation,
       // not after it — that lag was the "old song lingers, then flips" bug.
-      (dir === 'next' ? skipNext() : skipPrevious()).catch(() => {});
+      (to === 'next' ? skipNext() : skipPrevious()).catch(() => {});
       setPreviewDir(null); // the swap below IS the commit; no preview needed after
-      Animated.timing(slide, {
-        toValue: dir === 'next' ? -ART_TRAVEL : ART_TRAVEL,
-        duration: 160,
-        useNativeDriver: true,
-      }).start(() => {
-        slide.setValue(dir === 'next' ? ART_TRAVEL : -ART_TRAVEL);
-        Animated.timing(slide, {
-          toValue: 0,
+      dir.value = 0;
+      const out = to === 'next' ? -ART_TRAVEL : ART_TRAVEL;
+      slide.value = withTiming(out, {duration: 160}, finished => {
+        if (!finished) {
+          return;
+        }
+        // Jump to the far side with no animation, then travel back in. The
+        // assignment lands before the animation initialises, so the return
+        // starts from the far edge rather than from where the exit ended.
+        slide.value = -out;
+        slide.value = withTiming(0, {
           duration: 240,
-          useNativeDriver: true,
-        }).start();
+          easing: Easing.out(Easing.cubic),
+        });
       });
     },
-    [slide],
+    [slide, dir],
   );
 
   /**
@@ -368,65 +467,77 @@ export function PlayerScreen({
     ? splitArtists(String(previewTrack.artist ?? '')).join(', ')
     : '';
 
-  // The artwork owns TWO gestures: swipe LEFT/RIGHT to change song, and swipe
-  // DOWN to dismiss — so the down-swipe works from the big artwork, not only the
-  // little header. The axis is locked on the first clear movement.
-  const artAxis = useRef<'h' | 'v' | null>(null);
-  const pan = useMemo(
+  /**
+   * Swipe LEFT/RIGHT on the artwork to change song.
+   *
+   * The manual axis lock this replaces (`artAxis`, set on the first move and
+   * then obeyed for the rest of the drag) is gone entirely: activeOffsetX +
+   * failOffsetY decide the axis natively, before either gesture has taken a
+   * frame, and Gesture.Race guarantees only one of the two can ever claim the
+   * touch. A mode flag inside one handler was doing that job by hand, and doing
+   * it a frame late.
+   */
+  const skip = useMemo(
     () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) =>
-          (Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4) ||
-          (g.dy > 8 && g.dy > Math.abs(g.dx) * 1.4),
-        onPanResponderGrant: () => {
-          artAxis.current = null;
-        },
-        onPanResponderMove: (_e, g) => {
-          if (!artAxis.current) {
-            artAxis.current = Math.abs(g.dx) > Math.abs(g.dy) ? 'h' : 'v';
+      Gesture.Pan()
+        .activeOffsetX([-14, 14])
+        .failOffsetY([-20, 20])
+        .onUpdate(e => {
+          slide.value = e.translationX * 0.55;
+          // Which neighbour is being dragged toward. Re-evaluated every move,
+          // so reversing mid-drag (start left, change your mind) swaps the
+          // preview back — but JS only hears about it when the SIGN FLIPS, not
+          // on every frame. That is ~2 crossings per drag instead of ~60.
+          const d = e.translationX < 0 ? 1 : e.translationX > 0 ? -1 : 0;
+          if (d !== dir.value) {
+            dir.value = d;
+            runOnJS(setPreviewDir)(d === 1 ? 'next' : d === -1 ? 'prev' : null);
           }
-          if (artAxis.current === 'h') {
-            slide.setValue(g.dx * 0.55);
-            // Which neighbour is being dragged toward. Re-evaluated every move
-            // rather than locked on the first pixel, so reversing mid-drag
-            // (start left, change your mind) swaps the preview back correctly.
-            const dir = g.dx < 0 ? 'next' : g.dx > 0 ? 'prev' : null;
-            setPreviewDir(prev => (prev === dir ? prev : dir));
-          } else if (g.dy > 0) {
-            sheetY.setValue(g.dy);
-          }
-        },
-        onPanResponderRelease: (_e, g) => {
-          if (artAxis.current === 'v') {
-            setPreviewDir(null);
-            if (g.dy > 120 || g.vy > 0.8) {
-              onClose();
-            } else {
-              springBack();
-            }
+        })
+        .onEnd((e, success) => {
+          if (success && e.translationX <= -SWIPE_COMMIT) {
+            runOnJS(commit)('next');
             return;
           }
-          if (g.dx <= -SWIPE_COMMIT) {
-            commit('next');
-          } else if (g.dx >= SWIPE_COMMIT) {
-            commit('prev');
-          } else {
-            setPreviewDir(null);
-            Animated.spring(slide, {
-              toValue: 0,
-              useNativeDriver: true,
-              bounciness: 6,
-            }).start();
+          if (success && e.translationX >= SWIPE_COMMIT) {
+            runOnJS(commit)('prev');
+            return;
           }
-        },
-        onPanResponderTerminate: () => {
-          setPreviewDir(null);
-          springBack();
-          Animated.spring(slide, {toValue: 0, useNativeDriver: true}).start();
-        },
-      }),
-    [slide, sheetY, commit, onClose, springBack],
+          dir.value = 0;
+          runOnJS(setPreviewDir)(null);
+          slide.value = withSpring(0, {damping: 18, stiffness: 220});
+        }),
+    [slide, dir, commit],
   );
+
+  // Whichever recognises first wins outright; they can never both claim, and
+  // neither can hand over halfway through.
+  const artGesture = useMemo(
+    () => Gesture.Race(makeDismiss(), skip),
+    [makeDismiss, skip],
+  );
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{translateY: sheetY.value}],
+  }));
+  const artStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: slide.value}],
+  }));
+  // Same value as the artwork, deliberately: the title and credits travel as
+  // one unit with the cover rather than sitting frozen until release. Its own
+  // hook because Reanimated does not want one animated style on two views.
+  const metaStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: slide.value}],
+  }));
+  // The INCOMING title, offset a full travel to the side you're dragging
+  // toward, so it enters exactly as the outgoing one leaves.
+  const metaPreviewStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX: slide.value + (dir.value === 1 ? ART_TRAVEL : -ART_TRAVEL),
+      },
+    ],
+  }));
 
   /**
    * Repeat is a two-state switch: off, or repeat THIS song.
@@ -472,6 +583,12 @@ export function PlayerScreen({
     }
   }, [track, downloading]);
 
+  useEffect(() => {
+    if (focusPane) {
+      setPane(focusPane.pane);
+    }
+  }, [focusPane]);
+
   // Skipping to a song with no lyrics while the Lyrics pane is open would
   // otherwise strand you on a dead pane behind a dead tab.
   useEffect(() => {
@@ -480,7 +597,7 @@ export function PlayerScreen({
     }
   }, [pane, lyricsState.available]);
 
-  if (!active) {
+  if (!active || !everOpened) {
     return null;
   }
 
@@ -492,32 +609,33 @@ export function PlayerScreen({
   const album = track?.album ? cleanText(track.album) : '';
 
   return (
-    <Modal
-      visible={visible}
-      animationType="none"
-      // Transparent so that when the swipe drags the sheet DOWN, the space it
-      // vacates reveals the app behind (Home) instead of the modal window's own
-      // white background. The sheet itself is opaque (styles.wrap), so a fully
-      // open player still covers everything.
-      transparent
-      onRequestClose={() => close()}
-      statusBarTranslucent>
-      {/* A GestureHandlerRootView is required INSIDE the Modal.
-          react-native-gesture-handler attaches to the root view of a window,
-          and on Android an RN Modal is its OWN window — so handlers mounted in
-          here never see a touch unless there is a root view in this window too.
-          That is why the queue's drag-to-reorder did nothing: the list was
-          correct, the gestures simply never reached it. */}
-      <GestureHandlerRootView style={styles.ghRoot}>
-        <Animated.View
-          style={[
-            styles.wrap,
-            !!tint && {backgroundColor: toward(tint, 0.72)},
-            {transform: [{translateY: sheetY}]},
-          ]}>
-          {/* Header — close on the left, what you're inside of in the middle.
+    /**
+     * A VIEW, not a Modal.
+     *
+     * On Android a Modal is a separate Dialog window, and windows stack by
+     * window type and creation order — so a zIndex set in the main window can
+     * never put anything above one. That is exactly why "Add to playlist",
+     * raised from the ⊕ inside here, mounted and animated perfectly and was
+     * completely invisible until the player was minimised: the sheet was in the
+     * main window, the player was in a Dialog on top of it. One hierarchy fixes
+     * it by construction, and the app's own GestureHandlerRootView now covers
+     * these gestures, so the second root view this used to need is gone too.
+     */
+    <View
+      style={styles.host}
+      // A parked player is still in the tree; it must not eat touches meant for
+      // the app behind it.
+      pointerEvents={visible ? 'auto' : 'none'}>
+      <Animated.View
+        style={[
+          styles.wrap,
+          !!tint && {backgroundColor: toward(tint, 0.72)},
+          sheetStyle,
+        ]}>
+        {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
-          <View style={styles.topBar} {...dismissPan.panHandlers}>
+        <GestureDetector gesture={headerDismiss}>
+          <View style={styles.topBar}>
             <TouchableOpacity
               onPress={() => close()}
               hitSlop={14}
@@ -530,34 +648,39 @@ export function PlayerScreen({
             {/* Balances the close button so the label stays centred. */}
             <View style={styles.iconBtn} />
           </View>
+        </GestureDetector>
 
-          {/* The only flexible row: it shrinks and scrolls rather than pushing
+        {/* The only flexible row: it shrinks and scrolls rather than pushing
             the controls below the fold. */}
-          <View style={styles.pane}>
-            {/* Lyrics and queue stay MOUNTED and are shown/hidden — remounting
+        <View style={styles.pane}>
+          {/* Lyrics and queue stay MOUNTED and are shown/hidden — remounting
               re-ran their whole load every pane switch, which is the 1-2s
               "loading again" the pane tabs kept showing. */}
-            <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
-              <LyricsPane state={lyricsState} visible={pane === 'lyrics'} />
-            </View>
-            <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
-              <QueuePane />
-            </View>
-            {pane === 'song' && (
-              <View style={styles.artArea} {...pan.panHandlers}>
+          <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
+            <LyricsPane
+              state={lyricsState}
+              visible={visible && pane === 'lyrics'}
+            />
+          </View>
+          <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
+            <QueuePane />
+          </View>
+          {pane === 'song' && (
+            <GestureDetector gesture={artGesture}>
+              <View style={styles.artArea}>
                 <Animated.View
-                  style={[styles.artHolder, {transform: [{translateX: slide}]}]}
+                  style={[styles.artHolder, artStyle]}
                   pointerEvents="none">
                   {artwork ? (
-                    // Keyed by the URL: when the song changes, React swaps in a
-                    // FRESH Image rather than reusing the old element (which held
-                    // the previous cover visible until the new one decoded — the
-                    // "previous artwork for a few ms" flash).
+                    // Keyed by the URL: when the song changes, React swaps in
+                    // a FRESH Image rather than reusing the old element (which
+                    // held the previous cover visible until the new one
+                    // decoded — the "previous artwork for a few ms" flash).
                     //
                     // fadeDuration=0 because the cover is prefetched (see
-                    // warmArtwork in player.ts) — Android's default 300ms cross-
-                    // fade was spending a third of a second dissolving in an image
-                    // that was already decoded and ready to paint.
+                    // warmArtwork in player.ts) — Android's default 300ms
+                    // cross-fade was spending a third of a second dissolving
+                    // in an image that was already decoded and ready to paint.
                     <Image
                       key={artwork}
                       source={{uri: artwork}}
@@ -570,7 +693,8 @@ export function PlayerScreen({
                 </Animated.View>
 
                 {/* Double-tap zones over the artwork edges. They claim a TAP
-                  only — the swipe responder above still owns any drag. */}
+                      only — the pan above needs movement to activate, so a
+                      stationary touch falls straight through to these. */}
                 <View style={styles.tapZones} pointerEvents="box-none">
                   <TapZone onDoubleTap={() => doubleTapSeek(-1)} />
                   <TapZone onDoubleTap={() => doubleTapSeek(1)} />
@@ -580,219 +704,205 @@ export function PlayerScreen({
                   <SeekPeek side={seekFlash.side} seconds={seekFlash.secs} />
                 )}
               </View>
-            )}
-          </View>
+            </GestureDetector>
+          )}
+        </View>
 
-          <View style={styles.controls}>
-            {/* Title + credits on the left, the three per-song actions right.
+        <View style={styles.controls}>
+          {/* Title + credits on the left, the three per-song actions right.
               The text block moves with the SAME `slide` value as the artwork
               above, so a swipe drags them as one unit instead of the title
               sitting frozen until release. */}
-            <View style={styles.metaRow}>
-              <View style={styles.metaCarousel}>
-                <Animated.View
-                  style={[styles.meta, {transform: [{translateX: slide}]}]}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {title}
-                  </Text>
-                  <View style={styles.creditRow}>
-                    {/* The WHOLE credit is one target. A single name opens that
+          <View style={styles.metaRow}>
+            <View style={styles.metaCarousel}>
+              <Animated.View style={[styles.meta, metaStyle]}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {title}
+                </Text>
+                <View style={styles.creditRow}>
+                  {/* The WHOLE credit is one target. A single name opens that
                       profile directly; several open the picker. */}
-                    <TouchableOpacity
-                      onPress={() => onOpenArtist(String(active.artist ?? ''))}
-                      activeOpacity={0.6}
-                      style={styles.artistTap}>
-                      <Text style={styles.artist} numberOfLines={1}>
-                        {artists}
-                      </Text>
-                    </TouchableOpacity>
-                    <SourceBadge track={track} />
-                    <QualityBadge track={track} />
-                  </View>
-                </Animated.View>
+                  <TouchableOpacity
+                    onPress={() => onOpenArtist(String(active.artist ?? ''))}
+                    activeOpacity={0.6}
+                    style={styles.artistTap}>
+                    <Text style={styles.artist} numberOfLines={1}>
+                      {artists}
+                    </Text>
+                  </TouchableOpacity>
+                  <SourceBadge track={track} />
+                  <QualityBadge track={track} />
+                </View>
+              </Animated.View>
 
-                {/* The incoming title, entering from the side you're dragging
+              {/* The incoming title, entering from the side you're dragging
                   toward — same ART_TRAVEL offset the artwork uses, so the two
                   land in sync. Rendered only mid-gesture; the real swap
                   happens in `active` once commit() fires. */}
-                {!!previewTrack && (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      styles.meta,
-                      styles.metaPreview,
-                      {
-                        transform: [
-                          {
-                            translateX: Animated.add(
-                              slide,
-                              previewDir === 'next' ? ART_TRAVEL : -ART_TRAVEL,
-                            ),
-                          },
-                        ],
-                      },
-                    ]}>
-                    <Text style={styles.title} numberOfLines={1}>
-                      {previewTitle}
-                    </Text>
-                    <View style={styles.creditRow}>
-                      <Text style={styles.artist} numberOfLines={1}>
-                        {previewArtists}
-                      </Text>
-                    </View>
-                  </Animated.View>
-                )}
-              </View>
-
-              <View style={styles.actions}>
-                {/* Circled glyphs, matching the reference: ⊕ add, ♥ like,
-                  ⬇-in-circle download. */}
-                <TouchableOpacity
-                  onPress={() => track && onAddToPlaylist(track)}
-                  hitSlop={8}
-                  style={styles.actionBtn}>
-                  <CirclePlus size={23} color={C.sub} strokeWidth={1.8} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={toggleLike}
-                  hitSlop={8}
-                  style={styles.actionBtn}>
-                  <Heart
-                    size={22}
-                    color={liked ? C.accent : C.sub}
-                    fill={liked ? C.accent : 'transparent'}
-                  />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={download}
-                  disabled={downloading || downloaded}
-                  hitSlop={8}
-                  style={styles.actionBtn}>
-                  {downloaded || downloading ? (
-                    <Check size={22} color={C.accent} strokeWidth={2.6} />
-                  ) : (
-                    <CircleArrowDown
-                      size={23}
-                      color={C.sub}
-                      strokeWidth={1.8}
-                    />
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ProgressArea ref={progressApi} onSample={onProgressSample} />
-
-            {/* Pane toggles left, audio output right — above the transport so
-              the play controls never shift. */}
-            <View style={styles.paneRow}>
-              <View style={styles.paneTabs}>
-                {PANES.map(({id, label, Icon}) => {
-                  const on = pane === id;
-                  // Lyrics goes dead when this song genuinely has none — common
-                  // on SoundCloud/YouTube uploads. The info glyph replaces the
-                  // tab's own icon and explains itself on tap, rather than
-                  // opening a pane that only ever says "nothing here".
-                  const dead = id === 'lyrics' && !lyricsState.available;
-                  const Glyph = dead ? Info : Icon;
-                  return (
-                    <TouchableOpacity
-                      key={id}
-                      onPress={() =>
-                        dead
-                          ? toast('No lyrics available for this song')
-                          : setPane(id)
-                      }
-                      activeOpacity={0.8}
-                      style={[
-                        styles.paneTab,
-                        on && !dead && styles.paneTabOn,
-                        dead && styles.paneTabDead,
-                      ]}>
-                      <Glyph size={15} color={on && !dead ? C.text : C.faint} />
-                      <Text
-                        style={[
-                          styles.paneLabel,
-                          on && !dead && styles.paneLabelOn,
-                        ]}>
-                        {label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {!!output && (
-                <View style={styles.output}>
-                  <Bluetooth size={13} color={C.accent} />
-                  <Text style={styles.outputText} numberOfLines={1}>
-                    {output}
+              {!!previewTrack && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.meta, styles.metaPreview, metaPreviewStyle]}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {previewTitle}
                   </Text>
-                </View>
+                  <View style={styles.creditRow}>
+                    <Text style={styles.artist} numberOfLines={1}>
+                      {previewArtists}
+                    </Text>
+                  </View>
+                </Animated.View>
               )}
             </View>
 
-            {/* Transport */}
-            <View style={styles.transport}>
+            <View style={styles.actions}>
+              {/* Circled glyphs, matching the reference: ⊕ add, ♥ like,
+                  ⬇-in-circle download. */}
               <TouchableOpacity
-                onPress={onShuffle}
-                hitSlop={10}
-                style={styles.tBtn}>
-                <Shuffle size={24} color={shuffled ? C.accent : C.sub} />
+                onPress={() => track && onAddToPlaylist(track)}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                <CirclePlus size={23} color={C.sub} strokeWidth={1.8} />
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={() => skipPrevious()}
-                hitSlop={10}
-                style={styles.tBtn}>
-                <SkipBack size={34} color={C.text} fill={C.text} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => togglePlay()}
-                activeOpacity={0.85}
-                style={styles.playBtn}>
-                {playing ? (
-                  <Pause size={30} color={C.bg} fill={C.bg} />
-                ) : (
-                  <Play
-                    size={30}
-                    color={C.bg}
-                    fill={C.bg}
-                    style={styles.playNudge}
-                  />
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => skipNext()}
-                hitSlop={10}
-                style={styles.tBtn}>
-                <SkipForward size={34} color={C.text} fill={C.text} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={toggleRepeat}
-                hitSlop={10}
-                style={styles.tBtn}>
-                <Repeat2
-                  size={26}
-                  color={repeat === RepeatMode.Off ? C.sub : C.accent}
-                  strokeWidth={repeat === RepeatMode.Off ? 2 : 2.4}
+                onPress={toggleLike}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                <Heart
+                  size={22}
+                  color={liked ? C.accent : C.sub}
+                  fill={liked ? C.accent : 'transparent'}
                 />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={download}
+                disabled={downloading || downloaded}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                {downloaded || downloading ? (
+                  <Check size={22} color={C.accent} strokeWidth={2.6} />
+                ) : (
+                  <CircleArrowDown size={23} color={C.sub} strokeWidth={1.8} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Toasts must be visible INSIDE this modal — the app-root toaster
+          <ProgressArea
+            ref={progressApi}
+            live={visible}
+            onSample={onProgressSample}
+          />
+
+          {/* Pane toggles left, audio output right — above the transport so
+              the play controls never shift. */}
+          <View style={styles.paneRow}>
+            <View style={styles.paneTabs}>
+              {PANES.map(({id, label, Icon}) => {
+                const on = pane === id;
+                // Lyrics goes dead when this song genuinely has none — common
+                // on SoundCloud/YouTube uploads. The info glyph replaces the
+                // tab's own icon and explains itself on tap, rather than
+                // opening a pane that only ever says "nothing here".
+                const dead = id === 'lyrics' && !lyricsState.available;
+                const Glyph = dead ? Info : Icon;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    onPress={() =>
+                      dead
+                        ? toast('No lyrics available for this song')
+                        : setPane(id)
+                    }
+                    activeOpacity={0.8}
+                    style={[
+                      styles.paneTab,
+                      on && !dead && styles.paneTabOn,
+                      dead && styles.paneTabDead,
+                    ]}>
+                    <Glyph size={15} color={on && !dead ? C.text : C.faint} />
+                    <Text
+                      style={[
+                        styles.paneLabel,
+                        on && !dead && styles.paneLabelOn,
+                      ]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {!!output && (
+              <View style={styles.output}>
+                <Bluetooth size={13} color={C.accent} />
+                <Text style={styles.outputText} numberOfLines={1}>
+                  {output}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Transport */}
+          <View style={styles.transport}>
+            <TouchableOpacity
+              onPress={onShuffle}
+              hitSlop={10}
+              style={styles.tBtn}>
+              <Shuffle size={24} color={shuffled ? C.accent : C.sub} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => skipPrevious()}
+              hitSlop={10}
+              style={styles.tBtn}>
+              <SkipBack size={34} color={C.text} fill={C.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => togglePlay()}
+              activeOpacity={0.85}
+              style={styles.playBtn}>
+              {playing ? (
+                <Pause size={30} color={C.bg} fill={C.bg} />
+              ) : (
+                <Play
+                  size={30}
+                  color={C.bg}
+                  fill={C.bg}
+                  style={styles.playNudge}
+                />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => skipNext()}
+              hitSlop={10}
+              style={styles.tBtn}>
+              <SkipForward size={34} color={C.text} fill={C.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={toggleRepeat}
+              hitSlop={10}
+              style={styles.tBtn}>
+              <Repeat2
+                size={26}
+                color={repeat === RepeatMode.Off ? C.sub : C.accent}
+                strokeWidth={repeat === RepeatMode.Off ? 2 : 2.4}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Toasts must be visible INSIDE the player — the app-root toaster
             sits underneath it, so "Downloading…" was invisible until the
             player was closed. Same queue, second outlet. */}
-          <Toaster bottom={40} />
-        </Animated.View>
-      </GestureHandlerRootView>
-    </Modal>
+        <Toaster bottom={40} />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -918,47 +1028,54 @@ type ProgressHandle = {seek: (to: number) => void};
  * to 250ms for the next sample.
  */
 const ProgressArea = React.memo(
-  React.forwardRef<ProgressHandle, {onSample: (p: number, d: number) => void}>(
-    function ProgressArea({onSample}, ref) {
-      const {position: enginePosition, duration} = useProgress(250);
+  React.forwardRef<
+    ProgressHandle,
+    {
+      /** False when the player is parked off-screen — see PARKED_POLL. */
+      live: boolean;
+      onSample: (p: number, d: number) => void;
+    }
+  >(function ProgressArea({live, onSample}, ref) {
+    const {position: enginePosition, duration} = useProgress(
+      live ? 250 : PARKED_POLL,
+    );
 
-      /**
-       * Where the bar should SAY we are.
-       *
-       * useProgress only samples periodically, so after a double-tap seek the
-       * bar sat at the old spot until the next sample landed and the seek felt
-       * like it lagged the tap. A seek publishes its target immediately and
-       * that value wins until the engine's own reading catches up to it, at
-       * which point the engine is authoritative again.
-       */
-      const [seekEcho, setSeekEcho] = useState<{at: number; to: number} | null>(
-        null,
-      );
-      const position =
-        seekEcho &&
-        Math.abs(enginePosition - seekEcho.to) > 1.2 &&
-        Date.now() - seekEcho.at < 1500
-          ? seekEcho.to
-          : enginePosition;
+    /**
+     * Where the bar should SAY we are.
+     *
+     * useProgress only samples periodically, so after a double-tap seek the bar
+     * sat at the old spot until the next sample landed and the seek felt like it
+     * lagged the tap. A seek publishes its target immediately and that value
+     * wins until the engine's own reading catches up to it, at which point the
+     * engine is authoritative again.
+     */
+    const [seekEcho, setSeekEcho] = useState<{at: number; to: number} | null>(
+      null,
+    );
+    const position =
+      seekEcho &&
+      Math.abs(enginePosition - seekEcho.to) > 1.2 &&
+      Date.now() - seekEcho.at < 1500
+        ? seekEcho.to
+        : enginePosition;
 
-      useEffect(() => {
-        onSample(enginePosition, duration);
-      }, [enginePosition, duration, onSample]);
+    useEffect(() => {
+      onSample(enginePosition, duration);
+    }, [enginePosition, duration, onSample]);
 
-      /** Seek AND move the bar in the same frame. */
-      const seekAndShow = useCallback((to: number) => {
-        const target = Math.max(0, to);
-        setSeekEcho({at: Date.now(), to: target});
-        seekTo(target);
-      }, []);
+    /** Seek AND move the bar in the same frame. */
+    const seekAndShow = useCallback((to: number) => {
+      const target = Math.max(0, to);
+      setSeekEcho({at: Date.now(), to: target});
+      seekTo(target);
+    }, []);
 
-      useImperativeHandle(ref, () => ({seek: seekAndShow}), [seekAndShow]);
+    useImperativeHandle(ref, () => ({seek: seekAndShow}), [seekAndShow]);
 
-      return (
-        <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
-      );
-    },
-  ),
+    return (
+      <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
+    );
+  }),
 );
 
 /**
@@ -975,7 +1092,8 @@ const LyricsPane = React.memo(function LyricsPane({
 }) {
   // Its own subscription, at half the seekbar's rate — highlighting a line does
   // not need 4Hz, and this way a lyric tick re-renders only the lyric list.
-  const {position} = useProgress(500);
+  // Parked when the pane isn't on screen, since the player no longer unmounts.
+  const {position} = useProgress(visible ? 500 : PARKED_POLL);
   const {lyrics, busy, err} = state;
   const scroller = useRef<ScrollView>(null);
 
@@ -1063,8 +1181,16 @@ const LyricsPane = React.memo(function LyricsPane({
 });
 
 const styles = StyleSheet.create({
-  ghRoot: {flex: 1},
-  wrap: {flex: 1, backgroundColor: C.bg, paddingTop: 8},
+  // Below the bottom sheets (40) so a sheet raised from the ⊕ in here sits on
+  // top of the player, and below the drawer (45). See the note on the render.
+  host: {...StyleSheet.absoluteFillObject, zIndex: 30},
+  // Absolutely filling the host rather than flex:1 — the host is the thing
+  // being positioned now, and `wrap` is what actually slides inside it.
+  wrap: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: C.bg,
+    paddingTop: 8,
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
