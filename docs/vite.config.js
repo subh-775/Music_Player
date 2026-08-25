@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react';
 import mdx from '@mdx-js/rollup';
 import remarkGfm from 'remark-gfm';
 import rehypeSlug from 'rehype-slug';
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
-import {dirname, join} from 'node:path';
+import {mkdirSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {dirname, join, relative, sep} from 'node:path';
 import {ROUTES} from './src/nav.js';
 
 /**
@@ -55,6 +55,57 @@ function emitRoutes() {
   };
 }
 
+/**
+ * The search corpus, as one module.
+ *
+ * The obvious way to get the markdown behind each page is `import.meta.glob`
+ * with `?raw`. It does not work here: @mdx-js/rollup drops the query before it
+ * decides whether to handle a file (`const [path] = id.split('?')`), so the raw
+ * text is handed straight back to the MDX compiler and what arrives at the
+ * import site is a component, not a string. That failed silently — the indexing
+ * promise rejected and search simply never returned a result.
+ *
+ * Reading the files here sidesteps the compiler entirely. The module is
+ * imported dynamically, so it stays its own chunk and costs nothing until
+ * somebody opens the palette.
+ */
+function searchCorpus() {
+  const ID = 'virtual:docs-corpus';
+  const RESOLVED = '\u0000' + ID;
+  const dir = join(process.cwd(), 'content');
+
+  const walk = at =>
+    readdirSync(at, {withFileTypes: true}).flatMap(e =>
+      e.isDirectory()
+        ? walk(join(at, e.name))
+        : e.name.endsWith('.mdx')
+          ? [join(at, e.name)]
+          : [],
+    );
+
+  return {
+    name: 'docs-corpus',
+    resolveId: id => (id === ID ? RESOLVED : null),
+    load(id) {
+      if (id !== RESOLVED) {
+        return null;
+      }
+      const corpus = {};
+      for (const file of walk(dir)) {
+        const route =
+          '/' +
+          relative(dir, file)
+            .split(sep)
+            .join('/')
+            .replace(/\.mdx$/, '')
+            .replace(/(^|\/)index$/, '');
+        corpus[route || '/'] = readFileSync(file, 'utf8');
+      }
+      return `export default ${JSON.stringify(corpus)};`;
+    },
+  };
+}
+
 export default defineConfig({
   base,
   plugins: [
@@ -63,6 +114,7 @@ export default defineConfig({
     // parse.
     {enforce: 'pre', ...mdx({remarkPlugins: [remarkGfm], rehypePlugins: [rehypeSlug]})},
     react({include: /\.(jsx|js|mdx|tsx|ts)$/}),
+    searchCorpus(),
     emitRoutes(),
   ],
   build: {outDir: 'dist', emptyOutDir: true},

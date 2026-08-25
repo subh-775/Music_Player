@@ -7,15 +7,20 @@
  * rots, so there is only the one place.
  */
 
+/** owner/name once, so a rename or a fork is one edit rather than six. */
+const SLUG = 'subh-775/Music_Player';
+
 export const SITE = {
   name: 'Fix_Music',
   tagline: 'One library. Three sources. No account.',
-  repo: 'https://github.com/subh-775/Music_Player',
-  releases: 'https://github.com/subh-775/Music_Player/releases/latest',
-  allReleases: 'https://github.com/subh-775/Music_Player/releases',
-  issues: 'https://github.com/subh-775/Music_Player/issues',
+  slug: SLUG,
+  repo: `https://github.com/${SLUG}`,
+  releases: `https://github.com/${SLUG}/releases/latest`,
+  allReleases: `https://github.com/${SLUG}/releases`,
+  issues: `https://github.com/${SLUG}/issues`,
+  api: `https://api.github.com/repos/${SLUG}`,
   /** Where "Suggest an edit" points. The page path is appended. */
-  editBase: 'https://github.com/subh-775/Music_Player/edit/mobile/docs/content',
+  editBase: `https://github.com/${SLUG}/edit/mobile/docs/content`,
 };
 
 /** Top-of-page links. `match` decides which one is lit. */

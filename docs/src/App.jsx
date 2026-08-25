@@ -56,8 +56,15 @@ function useRouter() {
   const navigate = useCallback(to => {
     const [p, hash] = to.split('#');
     const clean = p.replace(/\/$/, '') || '/';
-    if (toPath(window.location.pathname) !== clean) {
-      window.history.pushState({}, '', `${BASE}${clean === '/' ? '/' : clean}`);
+    // The hash goes in the URL even when the path has not changed, so a link
+    // followed to a section on the page you are already on is still a link you
+    // can copy, and Back still undoes it.
+    const url = `${BASE}${clean === '/' ? '/' : clean}${hash ? `#${hash}` : ''}`;
+    const changed = toPath(window.location.pathname) !== clean;
+    if (window.location.pathname + window.location.hash !== url) {
+      window.history.pushState({}, '', url);
+    }
+    if (changed) {
       setPath(clean);
     }
     // Let the new page commit before hunting for the anchor in it.
@@ -329,6 +336,7 @@ export default function App() {
           <button
             type="button"
             className="search-btn"
+            aria-label="Search the documentation"
             onClick={() => setSearch(true)}>
             <SearchIcon />
             <span>Search</span>
@@ -355,10 +363,15 @@ export default function App() {
 
           <button
             type="button"
-            className="icon-btn"
-            aria-label={dark ? 'Switch to the light theme' : 'Switch to the dark theme'}
+            className={`theme-switch${dark ? ' dark' : ''}`}
+            role="switch"
+            aria-checked={dark}
+            aria-label="Dark theme"
+            title={dark ? 'Switch to the light theme' : 'Switch to the dark theme'}
             onClick={toggleTheme}>
-            {dark ? <Sun /> : <Moon />}
+            <span className="theme-knob">
+              {dark ? <Moon size={12} /> : <Sun size={12} />}
+            </span>
           </button>
 
           <a
