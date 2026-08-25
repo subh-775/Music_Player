@@ -7,12 +7,28 @@ name: Documentation
 # fires on docs changes, so neither can ever be waiting on the other. A docs
 # typo does not rebuild an APK, and a code-only release does not redeploy a page
 # that did not change.
+#
+# ## Why `main` and not `mobile`, where the work happens
+#
+# Enabling Pages creates a `github-pages` environment with a deployment branch
+# policy that permits the DEFAULT branch and nothing else. A push to `mobile`
+# therefore builds perfectly and is then refused at the deploy step with
+# "Branch mobile is not allowed to deploy to github-pages due to environment
+# protection rules" — which is the environment doing its job, not a
+# misconfiguration.
+#
+# Publishing from the default branch is also the more honest rule: the docs
+# describe the app people can actually install, and merging to `main` is what
+# says a change is real. Pointing this at `mobile` instead would need `mobile`
+# added under Settings → Environments → github-pages → Deployment branches, and
+# until someone did that every docs commit would leave a red run behind.
 on:
   push:
-    branches: [mobile]
+    branches: [main]
     paths:
       - "docs/**"
       - ".github/workflows/docs.yml"
+  # Run it by hand from the Actions tab — from `main`, for the reason above.
   workflow_dispatch:
 
 # The three the deploy action needs. `id-token` is what lets Pages verify the
@@ -53,14 +69,16 @@ jobs:
           # is silent — the page loads and every asset 404s.
           DOCS_BASE: /Music_Player/
 
-      # enablement: turns Pages on for the repo if it is not on already, rather
-      # than failing with "Get Pages site failed" and waiting for someone to
-      # find the toggle in Settings. It is the documented way to do this and it
-      # is why `pages: write` is in the permissions block above.
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
+      # No actions/configure-pages step, deliberately.
+      #
+      # Its whole job is to hand a framework the base path Pages will serve from,
+      # via steps.<id>.outputs.base_path. This build does not read that — the base
+      # is set explicitly above, because it has to be right in local builds and
+      # previews too, not only in CI. So the step contributed nothing and was
+      # purely a way for the run to fail: it queries the Pages REST API on every
+      # run, and that call is what returned "Get Pages site failed".
+      #
+      # upload-pages-artifact and deploy-pages do not depend on it.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/dist

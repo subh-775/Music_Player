@@ -859,16 +859,29 @@ axis as its scroller.
 
 One door, not three.
 
-**Pages**
+**Pages took three goes, and both mistakes were the same mistake**
 
-The first run failed at `actions/configure-pages` with "Get Pages site failed" —
-Pages was not enabled on the repository. Rather than leave that as a manual step
-in Settings, the workflow passes `enablement: true`, which is what the action's
-own error message suggests and what `permissions: pages: write` is there for. It
-turns Pages on itself on the first run and is a no-op afterwards.
+1. `actions/configure-pages` failed with "Get Pages site failed". It was
+   *removed*, not fixed: its only output is the base path Pages serves from, and
+   this build sets that itself — it has to, so a local build and a preview are
+   right too. The step contributed nothing to the artifact and existed purely as
+   a REST call that could fail. `upload-pages-artifact` and `deploy-pages` never
+   depended on it.
+2. The deploy was then refused: *"Branch mobile is not allowed to deploy to
+   github-pages due to environment protection rules."* Enabling Pages creates a
+   `github-pages` environment whose deployment branch policy permits the DEFAULT
+   branch and nothing else. The build was green; the environment was doing its
+   job.
 
-If it ever fails again with the same error, the manual path is Repository →
-Settings → Pages → Source: **GitHub Actions**.
+So the workflow publishes from `main`. That is also the more honest rule — the
+docs describe the app people can install, and merging to `main` is what makes a
+change real. Pointing it at `mobile` would need `mobile` added under Settings →
+Environments → github-pages → Deployment branches, and until someone did that
+every docs commit would leave a red run behind.
+
+The through-line: both failures came from a workflow depending on repository
+state that is invisible from the repository. The fix in each case was to stop
+depending on it.
 
 
 ### Standing constraints
