@@ -26,18 +26,21 @@ import {C, S, T} from '../theme';
 import {getLocalLibrary, type Track} from '../backend';
 import {useLikes} from '../store';
 import {useFollowedArtists} from '../artists';
-import {
-  collectionSubtitle,
-  useLibrary,
-  type Collection,
-} from '../collections';
+import {collectionSubtitle, useLibrary, type Collection} from '../collections';
 import {
   createPlaylist,
   deletePlaylist,
   renamePlaylist,
   setPlaylistImage,
 } from '../playlists';
-import {MAX_PINS, isPinned, rowId, sortPinned, togglePin, usePins} from '../pins';
+import {
+  MAX_PINS,
+  isPinned,
+  rowId,
+  sortPinned,
+  togglePin,
+  usePins,
+} from '../pins';
 import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
 import {
   markDownloaded,
@@ -68,7 +71,17 @@ function idOf(c: Collection): string {
   });
 }
 
-export function LibraryScreen({
+/**
+ * Memoised, and this is not a micro-optimisation.
+ *
+ * App holds twenty-odd useState hooks in ONE component, and all three tab
+ * screens, the full player, the mini player and the drawer are its children —
+ * so opening a sheet, closing an overlay or touching any of them re-rendered
+ * every one of these trees. That is what "the app freezes for a moment" was:
+ * not work being done, but work being redone. Every prop below is
+ * useCallback-stable in App, so this actually holds.
+ */
+export const LibraryScreen = React.memo(function LibraryScreen({
   onOpen,
   visible = true,
 }: {
@@ -158,7 +171,11 @@ export function LibraryScreen({
     const matches = (c: Collection) => {
       switch (filter) {
         case 'playlists':
-          return c.kind === 'userPlaylist' || c.kind === 'sourcePlaylist' || c.kind === 'liked';
+          return (
+            c.kind === 'userPlaylist' ||
+            c.kind === 'sourcePlaylist' ||
+            c.kind === 'liked'
+          );
         case 'albums':
           return c.kind === 'album';
         case 'artists':
@@ -170,7 +187,9 @@ export function LibraryScreen({
     // Liked Songs and Downloaded are fixtures: always first, in that order.
     // Pins reorder only what comes after them.
     const list = withArtists.filter(matches);
-    const fixed = list.filter(c => c.kind === 'liked' || c.kind === 'downloads');
+    const fixed = list.filter(
+      c => c.kind === 'liked' || c.kind === 'downloads',
+    );
     const rest = list.filter(c => c.kind !== 'liked' && c.kind !== 'downloads');
     return [...fixed, ...sortPinned(rest, pins, idOf)];
   }, [withArtists, pins, filter]);
@@ -222,17 +241,21 @@ export function LibraryScreen({
 
   const doDelete = useCallback((c: Collection) => {
     setMenuFor(null);
-    Alert.alert(`Delete "${c.name}"?`, 'The songs themselves are not touched.', [
-      {text: 'Cancel', style: 'cancel'},
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          deletePlaylist(playlistIdOf(c));
-          toast(`Deleted ${c.name}`);
+    Alert.alert(
+      `Delete "${c.name}"?`,
+      'The songs themselves are not touched.',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deletePlaylist(playlistIdOf(c));
+            toast(`Deleted ${c.name}`);
+          },
         },
-      },
-    ]);
+      ],
+    );
   }, []);
 
   const submitRename = useCallback(() => {
@@ -293,7 +316,6 @@ export function LibraryScreen({
           {...listWindowing}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-
           ListEmptyComponent={
             <Text style={styles.empty}>Nothing here yet.</Text>
           }
@@ -491,7 +513,7 @@ export function LibraryScreen({
       </Modal>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrap: {flex: 1, backgroundColor: C.bg},

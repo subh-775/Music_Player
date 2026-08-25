@@ -19,9 +19,10 @@
  *   - The corners are CONCENTRIC: outer radius = inner radius + padding. Bar
  *     and artwork were both 8, which is what made it read as two rectangles
  *     that happen to overlap.
- *   - One control DOMINATES. Three glyphs at the same optical weight in three
- *     identical slots is a toolbar. Play is what the bar is for, so it gets a
- *     solid disc and the others do not.
+ *   - The three controls share ONE slot size and one optical weight. Play used
+ *     to sit in a filled disc so it would dominate; at 38px the circle is
+ *     heavier than the bar it lives on, and it made the three controls read as
+ *     three different KINDS of control rather than one row.
  */
 import React, {useCallback, useMemo} from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
@@ -35,7 +36,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
-import {Bluetooth, Heart, Pause, Play} from 'lucide-react-native';
+import {Headphones, Heart, Pause, Play} from 'lucide-react-native';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {Marquee} from './Marquee';
@@ -73,7 +74,21 @@ const MiniProgress = React.memo(function MiniProgress() {
   return <View style={[styles.progressFill, {width: `${pct * 100}%`}]} />;
 });
 
-export function PlayerBar({onExpand}: {onExpand: () => void}) {
+/**
+ * Memoised, and this is not a micro-optimisation.
+ *
+ * App holds twenty-odd useState hooks in ONE component, and all three tab
+ * screens, the full player, the mini player and the drawer are its children —
+ * so opening a sheet, closing an overlay or touching any of them re-rendered
+ * every one of these trees. That is what "the app freezes for a moment" was:
+ * not work being done, but work being redone. Every prop below is
+ * useCallback-stable in App, so this actually holds.
+ */
+export const PlayerBar = React.memo(function PlayerBar({
+  onExpand,
+}: {
+  onExpand: () => void;
+}) {
   const active = useActiveTrack();
   const playing = useIsPlaying();
   const output = useAudioOutput();
@@ -204,12 +219,12 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
                   style={styles.title}
                 />
                 {output ? (
-                  <View style={styles.outputRow}>
-                    <Bluetooth size={10} color={C.accent} />
-                    <Text style={styles.output} numberOfLines={1}>
-                      {output}
-                    </Text>
-                  </View>
+                  // The name only. The 10px glyph that used to sit beside it
+                  // has moved into the controls at control size, which is where
+                  // it is actually legible.
+                  <Text style={styles.output} numberOfLines={1}>
+                    {output}
+                  </Text>
                 ) : (
                   <Text style={styles.artist} numberOfLines={1}>
                     {cleanText(String(active.artist ?? ''))}
@@ -219,11 +234,19 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
             </TouchableOpacity>
           </View>
 
-          {/* Like, then play. The headphone glyph that used to hold a third slot
-            here is gone: it is STATUS, not an action, and it already has a home
-            in the subtitle line above. Dropping the slot also hands the title
-            40px it did not have. */}
+          {/* Output, like, play — three identical 38x38 slots, so the row reads
+            as one rhythm instead of three different shapes. The headphones are
+            STATUS rather than an action, which is why they are a bare View: no
+            press feedback on something that cannot be pressed. They appear only
+            when something is actually connected, so they cost nothing the rest
+            of the time. */}
           <View style={styles.controls}>
+            {!!output && (
+              <View style={styles.ctl}>
+                <Headphones size={21} color={C.accent} strokeWidth={2} />
+              </View>
+            )}
+
             <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.ctl}>
               <Heart
                 size={21}
@@ -239,14 +262,9 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
               hitSlop={8}
               style={styles.playBtn}>
               {playing ? (
-                <Pause size={20} color={C.bg} fill={C.bg} />
+                <Pause size={22} color={C.text} fill={C.text} />
               ) : (
-                <Play
-                  size={20}
-                  color={C.bg}
-                  fill={C.bg}
-                  style={styles.playNudge}
-                />
+                <Play size={22} color={C.text} fill={C.text} />
               )}
             </TouchableOpacity>
           </View>
@@ -258,7 +276,7 @@ export function PlayerBar({onExpand}: {onExpand: () => void}) {
       </GestureDetector>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrap: {
@@ -306,13 +324,12 @@ const styles = StyleSheet.create({
   // than the size gap.
   title: {fontSize: 14, fontWeight: '600', color: C.text, letterSpacing: 0.1},
   artist: {fontSize: 11.5, color: C.text, opacity: 0.62, marginTop: 2},
-  outputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3.5,
+  output: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: C.accent,
     marginTop: 2,
   },
-  output: {fontSize: 10.5, fontWeight: '600', color: C.accent, flexShrink: 1},
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -324,18 +341,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // A solid disc with a dark glyph — the one control that outranks everything
-  // else on the bar, and the only filled shape on it.
+  // The same 38x38 slot as the other two. No disc: `playNudge` went with it,
+  // since it existed only to optically centre a triangle inside a circle.
   playBtn: {
     width: 38,
     height: 38,
-    borderRadius: 19,
-    backgroundColor: C.text,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 6,
   },
-  playNudge: {marginLeft: 2}, // optical centring for the triangle
   progressTrack: {
     position: 'absolute',
     // Inset, so it stops clipping against the bar's rounded corners.

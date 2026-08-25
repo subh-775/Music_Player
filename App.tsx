@@ -360,93 +360,106 @@ function Shell() {
    * on top. Returning true says "handled"; returning false on the last screen
    * lets Android exit, which IS what back means on Home.
    */
-  useEffect(() => {
-    const onBack = () => {
-      if (playerOpen) {
-        setPlayerOpen(false);
-        return true;
-      }
-      if (addTo) {
-        setAddTo(null);
-        return true;
-      }
-      if (artistChoices.length) {
-        setArtistChoices([]);
-        return true;
-      }
-      if (sheetTrack) {
-        setSheetTrack(null);
-        return true;
-      }
-      if (settingsOpen) {
-        setSettingsOpen(false);
-        setSettingsFocus(null);
-        return true;
-      }
-      if (tipsOpen) {
-        setTipsOpen(false);
-        return true;
-      }
-      if (activity) {
-        setActivity(null);
-        return true;
-      }
-      if (importUrl) {
-        setImportUrl(null);
-        return true;
-      }
-      // Artist and album/playlist overlays stack in either order (open an album
-      // FROM an artist, or an artist from an album), so back must dismiss the one
-      // actually on TOP — by z-order — not a fixed priority. Otherwise back closed
-      // the screen underneath and left the visible one stuck.
-      if (artist && collection) {
-        if (artistZ >= collectionZ) {
-          setArtist(null);
-        } else {
-          setCollection(null);
-        }
-        return true;
-      }
-      if (artist) {
-        setArtist(null);
-        return true;
-      }
-      if (collection) {
-        setCollection(null);
-        return true;
-      }
-      // Any tab other than Home goes to Home before the app will exit.
-      if (tab !== 'home') {
-        setTab('home');
-        return true;
-      }
-      // On Home with nothing open, one press warns, a second within 2s exits —
-      // so a stray back can't kill the music by accident.
-      if (Date.now() - exitArmedAt.current < 2000) {
-        return false;
-      }
-      exitArmedAt.current = Date.now();
-      toast('Press back again to exit', 'warn');
+  const onBack = () => {
+    if (playerOpen) {
+      setPlayerOpen(false);
       return true;
-    };
+    }
+    if (addTo) {
+      setAddTo(null);
+      return true;
+    }
+    if (artistChoices.length) {
+      setArtistChoices([]);
+      return true;
+    }
+    if (sheetTrack) {
+      setSheetTrack(null);
+      return true;
+    }
+    if (settingsOpen) {
+      setSettingsOpen(false);
+      setSettingsFocus(null);
+      return true;
+    }
+    if (tipsOpen) {
+      setTipsOpen(false);
+      return true;
+    }
+    // The Equalizer was simply never in this chain. It is a full-screen overlay
+    // like Shortcuts, so back fell straight through it to `tab !== 'home'` or to
+    // the exit warning and the screen stayed up.
+    if (eqOpen) {
+      setEqOpen(false);
+      return true;
+    }
+    if (activity) {
+      setActivity(null);
+      return true;
+    }
+    if (importUrl) {
+      setImportUrl(null);
+      return true;
+    }
+    // Artist and album/playlist overlays stack in either order (open an album
+    // FROM an artist, or an artist from an album), so back must dismiss the one
+    // actually on TOP — by z-order — not a fixed priority. Otherwise back closed
+    // the screen underneath and left the visible one stuck.
+    if (artist && collection) {
+      if (artistZ >= collectionZ) {
+        setArtist(null);
+      } else {
+        setCollection(null);
+      }
+      return true;
+    }
+    if (artist) {
+      setArtist(null);
+      return true;
+    }
+    if (collection) {
+      setCollection(null);
+      return true;
+    }
+    // Any tab other than Home goes to Home before the app will exit.
+    if (tab !== 'home') {
+      setTab('home');
+      return true;
+    }
+    // On Home with nothing open, one press warns, a second within 2s exits —
+    // so a stray back can't kill the music by accident.
+    if (Date.now() - exitArmedAt.current < 2000) {
+      return false;
+    }
+    exitArmedAt.current = Date.now();
+    toast('Press back again to exit', 'warn');
+    return true;
+  };
 
-    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+  /**
+   * Registered ONCE, and called through a ref.
+   *
+   * It used to re-register on any of thirteen dependencies, so nearly every
+   * state change in the app tore the listener down and added a fresh one. That
+   * is not just churn: BackHandler calls its listeners in REVERSE registration
+   * order, so re-adding this one kept moving the app-wide fallback to the FRONT
+   * of the queue, ahead of the per-surface handlers in Sheet, Sidebar and
+   * PlayerScreen that were registered when those opened. The player then closed
+   * via setPlayerOpen(false) — no settle animation — instead of through its own
+   * close(), and a sheet's own dismiss could be pre-empted outright.
+   *
+   * Registered once at mount, this handler is the OLDEST, so it is called LAST,
+   * which is exactly what a fallback should be. The ref keeps the closure fresh
+   * without touching the subscription.
+   */
+  const backRef = useRef(onBack);
+  backRef.current = onBack;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () =>
+      backRef.current(),
+    );
     return () => sub.remove();
-  }, [
-    playerOpen,
-    addTo,
-    artistChoices,
-    sheetTrack,
-    settingsOpen,
-    tipsOpen,
-    activity,
-    artist,
-    artistZ,
-    importUrl,
-    collection,
-    collectionZ,
-    tab,
-  ]);
+  }, []);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
@@ -520,6 +533,23 @@ function Shell() {
     setSheetFrom(from ?? null);
   }, []);
 
+  /**
+   * Stable identities for the memoised children below.
+   *
+   * These three were inline arrows, which meant a new function on every App
+   * render — and a new function is a changed prop, so React.memo on the child
+   * would have been defeated silently by the props rather than by anything
+   * visible. The rest of the children's callbacks were already useCallback.
+   */
+  const openFromLibrary = useCallback(
+    (c: Collection) =>
+      // A followed artist opens their profile, not an empty tracklist.
+      c.kind === 'artist' ? openArtist(c.name) : openCollection(c),
+    [openArtist, openCollection],
+  );
+  const closePlayer = useCallback(() => setPlayerOpen(false), []);
+  const expandPlayer = useCallback(() => setPlayerOpen(true), []);
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
@@ -554,10 +584,7 @@ function Shell() {
           <LibraryScreen
             key={libraryNonce}
             visible={tab === 'library'}
-            onOpen={c =>
-              // A followed artist opens their profile, not an empty tracklist.
-              c.kind === 'artist' ? openArtist(c.name) : openCollection(c)
-            }
+            onOpen={openFromLibrary}
           />
         </View>
 
@@ -664,7 +691,7 @@ function Shell() {
       */}
       <Toaster bottom={playerOpen ? 118 : engine ? 132 : 78} />
 
-      {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
+      {engine && <PlayerBar onExpand={expandPlayer} />}
 
       <BottomNav active={tab} onChange={switchTab} />
 
@@ -691,7 +718,7 @@ function Shell() {
       {engine && (
         <PlayerScreen
           visible={playerOpen}
-          onClose={() => setPlayerOpen(false)}
+          onClose={closePlayer}
           onAddToPlaylist={setAddTo}
           onOpenArtist={openArtistCredit}
         />

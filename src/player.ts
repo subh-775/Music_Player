@@ -110,6 +110,24 @@ export function usePlaybackOrigin(): string {
   );
 }
 
+/**
+ * The queue itself changed — reordered, shuffled, topped up, rebuilt.
+ *
+ * PlaybackActiveTrackChanged was the only signal the queue screen had, and
+ * shuffle is the case that proves it insufficient: it reorders everything AFTER
+ * the active track, by design, so the active track does not change and the
+ * event never fires. The engine really had shuffled; the list was rendering a
+ * snapshot taken before it.
+ */
+const queueListeners = new Set<() => void>();
+
+export function onQueueChanged(l: () => void): () => void {
+  queueListeners.add(l);
+  return () => {
+    queueListeners.delete(l);
+  };
+}
+
 /** The full Track behind an engine queue item, or null if it isn't ours. */
 export function sourceTrackFor(
   active: {title?: string | null; artist?: string | null} | null | undefined,
@@ -423,10 +441,15 @@ export async function playTrack(
   /** The collection this was launched from — see playbackOrigin. '' for a
    *  search result, a radio pick, or a single tap with no list behind it. */
   originId = '',
-  bitrate = currentQuality(),
 ): Promise<void> {
   await requireEngine();
   setPlaybackOrigin(originId);
+  // Was a fourth parameter defaulting to exactly this, which nothing ever
+  // passed. With originId inserted BEFORE it, playTrack(t, list, 320) would
+  // have quietly taken 320 as a collection id and still used the default
+  // bitrate — and TypeScript could not have said so, because a number is a
+  // perfectly good string index for nothing. A local is not a trap.
+  const bitrate = currentQuality();
 
   const list = context?.length ? context : [track];
   const items = list
@@ -674,6 +697,10 @@ async function refreshEngineMirror(index?: number): Promise<void> {
     engineQueue = await TrackPlayer.getQueue();
     activeIndex = index ?? (await TrackPlayer.getActiveTrackIndex()) ?? 0;
     warmArtwork(activeIndex);
+    // Here rather than at the five call sites: setShuffle, moveQueueItem,
+    // playTrack, restoreSession, topUpFromRadio and both skips ALL end with
+    // this, so this is the one place that knows the queue just moved.
+    queueListeners.forEach(l => l());
   } catch {
     /* engine not up — the next event refreshes it */
   }

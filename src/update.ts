@@ -15,14 +15,19 @@ import {readSettings} from './store';
 import {diag} from './diag';
 
 /**
- * When we last confirmed there was NOTHING new — and deliberately only that.
+ * When the AUTOMATIC check last ran — whatever it found.
  *
- * A "found" result never writes here, so an update that is genuinely waiting is
- * re-checked on every launch and the popup keeps appearing until it is
- * installed. A FAILED check never writes here either, so being offline once
- * does not buy silence.
+ * It used to record only a confirmed all-clear, on the reasoning that a waiting
+ * update should keep being re-checked. That was harmless while the check ran
+ * once per launch and is not now that it also runs on every return to the
+ * foreground: a "found" result and a FAILED one both left this unwritten, so
+ * coming back from the notification shade fired a fresh request every time, and
+ * an offline phone retried on every glance at the screen.
+ *
+ * Nothing is lost by recording the attempt. Once an update is found the dot is
+ * already lit and `info` is already set; re-asking cannot make it more found.
  */
-const lastAllClear = createStore<number>('mp.updateAllClearAt.v1', 0, raw =>
+const lastAutoCheck = createStore<number>('mp.updateCheckedAt.v1', 0, raw =>
   typeof raw === 'number' && raw > 0 ? raw : 0,
 );
 
@@ -126,9 +131,6 @@ function ensureRegistered() {
         ? `check failed: ${res.error}`
         : `up to date (${res?.installed || '?'})`,
     );
-    if (!res?.available && !failed) {
-      lastAllClear.set(Date.now());
-    }
     // A version already dismissed does not re-raise the popup — but `info` is
     // still recorded, which is what keeps the dot lit and Settings offering it.
     const alreadySeen =
@@ -209,10 +211,11 @@ export function checkUpdateOnLaunch(): void {
     diag('update', 'auto check skipped — automatic updates are off');
     return;
   }
-  if (Date.now() - lastAllClear.get() < RECHECK_MS) {
-    diag('update', 'auto check skipped — all clear a few minutes ago');
+  if (Date.now() - lastAutoCheck.get() < RECHECK_MS) {
+    diag('update', 'auto check skipped — checked a few minutes ago');
     return;
   }
+  lastAutoCheck.set(Date.now());
   checkUpdate();
 }
 

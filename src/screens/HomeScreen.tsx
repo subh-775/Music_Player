@@ -96,7 +96,17 @@ const HOME_WINDOWING = {
   windowSize: 5,
 } as const;
 
-export function HomeScreen({
+/**
+ * Memoised, and this is not a micro-optimisation.
+ *
+ * App holds twenty-odd useState hooks in ONE component, and all three tab
+ * screens, the full player, the mini player and the drawer are its children —
+ * so opening a sheet, closing an overlay or touching any of them re-rendered
+ * every one of these trees. That is what "the app freezes for a moment" was:
+ * not work being done, but work being redone. Every prop below is
+ * useCallback-stable in App, so this actually holds.
+ */
+export const HomeScreen = React.memo(function HomeScreen({
   onPickTrack,
   onPlayTrack,
   onOpenMenu,
@@ -372,7 +382,7 @@ export function HomeScreen({
       </GestureDetector>
     </View>
   );
-}
+});
 
 /** The artwork square is CollectionArt, the same component the Library rows
  *  use — that's what gives Liked its purple heart tile, Downloads its green

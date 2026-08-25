@@ -66,8 +66,45 @@ object MusicServiceRef {
         try {
             val intent = Intent(ctx, Class.forName(SERVICE))
             bound = ctx.applicationContext.bindService(intent, connection, 0)
+            // A false return means the service was not running, and it STILL
+            // leaves a client record behind that has to be released. This is
+            // retried on every play, so without this the records accumulate.
+            if (!bound) ctx.applicationContext.unbindService(connection)
         } catch (e: Exception) {
             Log.w(TAG, "could not bind playback service: ${e.message}")
         }
+    }
+
+    /**
+     * Let the service go.
+     *
+     * A BOUND service cannot be destroyed by stopSelf(), and stopSelf() is
+     * exactly what RNTP calls from onTaskRemoved under
+     * StopPlaybackAndRemoveNotification. So this binding — taken with the
+     * APPLICATION context, and therefore not released when the Activity died —
+     * is what left the music playing and an orphan notification on screen after
+     * the app was swiped away.
+     *
+     * It only ever happened with the equalizer or normalization actually ON:
+     * since v1.0.9 both setters no-op before touching the session when they are
+     * off, so nothing binds on a default install and the swipe-away worked.
+     * That is why it looked like a new bug and why it survived testing.
+     *
+     * `instance` is cleared deliberately. The service object could be kept — it
+     * is in our own process — but once the service is genuinely destroyed that
+     * reference is a DIFFERENT object from the next MusicService, so effects
+     * would attach to a dead session's id and silently do nothing. Null is
+     * recoverable: ensureBound() runs again on the next play.
+     */
+    @Synchronized
+    fun unbind(ctx: Context) {
+        if (!bound) return
+        try {
+            ctx.applicationContext.unbindService(connection)
+        } catch (e: Exception) {
+            Log.w(TAG, "unbind failed: ${e.message}")
+        }
+        bound = false
+        instance = null
     }
 }

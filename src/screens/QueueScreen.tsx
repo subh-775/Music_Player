@@ -33,54 +33,33 @@ import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
-import {Menu} from 'lucide-react-native';
+import {Headphones, Menu, Shuffle} from 'lucide-react-native';
 import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
-import {Event, TrackPlayer, moveQueueItem, sourceTrackFor} from '../player';
+import {
+  Event,
+  TrackPlayer,
+  moveQueueItem,
+  onQueueChanged,
+  sourceTrackFor,
+  useShuffle,
+} from '../player';
+import {useAudioOutput} from '../audioOutput';
+import {splitArtists} from '../tracks';
 
 const ROW_H = 60;
 
 /**
- * How many songs are still to come — for the player's queue grip label.
+ * The last queue we read, kept at module scope.
  *
- * Its own tiny hook rather than a value lifted out of QueuePane, because the
- * grip is on screen while the queue sheet is closed and QueuePane is not
- * mounted. Event-driven, so it costs one queue read per track change and
- * nothing at all in between.
+ * The queue is a sheet now, so QueuePane MOUNTS when it opens — and a mount
+ * that has to await two engine round-trips before it can draw anything is a
+ * sheet that slides up empty and fills in a beat later. Now that the pull
+ * drives the sheet with the finger, that gap is directly visible. Render the
+ * last known queue immediately and correct it when the read lands.
  */
-export function useUpcomingCount(): number {
-  const [n, setN] = useState(0);
-
-  useEffect(() => {
-    let alive = true;
-    const read = async () => {
-      try {
-        const [q, i] = await Promise.all([
-          TrackPlayer.getQueue(),
-          TrackPlayer.getActiveTrackIndex(),
-        ]);
-        if (alive) {
-          setN(Math.max(0, q.length - ((i ?? -1) + 1)));
-        }
-      } catch {
-        if (alive) {
-          setN(0);
-        }
-      }
-    };
-    read();
-    const sub = TrackPlayer.addEventListener(
-      Event.PlaybackActiveTrackChanged,
-      read,
-    );
-    return () => {
-      alive = false;
-      sub.remove();
-    };
-  }, []);
-
-  return n;
-}
+let lastQueue: RNTPTrack[] = [];
+let lastActive: number | null = null;
 
 export function QueuePane({
   onDragBegin,
@@ -97,8 +76,10 @@ export function QueuePane({
   onDragBegin?: () => void;
   onDragEnd?: () => void;
 } = {}) {
-  const [queue, setQueue] = useState<RNTPTrack[]>([]);
-  const [active, setActive] = useState<number | null>(null);
+  const [queue, setQueue] = useState<RNTPTrack[]>(lastQueue);
+  const [active, setActive] = useState<number | null>(lastActive);
+  const shuffled = useShuffle();
+  const output = useAudioOutput();
   const dragging = useRef(false);
   // A drop writes the new order straight into state; the engine round-trip that
   // follows must not repaint the old order over it.
@@ -112,6 +93,8 @@ export function QueuePane({
       ]);
       setQueue(q);
       setActive(i ?? null);
+      lastQueue = q;
+      lastActive = i ?? null;
     } catch {
       setQueue([]);
     }
@@ -119,15 +102,24 @@ export function QueuePane({
 
   useEffect(() => {
     refresh();
+    const guarded = () => {
+      if (!dragging.current && Date.now() > settleUntil.current) {
+        refresh();
+      }
+    };
     const sub = TrackPlayer.addEventListener(
       Event.PlaybackActiveTrackChanged,
-      () => {
-        if (!dragging.current && Date.now() > settleUntil.current) {
-          refresh();
-        }
-      },
+      guarded,
     );
-    return () => sub.remove();
+    // Shuffle reorders everything AFTER the active track and therefore never
+    // fires PlaybackActiveTrackChanged — which is why turning shuffle on with
+    // this list open visibly did nothing. The engine had shuffled; this was
+    // rendering the array it read before.
+    const off = onQueueChanged(guarded);
+    return () => {
+      sub.remove();
+      off();
+    };
   }, [refresh]);
 
   const jump = useCallback(
@@ -198,27 +190,59 @@ export function QueuePane({
     [jump, activeIdx, firstRecommended],
   );
 
+  // The context above the scroll region, always — including when there is
+  // nothing queued. The empty state used to return INSTEAD of it, so the sheet
+  // opened with no title on it at all.
+  const head = (
+    <View style={styles.head}>
+      <Text style={styles.sheetTitle}>Queue</Text>
+      {!!nowPlaying && (
+        <View style={styles.subRow}>
+          <Text style={styles.subtitle} numberOfLines={1}>
+            Playing {splitArtists(String(nowPlaying.artist ?? ''))[0] || '—'}
+          </Text>
+          {!!output && (
+            <>
+              <Text style={styles.subDot}>·</Text>
+              <Headphones size={11} color={C.accent} />
+              <Text style={styles.subOutput} numberOfLines={1}>
+                {output}
+              </Text>
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+
   if (!queue.length) {
     return (
-      <View style={styles.empty}>
-        <Text style={styles.emptyText}>
-          Nothing queued. Autoplay will keep the music going when this ends.
-        </Text>
+      <View style={styles.wrap}>
+        {head}
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>
+            Nothing queued. Autoplay will keep the music going when this ends.
+          </Text>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.wrap}>
-      {!!nowPlaying && (
-        <>
-          <Text style={styles.section}>Now playing</Text>
-          <Row track={nowPlaying} activeRow />
-        </>
-      )}
+      {head}
+
+      {/* PINNED: outside the list, so what is playing stays on screen however
+          far down the queue you scroll. */}
+      {!!nowPlaying && <Row track={nowPlaying} activeRow />}
 
       {upcoming.length > 0 && (
-        <Text style={styles.section}>Next up · hold the grip to reorder</Text>
+        <View style={styles.sectionRow}>
+          {shuffled && <Shuffle size={12} color={C.sub} strokeWidth={2.4} />}
+          <Text style={styles.section}>
+            {shuffled ? 'Shuffling from' : 'Next up'}
+          </Text>
+        </View>
       )}
 
       <DraggableFlatList
@@ -303,18 +327,32 @@ function Row({
 }
 
 const styles = StyleSheet.create({
-  wrap: {flex: 1},
-  listBox: {flex: 1},
+  // minHeight:0 on both so the list is free to be SHORTER than its content.
+  // The sheet's definite height is what actually makes it scroll (see
+  // queueSheet in PlayerScreen); these say the list may shrink into it.
+  wrap: {flex: 1, minHeight: 0},
+  listBox: {flex: 1, minHeight: 0},
   body: {paddingBottom: 16},
+  head: {paddingHorizontal: S.gutter, paddingTop: 6, paddingBottom: 10},
+  sheetTitle: {...T.screenTitle, color: C.text, fontSize: 20},
+  subRow: {flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2},
+  subtitle: {...T.sub, color: C.sub, fontSize: 12, flexShrink: 1},
+  subDot: {color: C.faint, fontSize: 12},
+  subOutput: {color: C.accent, fontSize: 12, fontWeight: '600', flexShrink: 1},
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: S.gutter,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
   section: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,
     textTransform: 'uppercase',
     color: C.sub,
-    paddingHorizontal: S.gutter,
-    paddingTop: 10,
-    paddingBottom: 6,
   },
   row: {
     height: ROW_H,

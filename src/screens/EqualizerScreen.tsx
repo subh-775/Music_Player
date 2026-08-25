@@ -10,7 +10,6 @@
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-  Animated,
   Dimensions,
   StyleSheet,
   Text,
@@ -47,7 +46,12 @@ import {
   // band drag has to be allowed to block.
   ScrollView as GHScrollView,
 } from 'react-native-gesture-handler';
-import {runOnJS} from 'react-native-reanimated';
+import Animated, {
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import {Toggle} from '../components/Toggle';
 
 /** Renders a preset's glyph by name — the preset list owns which icon it uses,
@@ -194,17 +198,43 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
 }
 
 const toT = (db: number) => (db - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB);
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+/**
+ * Column position (0 at the bottom, 1 at the top) for a touch `y` in a column
+ * `h` tall. A worklet, because the drag runs entirely on the UI thread now.
+ */
+function tAt(y: number, h: number): number {
+  'worklet';
+  return Math.max(0, Math.min(1, 1 - y / (h || 1)));
+}
+
+/**
+ * WHOLE dB for a column position — the same number the label shows.
+ *
+ * The label used to round while onChange got the raw value, so the gain you set
+ * could sit up to 0.5dB from the figure you were reading, which made "set it to
+ * exactly +4" impossible to hit.
+ */
+function dbAt(t: number): number {
+  'worklet';
+  return Math.round(EQ_MIN_DB + t * (EQ_MAX_DB - EQ_MIN_DB));
+}
 
 /**
  * One vertical band. Drag anywhere on the column.
  *
- * The fill and knob are driven by ONE Animated.Value updated with setValue()
- * inside the gesture — that moves the native views directly, with NO React
- * re-render per frame. The old version called setState every move, re-rendering
- * the whole screen ~60×/s on the JS thread, which is exactly why the drag felt
- * like snapping between points. Only the dB label (which changes ~24 times
- * across a full drag, not per frame) and the final commit use React state.
+ * ## The whole drag is on the UI thread
+ *
+ * The previous version was native only in the sense that the GESTURE was
+ * recognised natively; everything it then did was not. onUpdate ran on the UI
+ * thread and immediately did runOnJS every frame, where apply() wrote an
+ * Animated.Value (a hop back to native) and called setState (a React render of
+ * the band). Three thread crossings and a render per frame, at 60Hz — which is
+ * why the touch was no longer being stolen and the drag still was not smooth.
+ *
+ * Now the position is a shared value written directly in the worklet, the fill
+ * and knob are useAnimatedStyle, and JS hears about it twice: once per whole-dB
+ * change for the readout, and once at the end to commit.
  */
 function Band({
   hz,
@@ -220,43 +250,38 @@ function Band({
   /** The page's scroller, so the drag can tell it to wait rather than steal. */
   scrollRef: React.RefObject<GHScrollView>;
 }) {
-  const t = useRef(new Animated.Value(toT(value))).current;
+  const t = useSharedValue(toT(value));
+  /** The column's real measured height, so the worklet never has to ask JS. */
+  const h = useSharedValue(SLIDER_H);
   const [labelDb, setLabelDb] = useState(Math.round(value));
-  const heightRef = useRef(SLIDER_H);
-  const draggingRef = useRef(false);
-  const disabledRef = useRef(!!disabled);
-  disabledRef.current = !!disabled;
+  const dragging = useRef(false);
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
 
   // Follow the prop when it changes from OUTSIDE a drag (preset pick, reset).
   useEffect(() => {
-    if (!draggingRef.current) {
-      t.setValue(toT(value));
-      setLabelDb(Math.round(value));
+    if (!dragging.current) {
+      t.value = toT(value);
     }
   }, [value, t]);
 
-  const apply = useCallback(
-    (y: number) => {
-      const tt = clamp01(1 - y / (heightRef.current || 1));
-      t.setValue(tt); // native view update, no React render
-      // WHOLE dB, and the same number the label shows. The label already
-      // rounded while onChange got the raw value, so the gain you set could sit
-      // up to 0.5dB away from the figure you were reading — which made "set it
-      // to exactly +4" impossible to hit.
-      const db = Math.round(EQ_MIN_DB + tt * (EQ_MAX_DB - EQ_MIN_DB));
-      setLabelDb(prev => (prev === db ? prev : db));
-      return db;
+  // The readout, derived from the position itself rather than pushed by the
+  // gesture — so it is right whoever moved the band, and it crosses to JS only
+  // when the WHOLE number changes: about 24 times across a full drag, not 60
+  // times a second.
+  useAnimatedReaction(
+    () => dbAt(t.value),
+    (db, prev) => {
+      if (db !== prev) {
+        runOnJS(setLabelDb)(db);
+      }
     },
-    [t],
   );
 
-  // Held in refs so the gesture, built once, always calls the current closures.
-  const applyRef = useRef(apply);
-  applyRef.current = apply;
-  const commitRef = useRef((y: number) => changeRef.current(apply(y)));
-  commitRef.current = (y: number) => changeRef.current(apply(y));
+  const setDragging = useCallback((on: boolean) => {
+    dragging.current = on;
+  }, []);
+  const commit = useCallback((db: number) => changeRef.current(db), []);
 
   /**
    * The band drag, natively recognised — and blocking the page scroller.
@@ -281,58 +306,57 @@ function Band({
   const drag = useMemo(
     () =>
       Gesture.Pan()
+        // Not a flag checked inside the callbacks: told to RNGH, so a disabled
+        // band never claims the touch and the page scrolls over it normally.
+        .enabled(!disabled)
         // Respond from the first pixel: this is a slider, not a scroller, and
         // there is no ambiguity left to resolve once the touch is ours.
         .minDistance(0)
+        // On the GESTURE, not on the View. A `hitSlop` prop belongs to RN's
+        // responder system; RNGH reads its own, and this column is 26px wide,
+        // which is thin for a drag.
+        .hitSlop({left: 10, right: 10})
         .blocksExternalGesture(scrollRef)
         .onBegin(e => {
-          if (disabledRef.current) {
-            return;
-          }
-          draggingRef.current = true;
-          runOnJS(applyRef.current)(e.y);
+          runOnJS(setDragging)(true);
+          t.value = tAt(e.y, h.value);
         })
         .onUpdate(e => {
-          if (!draggingRef.current) {
-            return;
-          }
-          runOnJS(applyRef.current)(e.y);
+          t.value = tAt(e.y, h.value);
         })
-        .onFinalize((e, success) => {
-          if (!draggingRef.current) {
-            return;
-          }
-          draggingRef.current = false;
-          if (success) {
-            runOnJS(commitRef.current)(e.y);
-          }
+        /**
+         * onEnd, NOT onFinalize.
+         *
+         * onFinalize fires for every terminal state and its `success` flag is
+         * false whenever the gesture was cancelled or never reached END — so
+         * the commit was being skipped silently. The slider stayed where you
+         * left it, setBand never ran, eqPreset never became 'custom' and
+         * nothing was applied: exactly "I adjusted it and it didn't switch to
+         * Custom". onEnd is the callback that means the gesture COMPLETED.
+         *
+         * It commits the value on screen rather than re-deriving from the
+         * event, which at finalize time may not carry a fresh coordinate.
+         */
+        .onEnd(() => {
+          runOnJS(commit)(dbAt(t.value));
+        })
+        .onFinalize(() => {
+          runOnJS(setDragging)(false);
         }),
-    [scrollRef],
+    [disabled, scrollRef, t, h, setDragging, commit],
   );
 
   // Bottom-anchored fill via scaleY, and the knob via translateY — both are
   // transform-only, so they composite on the UI thread at 60fps.
-  const fillStyle = {
+  const fillStyle = useAnimatedStyle(() => ({
     transform: [
-      {
-        translateY: t.interpolate({
-          inputRange: [0, 1],
-          outputRange: [SLIDER_H / 2, 0],
-        }),
-      },
-      {scaleY: t},
+      {translateY: (SLIDER_H / 2) * (1 - t.value)},
+      {scaleY: t.value},
     ],
-  };
-  const knobStyle = {
-    transform: [
-      {
-        translateY: t.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, -SLIDER_H],
-        }),
-      },
-    ],
-  };
+  }));
+  const knobStyle = useAnimatedStyle(() => ({
+    transform: [{translateY: -SLIDER_H * t.value}],
+  }));
 
   return (
     <View style={styles.band}>
@@ -343,11 +367,8 @@ function Band({
       <GestureDetector gesture={drag}>
         <View
           style={[styles.column, disabled && styles.columnOff]}
-          // A 26px-wide target is thin for a drag; widen what responds without
-          // widening what is drawn.
-          hitSlop={{left: 10, right: 10}}
           onLayout={(e: LayoutChangeEvent) => {
-            heightRef.current = e.nativeEvent.layout.height;
+            h.value = e.nativeEvent.layout.height;
           }}>
           <View style={styles.columnTrack} />
           <Animated.View

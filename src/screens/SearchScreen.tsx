@@ -68,7 +68,17 @@ const TILE_COLORS = [
 ];
 const tileColor = (i: number) => TILE_COLORS[i % TILE_COLORS.length];
 
-export function SearchScreen({
+/**
+ * Memoised, and this is not a micro-optimisation.
+ *
+ * App holds twenty-odd useState hooks in ONE component, and all three tab
+ * screens, the full player, the mini player and the drawer are its children —
+ * so opening a sheet, closing an overlay or touching any of them re-rendered
+ * every one of these trees. That is what "the app freezes for a moment" was:
+ * not work being done, but work being redone. Every prop below is
+ * useCallback-stable in App, so this actually holds.
+ */
+export const SearchScreen = React.memo(function SearchScreen({
   visible,
   onPickTrack,
   onImportSpotify,
@@ -507,7 +517,7 @@ export function SearchScreen({
       )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrap: {flex: 1, backgroundColor: C.bg},

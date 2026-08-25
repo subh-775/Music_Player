@@ -568,6 +568,226 @@ momentary level step v1.0.9 removed everywhere else. It has to: band count and
 gain range can only be read off a live `Equalizer`.
 
 
+---
+
+## v1.0.11 batch — audit round 5
+
+**The regression pattern, and the one thing that would actually catch it**
+
+The audit is right that every round has moved something other code held an
+unwritten assumption about, and right that none of it is catchable by the suite:
+`tsc`, eslint and 18 jest tests were all green for every one of those
+regressions, because they lived in z-order, gesture arbitration, layout
+constraint resolution and Android service lifecycle. A unit test on
+`getDownloadKey` cannot see any of that.
+
+So this round adds the checklist below rather than more tests. It is the thing
+that would have caught all four.
+
+### On-device checklist — run before every tag
+
+1. Swipe from the left edge on Home; the drawer follows the finger.
+2. Open the player, pull the queue grip up; the sheet comes with the finger.
+3. Scroll the queue past ten rows; drag a row by its grip and drop it.
+4. Turn shuffle on with the queue open; the visible order changes.
+5. Minimise from the artwork and from the header; both finish the slide.
+6. Open `+` from inside the player; the sheet is ON TOP of the player.
+7. Toast something while the player is open; exactly one toast.
+8. Back out of every overlay in turn — Equalizer, Shortcuts, Settings, artist,
+   album, queue sheet — each returns to what raised it.
+9. Drag an equalizer band; it moves smoothly and the preset becomes Custom.
+10. Play something, swipe the app away from recents; audio stops and the
+    notification goes with it. Repeat with the equalizer ON — that is the case
+    that broke.
+11. Rotate with the player open, and with a sheet open.
+12. Cold start with no network.
+
+**A1 — the queue sheet**
+
+| Part | What it was |
+|---|---|
+| A1b (the P0) | `maxHeight: '72%'` on a container with no height. Yoga sizes such a node to its CONTENT and clamps the result afterwards, so QueuePane's `flex: 1` wrapper and DraggableFlatList's `flex: 1` container resolved their basis against the UNCLAMPED height — the list believed its viewport was exactly as tall as its own contents, which is a list with nothing to scroll. The rows past the clamp were simply cut off by the parent. A definite `height` is the fix. |
+| A1a | The pull committed on RELEASE. `setQueueOpen(true)` fired from `onEnd`, and the Sheet then played its own 220ms slide on its own schedule, so the gesture and the motion were never connected. It opens on `onStart` now — the pan activating at 12px IS the open — and the release only handles the reversal (drag up, change your mind, push back down). |
+| A1c | The layout, in full: title "Queue", a `Playing {artist} · {output}` subtitle, the now-playing row pinned outside the scroll region, and "Shuffling from" with a shuffle glyph replacing "Next up · hold the grip to reorder" when shuffle is on. All of it moved INTO QueuePane, which is the component that knows what is playing; the sheet's own chevron went with it, since the handle, the scrim and back all already close it. |
+
+**A1c's two detents: deliberately not built — see below.**
+
+**A2 — shuffle did not repaint the queue**
+
+`PlaybackActiveTrackChanged` was the list's only refresh trigger, and shuffle is
+precisely the mutation that does not fire it: it reorders everything AFTER the
+active track, by design, so the active track never changes. The engine really
+had shuffled; the list was rendering the array it read before.
+
+New `onQueueChanged` registry, emitted from `refreshEngineMirror` — the one
+function `setShuffle`, `moveQueueItem`, `playTrack`, `restoreSession`,
+`topUpFromRadio` and both skips already end with. One line at the choke point
+rather than six at the call sites.
+
+**A3 — the app kept playing after being swiped away**
+
+The setting was never wrong: `AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification`
+has been in place since `58b93e2`. A BOUND service cannot be destroyed by
+`stopSelf()`, which is what RNTP calls from `onTaskRemoved` — and
+`MusicServiceRef.ensureBound()` took its binding with the APPLICATION context,
+so nothing released it when the Activity died. There was no `unbindService`
+anywhere in the codebase.
+
+It is conditional on a setting, which is why it survived testing: since v1.0.9
+`setEqualizer(false)`/`setNormalize(false)` no-op before touching the session,
+so on a default install nothing ever binds. Turn the equalizer on — the
+screenshots show Metal — and the bind happens on the first play of every
+session.
+
+`MusicServiceRef.unbind()` now exists and `AudioModule` implements
+`LifecycleEventListener` to call it from `onHostDestroy`. Deliberately NOT
+`release()` as well: pressing back to exit also destroys the Activity, playback
+legitimately continues then, and tearing the effects down there would drop the
+user's EQ mid-song — and removing an AudioEffect from a live session makes the
+audio HAL re-route the mix, which is the audible level step v1.0.9 spent a whole
+round removing. `onHostResume` re-takes the binding, because the crossfade ramp
+reaches ExoPlayer through it and would otherwise be a no-op until the next play.
+
+Also: `bindService` returning false still leaves a client record that has to be
+released, and this is retried on every play. That is unbound now too.
+
+**A4 — back**
+
+Three causes, all real:
+
+- **The Equalizer was never in the chain.** `eqOpen` is state in App and the
+  screen renders from it, but `onBack` tested eleven other things and not that
+  one, so back fell through to `tab !== 'home'` or to the exit warning.
+- **The handler re-registered on thirteen dependencies.** Not just churn:
+  `BackHandler` calls listeners in REVERSE registration order, so re-adding the
+  app-wide fallback kept moving it to the FRONT of the queue, ahead of the
+  per-surface handlers in `Sheet`, `Sidebar` and `PlayerScreen`. The player then
+  closed through `setPlayerOpen(false)` — no settle — instead of its own
+  `close()`. Registered once at mount and called through a ref, it is now the
+  oldest listener and therefore the last one asked, which is what a fallback
+  should be.
+- **The slowness is the render storm.** See B4.
+
+**A5 — the equalizer bands**
+
+The `blocksExternalGesture` fix was right and the touch is no longer stolen —
+but the per-frame work got worse, not better. The gesture was native; everything
+it did was not: `onUpdate` ran on the UI thread and immediately did `runOnJS`
+every frame, where `apply()` wrote an `Animated.Value` (a hop back to native)
+and called `setState` (a React render of the band). Three thread crossings and a
+render per frame at 60Hz.
+
+Now the position is a shared value written in the worklet, fill and knob are
+`useAnimatedStyle`, and JS hears about it twice: once per whole-dB change for
+the readout (via `useAnimatedReaction`, ~24 times across a full drag) and once
+at the end to commit.
+
+And the commit moved from `onFinalize` to `onEnd`. `onFinalize` fires for every
+terminal state and its `success` flag is false whenever the gesture was
+cancelled or never reached END, so the commit was silently skipped: the slider
+stayed where you left it, `setBand` never ran, `eqPreset` never became
+`'custom'` and nothing was applied. That is exactly "I adjusted it and it didn't
+switch to Custom". It commits the value on screen rather than re-deriving from
+an event that may not carry a fresh coordinate.
+
+Two more while in there: `disabled` is `.enabled(!disabled)` on the gesture now,
+so a disabled band never claims the touch and the page scrolls over it; and the
+10px `hitSlop` moved from the View prop (RN's responder system — RNGH does not
+read it) onto the gesture, where it does something.
+
+**B1, B2, B3 — the unreported ones**
+
+- `playTrack`'s `bitrate` parameter is gone. It always defaulted to
+  `currentQuality()` and nothing ever passed it, so with `originId` inserted
+  before it, `playTrack(t, list, 320)` would have taken 320 as a collection id
+  and still used the default — silently, because a number is a perfectly good
+  index for nothing. A local is not a trap.
+- The update throttle records the ATTEMPT, not only a confirmed all-clear.
+  Recording only all-clears was harmless at one check per launch and is not now
+  that it also runs on every foreground: a "found" result and a FAILED one both
+  left it unwritten, so returning from the notification shade fired a fresh
+  request every time and an offline phone retried on every glance. Nothing is
+  lost — once an update is found the dot is lit and `info` is set; re-asking
+  cannot make it more found. One throttle, one writer.
+- QueuePane renders the last queue it read from a module-level snapshot, then
+  corrects it. It mounts on open now, and a mount that awaits two engine
+  round-trips before it can draw is a sheet that arrives empty.
+
+**B4 — the render storm, which is what the "freezes" are**
+
+Done: `React.memo` on all six permanently-mounted trees — the three tab screens,
+`PlayerScreen`, `PlayerBar` and `Sidebar` — plus `useCallback` on the three
+props that were still inline arrows (`LibraryScreen.onOpen`,
+`PlayerScreen.onClose`, `PlayerBar.onExpand`). Without those three the memo
+would have been defeated by the props rather than by anything visible.
+
+**Not done: B4-2 (overlay reducer) and B4-3 (split Shell).** The reducer's
+stated payoff does not follow: the reducer state would live in `Shell`, so
+replacing fifteen `useState`s with one `useReducer` re-renders exactly the same
+component exactly as often. What stops the tab screens re-rendering is the memo,
+and that is done. Its real benefits — back order, deleting the `artistZ` /
+`collectionZ` counters — are worth having, but they are a large structural
+refactor of the one file every regression this round came through, and the back
+order was fixed in five lines by A4 instead.
+
+**B5 — stale**
+
+`skipPrevious()` already restarts first (`pos > 3` → `seekTo(0)`), and the
+notification button does not call it: RNTP raises `Event.RemotePrevious`, which
+`playbackService.ts` handles with the identical guard. Both have been there
+since before this round. Verified, no work done.
+
+**Part C — the UI**
+
+- **C1** Song/Lyrics is a capsule with a sliding thumb; the active icon inverts
+  to the background colour rather than merely brightening, and the track carries
+  a hairline ring. The `PANES` array went with it — the switch is hand-built for
+  exactly two segments (the thumb's travel IS one segment width), so a list to
+  map over was describing a generality the component does not have.
+- **C2** The artist has its own full-width line in `C.text` at 15/500 (it was
+  sharing a row with two badges and the output device, which is how "Mitraz"
+  rendered as "Mi..."), badges moved to a third line, and the output moved under
+  the action buttons, right-aligned and capped so a long device name cannot take
+  the width the song title needs. 18px off the bottom padding went into the gaps
+  between the three things actually looked at.
+- **C3** The count is gone from the queue label, and `useUpcomingCount` with it
+  — it kept a queue subscription alive for the life of the app to maintain a
+  number nobody wanted.
+- **C4** The corner radius interpolates off the same shared value that drives
+  the dismiss, so the corners cannot disagree with the position, plus
+  `overflow: 'hidden'` — without it the container rounds and the artwork paints
+  square corners straight through it.
+- **C5** Mini player: headphones at control size in the controls row (green,
+  only when connected, a bare View because status cannot be pressed), the play
+  disc gone, and all three in identical 38×38 slots. `playNudge` went with the
+  disc — it existed only to optically centre a triangle inside a circle. The
+  subtitle keeps the device NAME and loses its own 10px glyph, which would
+  otherwise have been the same signal twice.
+
+**Deliberately not done**
+
+- **A1c's two detents and scroll handoff.** The proposed mechanism cannot be
+  built as written — `simultaneousWithExternalGesture(listRef)` needs a ref to a
+  gesture RNGH owns and `DraggableFlatList` does not expose its inner list as
+  one, which round 4 already established and this round agreed with. Beyond
+  that, a two-detent sheet is one sheet at the FULL height translated down, so
+  at the lower detent the bottom of the list sits below the screen edge — which
+  is exactly why every implementation that does it has to pair it with
+  expand-on-scroll, the part that cannot be built. A single tall detent (88%)
+  with a list that genuinely scrolls is what shipped. If the two detents are
+  still wanted, say so and it gets built against a real bottom-sheet library
+  rather than by hand.
+- **B4-2 / B4-3**, above.
+- **Following** (round 3's other A8 pick) and **C1** SoundCloud API v2.
+
+**Standing caveat, restated**
+
+`getCapabilities` remains the one place that attaches the effects chain
+unconditionally, so opening the Equalizer screen mid-song can still cost the
+momentary level step. It has to: band count and gain range can only be read off
+a live `Equalizer`.
+
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

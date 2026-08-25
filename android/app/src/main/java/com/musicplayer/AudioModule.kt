@@ -10,6 +10,7 @@ import android.media.audiofx.LoudnessEnhancer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -33,7 +34,11 @@ import com.facebook.react.bridge.ReadableArray
  * Nothing here is tuned for one handset.
  */
 class AudioModule(private val ctx: ReactApplicationContext) :
-    ReactContextBaseJavaModule(ctx) {
+    ReactContextBaseJavaModule(ctx), LifecycleEventListener {
+
+    init {
+        ctx.addLifecycleEventListener(this)
+    }
 
     override fun getName() = "Audio"
 
@@ -720,6 +725,41 @@ class AudioModule(private val ctx: ReactApplicationContext) :
             cancelVolWork()
             promise.resolve(setExoVolume(1f))
         }
+    }
+
+    override fun onHostPause() {}
+
+    /**
+     * The UI is going away — release the playback service.
+     *
+     * This is the half of the swipe-away that was missing: RNTP stops playback
+     * and calls stopSelf() from onTaskRemoved, and Android keeps the service
+     * alive anyway while anything is bound to it. Nothing here ever unbound, so
+     * with the equalizer on the music simply carried on with its notification.
+     *
+     * Deliberately NOT release() as well. Pressing back to exit destroys the
+     * Activity too, and playback legitimately continues then — tearing the
+     * effects down there would silently drop the user's EQ mid-song, and
+     * removing an AudioEffect from a live session makes the audio HAL re-route
+     * the mix, which is audible as a step in level. Unbinding is what fixes the
+     * reported bug; releasing is what would cause the next one.
+     */
+    override fun onHostDestroy() {
+        MusicServiceRef.unbind(ctx)
+    }
+
+    /**
+     * Re-take the binding on the way back in.
+     *
+     * ensureAttached() would do it lazily, but only on the next play — and the
+     * crossfade ramp reaches ExoPlayer through this same binding, so without
+     * this the fade at the end of an already-playing song would be a no-op for
+     * everyone who had exited with back and come back. Cheap and idempotent:
+     * it returns immediately when already bound, and binds nothing at all when
+     * the service is not running.
+     */
+    override fun onHostResume() {
+        MusicServiceRef.ensureBound(ctx)
     }
 
     override fun onCatalystInstanceDestroy() {
