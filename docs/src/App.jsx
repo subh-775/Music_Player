@@ -1,30 +1,166 @@
 /**
- * Layout, navigation and the two things that make a long page navigable: a
- * table of contents that knows where you are, and sections that arrive rather
- * than simply being there.
+ * The shell: routing, header, sidebar, on-this-page, and the page footer.
  *
- * The mobile navigation is a left drawer with a scrim, deliberately: it is the
- * same gesture and the same panel the app itself uses, so someone who has the
- * app already knows how this page works.
+ * ## Routing
+ *
+ * A ~40-line path router rather than a library. The site is a fixed list of
+ * routes known at build time (src/nav.js), the build emits a real HTML file for
+ * each of them, and there is nothing dynamic to match — a router that can parse
+ * `/users/:id/posts/*` is solving a problem this site does not have.
+ *
+ * Pages are imported EAGERLY. Twenty compiled MDX modules are a few tens of
+ * kilobytes gzipped, and paying that once at load buys navigation with no
+ * loading state at all — which is both faster to use and one fewer state to
+ * design. The search index is the opposite case and is loaded lazily; see
+ * search.jsx.
  */
-import {useCallback, useEffect, useState} from 'react';
-import {Content, RELEASES, REPO, SECTIONS} from './sections.jsx';
+import {useCallback, useEffect, useMemo, useState} from 'react';
+import {FLAT, NAV, SIDEBAR, SITE} from './nav.js';
+import {mdxComponents} from './mdx.jsx';
+import {SearchPalette} from './search.jsx';
+import {
+  Close,
+  Github,
+  Menu,
+  Moon,
+  Pencil,
+  Search as SearchIcon,
+  Sun,
+} from './icons.jsx';
 import './styles.css';
 
-const LOGO = `${import.meta.env.BASE_URL}logo.png`;
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+const LOGO = `${BASE}/logo.png`;
 
-/** Which section is on screen, for the contents list. */
-function useScrollSpy() {
-  const [active, setActive] = useState(SECTIONS[0].id);
+const PAGES = import.meta.glob('../content/**/*.mdx', {eager: true});
+
+/** ../content/guide/player.mdx → /guide/player  ·  ../content/index.mdx → / */
+const BY_ROUTE = Object.fromEntries(
+  Object.entries(PAGES).map(([file, mod]) => [
+    file.replace('../content', '').replace(/\.mdx$/, '').replace(/\/index$/, '') ||
+      '/',
+    mod,
+  ]),
+);
+
+/* ── Routing ─────────────────────────────────────────────────────────────── */
+
+const toPath = url => {
+  const p = url.replace(BASE, '') || '/';
+  return p.replace(/\/$/, '') || '/';
+};
+
+function useRouter() {
+  const [path, setPath] = useState(() => toPath(window.location.pathname));
+
+  const navigate = useCallback(to => {
+    const [p, hash] = to.split('#');
+    const clean = p.replace(/\/$/, '') || '/';
+    if (toPath(window.location.pathname) !== clean) {
+      window.history.pushState({}, '', `${BASE}${clean === '/' ? '/' : clean}`);
+      setPath(clean);
+    }
+    // Let the new page commit before hunting for the anchor in it.
+    requestAnimationFrame(() => {
+      const el = hash && document.getElementById(hash);
+      if (el) {
+        el.scrollIntoView();
+      } else {
+        window.scrollTo(0, 0);
+      }
+    });
+  }, []);
 
   useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') {
+    const onPop = () => setPath(toPath(window.location.pathname));
+    window.addEventListener('popstate', onPop);
+
+    // One delegated listener instead of a <Link> component: MDX content is
+    // plain markdown, and its links are plain <a>. Intercepting here means
+    // every internal link in every page routes without the content knowing.
+    const onClick = e => {
+      const a = e.target.closest?.('a');
+      if (
+        !a ||
+        e.defaultPrevented ||
+        e.button !== 0 ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        a.target === '_blank' ||
+        a.hasAttribute('download')
+      ) {
+        return;
+      }
+      const href = a.getAttribute('href') || '';
+      if (!href.startsWith('/') || href.startsWith('//')) {
+        return;
+      }
+      e.preventDefault();
+      navigate(href);
+    };
+    document.addEventListener('click', onClick);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      document.removeEventListener('click', onClick);
+    };
+  }, [navigate]);
+
+  return [path, navigate];
+}
+
+/* ── Theme ───────────────────────────────────────────────────────────────── */
+
+function useTheme() {
+  const [theme, setTheme] = useState(
+    () => document.documentElement.dataset.theme || '',
+  );
+
+  const toggle = useCallback(() => {
+    const isDark =
+      (document.documentElement.dataset.theme ||
+        (window.matchMedia('(prefers-color-scheme: light)').matches
+          ? 'light'
+          : 'dark')) === 'dark';
+    const next = isDark ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem('fm-theme', next);
+    } catch {
+      // Private windows and blocked site data both throw here. The toggle
+      // still works for this visit; it just will not be remembered.
+    }
+    setTheme(next);
+  }, []);
+
+  const dark =
+    (theme ||
+      (window.matchMedia?.('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark')) === 'dark';
+
+  return [dark, toggle];
+}
+
+/* ── On this page ────────────────────────────────────────────────────────── */
+
+function Toc({path}) {
+  const [items, setItems] = useState([]);
+  const [active, setActive] = useState('');
+
+  useEffect(() => {
+    const nodes = [...document.querySelectorAll('.prose h2, .prose h3')].filter(
+      n => n.id,
+    );
+    setItems(nodes.map(n => ({id: n.id, text: n.textContent, level: +n.tagName[1]})));
+    setActive(nodes[0]?.id ?? '');
+
+    if (!nodes.length || typeof IntersectionObserver === 'undefined') {
       return;
     }
-    // A band across the upper third: the heading nearest the top of what you
-    // are reading is the one you are reading, which is not the same as the one
-    // most visible. Tracking "most visible" makes the marker lag by a section
-    // on anything long.
+    // A band across the top of the viewport: the heading nearest the top of
+    // what you are reading is the one you are reading, which is not the same as
+    // the one that happens to be most visible.
     const io = new IntersectionObserver(
       entries => {
         const onScreen = entries
@@ -34,229 +170,308 @@ function useScrollSpy() {
           setActive(onScreen[0].target.id);
         }
       },
-      {rootMargin: '-64px 0px -68% 0px', threshold: 0},
+      {rootMargin: '-72px 0px -72% 0px'},
     );
-    SECTIONS.forEach(s => {
-      const el = document.getElementById(s.id);
-      if (el) {
-        io.observe(el);
-      }
-    });
+    nodes.forEach(n => io.observe(n));
     return () => io.disconnect();
-  }, []);
+  }, [path]);
 
-  return active;
-}
+  if (items.length < 2) {
+    return <aside className="toc" />;
+  }
 
-/** Sections fade up as they arrive. Applied from JS, never from the markup, so
- *  a browser without IntersectionObserver shows everything instead of nothing. */
-function useReveal() {
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') {
-      return;
-    }
-    const targets = document.querySelectorAll('.sec');
-    targets.forEach(el => el.classList.add('reveal'));
-
-    const io = new IntersectionObserver(
-      entries => {
-        entries.forEach(e => {
-          if (e.isIntersecting) {
-            e.target.classList.add('in');
-            io.unobserve(e.target);
-          }
-        });
-      },
-      {rootMargin: '0px 0px -40px 0px', threshold: 0.02},
-    );
-    targets.forEach(el => io.observe(el));
-    return () => io.disconnect();
-  }, []);
-}
-
-function Brand() {
   return (
-    <a className="brand" href="#overview">
-      <img src={LOGO} alt="" width="28" height="28" />
-      <span>
-        Fix_Music
-        <small>Documentation</small>
-      </span>
-    </a>
+    <aside className="toc">
+      <div className="toc-inner">
+        <p className="toc-title">On this page</p>
+        {items.map(i => (
+          <a
+            key={i.id}
+            href={`#${i.id}`}
+            className={`${i.level === 3 ? 'lvl-3 ' : ''}${active === i.id ? 'on' : ''}`}>
+            {i.text}
+          </a>
+        ))}
+      </div>
+    </aside>
   );
 }
 
-function Nav({active, onPick}) {
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+function Sidebar({path, onPick}) {
   return (
-    <nav aria-label="Contents">
-      <p className="nav-title">Contents</p>
-      {SECTIONS.map(s => (
-        <a
-          key={s.id}
-          href={`#${s.id}`}
-          className={`nav-link${active === s.id ? ' on' : ''}`}
-          aria-current={active === s.id ? 'true' : undefined}
-          onClick={onPick}>
-          {s.label}
-        </a>
+    <nav aria-label="Documentation">
+      {SIDEBAR.map(group => (
+        <div className="side-group" key={group.text}>
+          <p className="side-title">{group.text}</p>
+          {group.items.map(item => (
+            <a
+              key={item.link}
+              href={item.link}
+              className={`side-link${path === item.link ? ' on' : ''}`}
+              aria-current={path === item.link ? 'page' : undefined}
+              onClick={onPick}>
+              {item.text}
+            </a>
+          ))}
+        </div>
       ))}
-      <p className="nav-title">Elsewhere</p>
-      <a className="nav-link" href={RELEASES} onClick={onPick}>
-        Releases
-      </a>
-      <a className="nav-link" href={REPO} onClick={onPick}>
-        Source
-      </a>
     </nav>
   );
 }
 
-function Hero() {
+/* ── Page footer ─────────────────────────────────────────────────────────── */
+
+function Pager({path}) {
+  const i = FLAT.findIndex(p => p.link === path);
+  if (i < 0) {
+    return null;
+  }
+  const prev = FLAT[i - 1];
+  const next = FLAT[i + 1];
   return (
-    <header className="hero">
-      <span className="eyebrow">Android · free · no account</span>
-      <h1>
-        Everything Fix_Music does,
-        <br />
-        and how to do it.
-      </h1>
-      <p className="lede">
-        Three catalogues searched as one. Downloads that are real files in a
-        folder you chose. An equalizer mapped onto your phone's actual hardware.
-        And a gesture for every common action, because you are holding this
-        thing in one hand.
-      </p>
-
-      <div className="hero-actions">
-        <a className="cta" href={RELEASES}>
-          ⭳ Download the APK
+    <nav className="pager" aria-label="Nearby pages">
+      {prev ? (
+        <a className="prev" href={prev.link}>
+          <span className="dir">← Previous</span>
+          <span className="name">{prev.text}</span>
         </a>
-        <a className="ghost" href="#gestures">
-          See the gestures
+      ) : (
+        <span />
+      )}
+      {next && (
+        <a className="next" href={next.link}>
+          <span className="dir">Next →</span>
+          <span className="name">{next.text}</span>
         </a>
-      </div>
-
-      <div className="facts">
-        <div className="fact">
-          <b>3</b>
-          <span>sources, one list</span>
-        </div>
-        <div className="fact">
-          <b>8</b>
-          <span>equalizer bands</span>
-        </div>
-        <div className="fact">
-          <b>0</b>
-          <span>accounts, ever</span>
-        </div>
-        <div className="fact">
-          <b>100%</b>
-          <span>on the device</span>
-        </div>
-      </div>
-    </header>
+      )}
+    </nav>
   );
 }
 
+/* ── App ─────────────────────────────────────────────────────────────────── */
+
 export default function App() {
-  const active = useScrollSpy();
-  const [open, setOpen] = useState(false);
-  useReveal();
+  const [path, navigate] = useRouter();
+  const [dark, toggleTheme] = useTheme();
+  const [drawer, setDrawer] = useState(false);
+  const [search, setSearch] = useState(false);
 
-  const close = useCallback(() => setOpen(false), []);
+  const page = BY_ROUTE[path];
+  const meta = FLAT.find(p => p.link === path);
+  const isHome = path === '/';
 
-  // Escape closes the drawer, and the page behind it must not scroll under it.
+  // Title follows the route, because a tab you left open should say which page
+  // it is rather than which site.
   useEffect(() => {
-    if (!open) {
-      return;
-    }
+    document.title = meta
+      ? `${meta.text} | ${SITE.name}`
+      : `${SITE.name} — Documentation`;
+  }, [meta]);
+
+  useEffect(() => setDrawer(false), [path]);
+
+  // Ctrl/⌘-K anywhere, and "/" when you are not already typing.
+  useEffect(() => {
     const onKey = e => {
+      if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) ||
+          (e.key === '/' && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName))) {
+        e.preventDefault();
+        setSearch(true);
+      }
       if (e.key === 'Escape') {
-        setOpen(false);
+        setDrawer(false);
       }
     };
     document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // The page behind the drawer must not scroll under it.
+  useEffect(() => {
+    if (!drawer) {
+      return;
+    }
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open]);
+  }, [drawer]);
+
+  // No scroll-reveal on documentation pages, deliberately. Fading paragraphs in
+  // as they arrive answers no question — nothing changed, you scrolled — and it
+  // actively fights reading: the line you are moving toward is the one that is
+  // not there yet. It belongs on a landing page, not on a reference.
+
+  const Body = useMemo(() => page?.default, [page]);
+  const activeTop = NAV.find(n => path.startsWith(n.match));
 
   return (
     <>
-      <div className="top">
+      <header className="hdr">
         <button
           type="button"
-          className="burger"
-          aria-label="Open the contents"
-          aria-expanded={open}
-          onClick={() => setOpen(v => !v)}>
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M3 6h18M3 12h18M3 18h18"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              fill="none"
-            />
-          </svg>
+          className="icon-btn burger"
+          aria-label="Open the navigation"
+          aria-expanded={drawer}
+          onClick={() => setDrawer(v => !v)}>
+          <Menu />
         </button>
 
-        <Brand />
-        <div className="top-spacer" />
+        <a className="brand" href="/">
+          <img src={LOGO} alt="" width="30" height="30" />
+          {SITE.name}
+        </a>
 
-        <div className="top-links">
-          <a href="#install">Install</a>
-          <a href="#gestures">Gestures</a>
-          <a href="#sound">Sound</a>
-          <a href="#faq">Help</a>
+        <div className="hdr-mid">
+          <button
+            type="button"
+            className="search-btn"
+            onClick={() => setSearch(true)}>
+            <SearchIcon />
+            <span>Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
         </div>
 
-        <a className="cta" href={RELEASES}>
-          Download
-        </a>
-      </div>
+        <div className="hdr-right">
+          <div className="hdr-links">
+            {NAV.map(n => (
+              <a
+                key={n.link}
+                href={n.link}
+                className={activeTop === n ? 'on' : undefined}>
+                {n.text}
+              </a>
+            ))}
+            <a href={SITE.releases} target="_blank" rel="noreferrer">
+              Download
+            </a>
+          </div>
+
+          <span className="hdr-sep" />
+
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={dark ? 'Switch to the light theme' : 'Switch to the dark theme'}
+            onClick={toggleTheme}>
+            {dark ? <Sun /> : <Moon />}
+          </button>
+
+          <a
+            className="icon-btn"
+            href={SITE.repo}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Source on GitHub">
+            <Github />
+          </a>
+        </div>
+      </header>
 
       <div
-        className={`scrim${open ? ' on' : ''}`}
-        onClick={close}
+        className={`scrim${drawer ? ' on' : ''}`}
+        onClick={() => setDrawer(false)}
         aria-hidden="true"
       />
-      {/* inert while closed: the panel is only off-screen by a transform, so
-          without this its links stay in the tab order behind the page. */}
       <aside
-        className={`drawer${open ? ' on' : ''}`}
-        inert={open ? undefined : 'true'}>
-        <Brand />
-        <Nav active={active} onPick={close} />
+        className={`drawer${drawer ? ' on' : ''}`}
+        inert={drawer ? undefined : 'true'}>
+        <div className="drawer-head">
+          <a className="brand" href="/">
+            <img src={LOGO} alt="" width="30" height="30" />
+            {SITE.name}
+          </a>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Close the navigation"
+            onClick={() => setDrawer(false)}>
+            <Close />
+          </button>
+        </div>
+        <Sidebar path={path} onPick={() => setDrawer(false)} />
       </aside>
 
-      <div className="shell">
-        <aside className="side">
-          <Nav active={active} />
-        </aside>
-
-        <main className="main">
-          <Hero />
-          <Content />
+      {isHome ? (
+        <main className="home">
+          {Body && <Body components={mdxComponents} />}
         </main>
-      </div>
+      ) : (
+        <div className="shell">
+          <aside className="side">
+            <Sidebar path={path} />
+          </aside>
+
+          <main className="doc">
+            <div className="doc-inner">
+              <article className="prose">
+                {Body ? (
+                  <Body components={mdxComponents} />
+                ) : (
+                  <>
+                    <h1>Page not found</h1>
+                    <p>
+                      There is no page at <code>{path}</code>. It may have been
+                      renamed — the sidebar has everything the site knows about.
+                    </p>
+                    <p>
+                      <a href="/guide/introduction">Start at the introduction →</a>
+                    </p>
+                  </>
+                )}
+              </article>
+
+              {meta && (
+                <>
+                  <a
+                    className="edit"
+                    href={`${SITE.editBase}${path}.mdx`}
+                    target="_blank"
+                    rel="noreferrer">
+                    <Pencil />
+                    Suggest an edit to this page
+                  </a>
+                  <Pager path={path} />
+                </>
+              )}
+            </div>
+          </main>
+
+          <Toc path={path} />
+        </div>
+      )}
 
       <footer className="foot">
-        <div className="foot-links">
-          <a href={REPO}>Source</a>
-          <a href={RELEASES}>Releases</a>
-          <a href={`${REPO}/issues`}>Report a problem</a>
-          <a href={`${REPO}/blob/mobile/LICENSE`}>Licence</a>
-        </div>
         <p>
-          Fix_Music is a personal project, not affiliated with Spotify,
-          JioSaavn, SoundCloud or YouTube. Respect the rights of the people who
-          made the music you listen to.
+          <a href={SITE.repo} target="_blank" rel="noreferrer">
+            Source
+          </a>{' '}
+          ·{' '}
+          <a href={SITE.allReleases} target="_blank" rel="noreferrer">
+            Releases
+          </a>{' '}
+          ·{' '}
+          <a href={SITE.issues} target="_blank" rel="noreferrer">
+            Report a problem
+          </a>{' '}
+          ·{' '}
+          <a href="/fair-use">Fair use</a>
+        </p>
+        <p>
+          For personal use. Not affiliated with Spotify, JioSaavn, SoundCloud or
+          YouTube.
         </p>
       </footer>
+
+      <SearchPalette
+        open={search}
+        onClose={() => setSearch(false)}
+        onNavigate={navigate}
+      />
     </>
   );
 }

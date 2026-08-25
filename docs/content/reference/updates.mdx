@@ -1,0 +1,55 @@
+# Updates
+
+The app checks GitHub for a newer release by itself, downloads it on request, and hands it to Android's own installer. You confirm the install; nothing happens behind your back.
+
+## How you find out
+
+**A green dot on Settings in the drawer.** Opening Settings from the drawer takes you straight to the update rather than to the top of the list.
+
+If a release is genuinely new, a notice also appears once. Dismissing it hides **the popup, not the update** — the dot stays lit and Settings keeps offering it until you install, or until a newer release replaces it.
+
+## When it checks
+
+- **At launch**, a few seconds in, so it never competes with the cold start.
+- **Every time the app returns to the foreground.**
+
+Both are debounced to at most one check every fifteen minutes.
+
+<Note title="Why the foreground check matters">
+  A phone kept awake by the playback service can go **days** without a cold start. A launch-only check reaches nobody who leaves the app running, which meant the dot people were waiting for simply never arrived. That was a real bug, and it is what the foreground check fixes.
+</Note>
+
+The fifteen-minute window exists only to absorb a burst of opening and closing. It records the **attempt**, whatever the result — so an offline phone does not fire a fresh request every time you glance at the screen, and a found update does not keep re-asking a question it already has the answer to.
+
+## Installing
+
+1. **Download** — runs on its own thread. Leaving the Settings screen does not cancel it; the progress survives navigation.
+2. **Install** — Android's package installer takes over and asks for confirmation. The first time it will also ask permission to install packages from this app.
+3. The app restarts on the new version.
+
+<Danger title="Install over the top, never uninstall first">
+  The in-app updater always installs over the existing app, which keeps your playlists, liked songs, history and settings.
+
+  Uninstalling first wipes all of it — Android clears app data on uninstall and there is no recovery. Downloads survive either way, because they live in your own music folder.
+</Danger>
+
+## Turning it off
+
+**Settings → Updates → Automatic updates.** With it off, nothing checks in the background and no dot appears.
+
+**Check for updates** works regardless of the switch, so turning automatic checks off is not the same as opting out of updates.
+
+## Versions
+
+`v1.0.11`, `v1.0.12` and so on. The version is derived from the git tag by CI, which means the number in **Settings → App version** is always the tag the build came from — it cannot drift from it, because nobody types it in.
+
+Every build and its notes are on **[the releases page](https://github.com/subh-775/Music_Player/releases)**.
+
+## What an update can and cannot change
+
+| | |
+| --- | --- |
+| **Kept** | Playlists, liked songs, history, settings, downloads |
+| **Kept** | Your equalizer curve and every other preference |
+| **May change** | Defaults for settings you never touched |
+| **Never touched** | Files in your download folder |

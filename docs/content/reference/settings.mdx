@@ -1,0 +1,83 @@
+# Settings
+
+Reached from the drawer — swipe in from the left edge of Home, or tap the hamburger.
+
+Anything with more than a switch's worth of choice opens as **its own screen** rather than expanding in place, so the list stays scannable.
+
+## Playback
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Autoplay** | On | Keeps playing similar songs when the queue runs out. See [The Queue](/guide/queue) |
+| **Normalize volume** | Off | Plays every track at roughly the same loudness |
+| **Crossfade** | Off | Overlap between songs, 0–12 seconds |
+| **Equalizer** | Off | Eight-band shaping. Opens [its own screen](/guide/equalizer) |
+| **Streaming quality** | Auto | Auto, 96, 128, 256 or 320 kbps |
+
+### Crossfade
+
+A horizontal bar, dragged or tapped, snapping to whole seconds.
+
+<CrossfadeDemo />
+
+Nought is off, which is the right answer for albums sequenced to run together. Twelve is the ceiling; past that you are hearing two songs rather than a transition.
+
+### Streaming quality
+
+A **ceiling, not a promise**. A source that has no 320 kbps stream still gives you its best available, and the quality badge on the row tells you what you actually got.
+
+**Auto** adapts to the source. Pick a number if you are counting data.
+
+## Sleep timer
+
+In the drawer. **15, 30, 45 or 60 minutes**, or **the end of this track**.
+
+The remaining time shows on the drawer row while it runs. It fires from the playback engine's own events rather than a timer, so it still works with the screen off — which is the only time anybody uses it.
+
+## Downloads
+
+| Row | What it does |
+| --- | --- |
+| **Download folder** | Where files are written. The path is shown, middle-ellipsised |
+| **Open in Files** | Opens that folder in your file manager |
+| **Storage used** | How much the downloads take |
+| **Clear cache** | Frees temporary files, saved lyrics and search history |
+
+**Clear cache does not touch downloads, playlists or liked songs.** It only drops things the app can fetch again.
+
+## Appearance
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Show source label** | On | The JioSaavn / SoundCloud / YouTube badge on rows |
+| **Show quality label** | On | The kbps badge on rows |
+
+Both are pure information density. Turn them off for a quieter list.
+
+## Updates
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Automatic updates** | On | Checks GitHub for a newer release quietly in the background |
+| **Check for updates** | — | Runs a check now, regardless of the switch above |
+| **App version** | — | What is installed |
+
+See **[Updates](/reference/updates)**.
+
+## Sources
+
+Three rows — JioSaavn, SoundCloud, YouTube — shown as **Always on**.
+
+They are not switches. All three are searched together and the fallback between them is what makes a dead stream recoverable; turning one off would only make results worse in ways that are hard to attribute later.
+
+## Diagnostics
+
+What the audio engine can see: whether the playback service is bound, which audio session is live, whether the effects attached, the device's real band count, and the last error it hit.
+
+<Tip>
+  This page answers most "it is not working" questions without a cable. Quoting it in an issue is the single most useful thing you can do.
+</Tip>
+
+## Reset all settings
+
+Puts every switch back to its default. **Your library — likes, playlists, downloads — is not touched.**

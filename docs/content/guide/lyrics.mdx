@@ -1,0 +1,36 @@
+# Lyrics
+
+Open the full player and tap the **Quote** half of the capsule in the middle of the timestamp row. The artwork is replaced by the words.
+
+## Timed and untimed
+
+Two kinds of lyrics come back, and the app shows whichever it got:
+
+- **Timed** — the current line is highlighted and the view scrolls itself as the song plays. This is what you want, and it is what most well-known tracks have.
+- **Plain** — the whole text, no highlighting. Better than nothing, and common for less mainstream songs.
+
+You do not choose between them. The app asks for timed and falls back.
+
+## When the capsule is dim
+
+The Lyrics half goes **faint** when this track genuinely has none.
+
+That is not a failed request or a slow connection — the app checked, the provider has nothing for this song, and the segment says so rather than opening a pane that only ever reads "nothing here". Tapping it explains itself in a single line.
+
+It is common for SoundCloud and YouTube uploads, where the metadata often does not match any catalogued release well enough to look up.
+
+## Why they are fetched when the player opens
+
+The check runs **as soon as the player is opened**, not when you tap the capsule. The tab bar has to know whether this song has lyrics before you press anything — otherwise the only way to discover there are none is to press and be disappointed.
+
+It is also gated on the player being open. Leaving it running would spend a request on lyrics nobody asked for on every track change, for a screen that is closed.
+
+<Note>
+  Lyrics are cached, so going back to a song you played earlier does not re-fetch. **Settings → Clear cache** drops them along with temporary files and search history.
+</Note>
+
+## Accuracy
+
+Lyrics come from a public lyrics provider, matched on title, artist and duration. The duration is part of the match on purpose — it is what separates the album cut from the radio edit and the extended mix, which otherwise share a title and an artist.
+
+It is not perfect. A mismatch shows up as words that drift out of time or belong to another version of the song, and it usually means the track's own metadata is wrong rather than the lookup being wrong.

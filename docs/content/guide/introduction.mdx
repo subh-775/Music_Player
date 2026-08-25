@@ -1,0 +1,49 @@
+# Introduction
+
+Fix_Music is an Android music player that searches three catalogues at once, streams from whichever one actually has the track, and keeps a real copy on your phone when you ask it to.
+
+There is no account. There is nothing to sign in to, no subscription, no trial, and no server of ours between you and the music.
+
+## What makes it different
+
+Most players are a front end for one catalogue. If that catalogue does not have the song, you do not have the song.
+
+This one treats **three catalogues as one library**. A search goes to JioSaavn, SoundCloud and YouTube together, the results are merged and ranked as a single list, and near-duplicates collapse into one row. The sources you can see in the badge on each row; the ones you cannot see are still there, waiting, in case the first stream fails.
+
+That single design decision is where most of the app's behaviour comes from:
+
+- A track that will not play **swaps source** instead of showing you an error.
+- A song you cannot find under one spelling is often already there under another source's metadata.
+- The **quality badge** tells you what is actually streaming, not what you asked for in Settings — because the setting is a ceiling, not a promise.
+
+## The part people actually notice
+
+Not the search. The **gestures**.
+
+Swipe the artwork to change song. Double-tap either edge to jump ten seconds. Drag the player down to put it away. Pull the grip at the bottom to see what is next. Swipe in from the left edge of Home for the drawer.
+
+None of these is the only way to do the thing — there is always a button — but the app was designed around them, and it is why it does not feel like a web page in a wrapper.
+
+<Tip title="Read this one first">
+  If you only read one page after installing, make it **[Gestures](/guide/gestures)**. Everything else is discoverable by tapping around; the gestures are not.
+</Tip>
+
+## Everything runs on the phone
+
+The interface is native Android. Behind it, the app runs its own search and download engine **on the device** — a Python service bound to `127.0.0.1`, which nothing outside the handset can reach.
+
+There is no backend of ours to go down, to get blocked, or to be subpoenaed. Your searches, your playlists and your listening history are written to your own storage and never leave it.
+
+The trade is honest and worth stating: because the engine is on the phone, a search is only as fast as your connection to three public catalogues, and a source having a bad day is a source having a bad day. See **[How It Works](/reference/architecture)** if you want the full picture — you need none of it to use the app.
+
+## What it is not
+
+- **Not on the Play Store.** It is an APK from GitHub Releases. That is one extra prompt at install time and nothing after it.
+- **Not iOS.** The playback engine, the audio effects and the download folder all use Android APIs with no equivalent there, so there is no iOS build and there will not be one.
+- **Not a way to avoid paying artists.** See **[Fair Use](/fair-use)**.
+
+## Where to go next
+
+- **[Installation](/guide/installation)** — get it onto your phone.
+- **[Quick Start](/guide/quick-start)** — first search to first download.
+- **[Finding Music](/guide/finding-music)** — how the three sources are actually searched and ranked.

@@ -1,0 +1,61 @@
+# Downloads & Offline
+
+Downloading writes a **real audio file** into a folder you choose, with artwork and tags embedded. It is not a cache entry and it is not locked to the app.
+
+## Downloading
+
+Tap **⭳** in the player, or long-press any row and choose Download.
+
+- The first time, Android asks for storage permission.
+- Progress shows on the Downloads screen while it runs.
+- The glyph becomes a **green tick** the moment the file lands — no need to reopen the screen.
+- Downloaded songs carry an **Offline** badge wherever they appear.
+
+## Where the files go
+
+**Settings → Downloads** shows the folder and lets you change it. **Open in Files** takes you there in your file manager.
+
+The files are ordinary tagged audio. They play in any other music app on the phone, they copy to a computer, and **they survive uninstalling Fix_Music** — they live in your own music folder, not in the app's private storage.
+
+<Danger title="Uninstalling still costs you something">
+  Your downloads survive an uninstall. Your **playlists, likes and history do not** — Android wipes app data on uninstall. Always update by installing the new APK over the top; the in-app updater does this correctly.
+</Danger>
+
+## Streaming does not save anything
+
+Playing a song through leaves nothing behind. That is a decision, not an oversight.
+
+An implicit listen-cache grows without bound, needs an eviction policy nobody can see, and is invisible to the person relying on it — so "I played it once" quietly becomes "why is it there only sometimes", usually on a train with no signal.
+
+**Download is the feature that keeps a song.** It is explicit, it tells you when it is done, and what it produces is a file you can point at.
+
+## How a download is recognised later
+
+By **title and artist**, normalised — not by a catalogue identifier.
+
+This is worth knowing because it explains the edge cases. A file on disk carries no ISRC, so the app cannot match on one; it matches on what the tags actually contain. Which means:
+
+- Renaming the file is fine. Editing its **title or artist tag** is not — the match is lost and the song reads as not downloaded.
+- Two genuinely different recordings with the same title and artist collapse into one as far as the tick is concerned.
+
+<Note>
+  If a download stops showing as downloaded, the tags changed. Re-downloading fixes it, and the folder is re-scanned every time you open the Library tab.
+</Note>
+
+## Deleting
+
+From the Downloads screen. Deleting removes **the file**, not just the entry — that is the honest behaviour for something that occupies real space.
+
+Deleting a download does not unlike the song or remove it from playlists. Those are separate things, deliberately.
+
+## Playing offline
+
+With no connection:
+
+- **Downloads play normally.** Everything in that collection is available.
+- Search returns nothing — it needs three public catalogues.
+- Your playlists still open; songs in them that are downloaded play, and the rest are skipped with a note.
+
+## Artwork
+
+Covers are embedded in the file at download time. The library also remembers the cover it saw, so a file whose tags carry no picture still shows the right artwork in the app — and a file that genuinely has none does not cost a request that was always going to fail.

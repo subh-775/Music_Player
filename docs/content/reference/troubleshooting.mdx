@@ -1,0 +1,103 @@
+# Troubleshooting
+
+The questions that actually come up, with the real reason rather than a reassurance.
+
+## Playback
+
+### A song skipped by itself
+
+Every source the app had for that track failed — a preview-only SoundCloud upload, a region-locked track, or a dead link. The app names the song it skipped rather than failing silently.
+
+The same song is often available elsewhere: search it again and pick a row with a **different source badge**.
+
+### Music stops when I leave the app
+
+Your phone's battery optimiser killed the playback service.
+
+Android lets manufacturers be aggressive here, and some are very aggressive. Find Fix_Music in **Settings → Apps → Battery** and set it to **Unrestricted** (the wording varies: "Don't optimise", "No restrictions", "Allow background activity").
+
+### Playback carried on after I swiped the app away
+
+You are on a build before **v1.0.11**. Updating fixes it.
+
+The cause was a binding held on the playback service: a service anything is still bound to cannot be destroyed by `stopSelf()`, so the request to stop was made and ignored. It only happened with the equalizer or normalization switched on, which is why it was easy to miss.
+
+### The volume jumped when a song started
+
+Fixed in **v1.0.9**. Enabling an audio effect on a live session makes Android re-route the audio, which is audible as a step in level, and the app was creating effects it was then not going to use.
+
+Opening the **Equalizer screen** mid-song can still cost one, because reading your device's real band count requires a live effect. That one is unavoidable.
+
+## Sound
+
+### The equalizer says to play something first
+
+Audio effects attach to a live audio session, and there is no session until something is playing. Start a song, then open the equalizer.
+
+### It says the device refused the effects
+
+Some handsets decline audio effects on an offloaded or fast-path audio route. That is the phone, not the app, and there is no way around it from inside an app.
+
+The app reports **your device's own reason** rather than a generic message, precisely so this case is distinguishable from the one above.
+
+### The equalizer bands will not drag smoothly
+
+Fixed in **v1.0.11**. Before that the drag was recognised natively but everything it did afterwards crossed to the JavaScript thread on every frame.
+
+If you are on v1.0.11 or later and a band still does not respond, check that the equalizer is actually **switched on** — a disabled band deliberately does not claim the touch, so the page scrolls over it instead.
+
+## Search and downloads
+
+### Search is slow or comes back with less than expected
+
+The engine searches three public catalogues with a deadline and returns whatever arrived in time. A slow source **degrades** the results rather than hanging the search. Searching again with the caches warm usually finds the rest.
+
+An entirely empty result almost always means no connection. The app works fully offline for downloads and not at all for search.
+
+### A downloaded song is not showing as downloaded
+
+Downloads are matched by **title and artist**, because a file on disk carries no catalogue identifier. If you edited those tags, the match is lost.
+
+Re-downloading fixes it. The folder is re-scanned every time the Library tab is opened.
+
+### Downloads fail or nothing is written
+
+Storage permission was declined, or the chosen folder is on removable media that is no longer mounted. Check **Settings → Downloads → Download folder**, and re-grant storage if Android has revoked it for inactivity.
+
+## Interface
+
+### The drawer will not open by swiping
+
+The strip is the outer 28 pixels of the **left edge, on Home only**, and Android also uses that area for its own back gesture.
+
+If your phone uses three-button navigation the conflict disappears. Either way, the hamburger in the Home header always works.
+
+### No lyrics for this song
+
+The Lyrics segment goes dim when the track genuinely has none on the provider — common for SoundCloud and YouTube uploads. It is not a failed fetch; the app checked and there is nothing there. See [Lyrics](/guide/lyrics).
+
+### Back closes the wrong thing
+
+It should close whatever is visually on top, one layer per press. If it does not on your build, that is a bug worth reporting with the exact sequence of screens — the ordering is explicit in the code and a wrong order is fixable.
+
+## Updates
+
+### The update dot never appears
+
+Fixed in **v1.0.10**. The launch check used to skip for a full day after any "you're up to date", so a release published an hour later was invisible until the next day.
+
+It now checks at launch and on every return to the foreground, at most once every fifteen minutes.
+
+### I updated and lost my playlists
+
+You uninstalled before installing. Android wipes app data on uninstall and there is no recovery.
+
+Always install the new APK **over** the old app; the in-app updater does this correctly. Your downloads are unaffected either way — they live outside app storage.
+
+## Still stuck
+
+**Settings → Diagnostics** reports what the audio engine can see: whether the playback service is bound, which audio session is live, whether the effects attached, your device's real band count, and the last error it hit.
+
+<Tip>
+  Quoting that page in an issue is the single most useful thing you can do — it answers most "it is not working" questions without anyone needing your phone. **[Open an issue](https://github.com/subh-775/Music_Player/issues)**.
+</Tip>
