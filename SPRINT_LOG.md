@@ -884,6 +884,59 @@ state that is invisible from the repository. The fix in each case was to stop
 depending on it.
 
 
+---
+
+## Documentation site, rebuilt as a real docs site
+
+The first version was one long scrolling page. It read as a landing page with
+headings, which is not what someone arriving with a question needs. Rebuilt at
+the shape of the Fix_Spotify docs: **nineteen pages**, grouped sidebar,
+on-this-page outline, prev/next, edit links, Ctrl-K search, and a light theme.
+
+**Stack.** Vite + React + MDX. Content is nineteen `.mdx` files under
+`docs/content/`, so a page is a markdown file and the components it wants —
+`<Tip>`, `<EqDemo/>`, `<GestureGrid/>` — are available inside it.
+
+**Routing without a router.** The route list is known at build time
+(`src/nav.js`), so a plugin copies `index.html` into every route directory. Deep
+links are real 200s with clean URLs, rather than the usual trick of making
+`404.html` a copy of `index.html` and serving a 404 status for every real page
+on the site. The client router is about forty lines and one delegated click
+listener — MDX content is plain markdown and its links are plain `<a>`, so
+intercepting at the document means no page has to know it is in an SPA.
+
+**Search.** No index-building plugin. The compiled pages are inlined in the
+entry chunk (eager glob) and each page's *raw* markdown is its own dynamically
+imported chunk (lazy glob) — verified in the build output, because the two are
+separate modules despite coming from one file. So the text that only search
+needs arrives only when search is opened. Indexing splits on headings, so a hit
+lands on the section rather than the top of a long page.
+
+**Design.** OKLCH throughout: the palette is built by walking lightness, and
+that only works in a space where one step of lightness looks like one step.
+Neutrals carry 0.004–0.012 chroma at the brand's hue, because pure grey beside a
+saturated green reads as dead. Neither end is pure — the app is `#000` because
+it targets AMOLED, but a docs page is a wall of body text and text on pure black
+haloes.
+
+Two decisions worth recording because they went against the obvious:
+
+- **Callouts are a tinted field with a hairline and a label chip, not a coloured
+  rail down the left edge.** The rail is what every docs theme reaches for; it
+  reads as decoration and it puts the colour where the eye is not looking.
+- **No scroll-reveal on documentation pages.** Fading paragraphs in as they
+  arrive answers no question — nothing changed, you scrolled — and it actively
+  fights reading, because the line you are moving toward is the one that is not
+  there yet. It belongs on the home page, not on a reference.
+
+**Light mode needed a different green.** `#1db954` on white is 2.4:1, which
+fails AA for text. Links and accents drop to a darker step in light mode and
+keep the app's exact green in dark.
+
+**Montserrat**, as asked, self-hosted as a variable font. It is a geometric sans
+with wide counters, so body text runs at 1.75 leading with slightly negative
+tracking — left at defaults it reads loose over a long paragraph.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

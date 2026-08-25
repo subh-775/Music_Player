@@ -1,0 +1,60 @@
+# Installation
+
+Fix_Music is distributed as an APK from GitHub Releases. It is not on the Play Store, so Android will ask you once for permission to install it — and only once.
+
+## 1. Download the APK
+
+Open **[the latest release](https://github.com/subh-775/Music_Player/releases/latest)** on the phone itself and download `Music_Player.apk`.
+
+Downloading on a computer and transferring the file works exactly as well. There is one file; there are no variants to choose between.
+
+## 2. Allow the install
+
+Tap the downloaded file. The first time, Android will say your browser or file manager is not allowed to install apps.
+
+Follow the prompt to **Settings → Install unknown apps**, turn it on for that one app — your browser, or Files — and come back. The install then proceeds normally.
+
+<Note>
+  You are granting the permission to **the app that hands over the file**, not to Fix_Music. Turning it on for Chrome does not turn it on for anything else, and you can turn it off again afterwards without affecting the installed app.
+</Note>
+
+## 3. First launch
+
+The first start takes a few seconds longer than every one after it: the embedded engine unpacks itself and the app restores whatever was playing last.
+
+The splash screen stays up until **both** the engine and the home screen are genuinely ready. That is deliberate — the alternative is watching the app assemble itself in stages, which reads as slow even when it is not.
+
+<Tip>
+  Nothing needs configuring after install. Autoplay is on, quality is on Auto, and the equalizer is off. You can start searching immediately — see **[Quick Start](/guide/quick-start)**.
+</Tip>
+
+## Requirements
+
+| | |
+| --- | --- |
+| **Android** | 7.0 (Nougat) or newer |
+| **Storage** | ~120 MB for the app, plus whatever you download |
+| **Connection** | Needed for search and streaming. Downloads play with none |
+| **Account** | None |
+
+## Permissions, and when each is asked for
+
+Nothing is requested at install time. Each is asked for at the moment it is first needed, so you always know what it is for.
+
+| Permission | Asked when | What happens if you decline |
+| --- | --- | --- |
+| **Notifications** | First playback | Music still plays; you lose the lock-screen and notification controls |
+| **Storage** | First download | Streaming still works; downloads cannot be written |
+| **Install packages** | An update is ready | In-app updates stop; you can still install a new APK by hand |
+
+## Updating later
+
+Once installed, the app checks for new releases by itself and can download and install them from inside Settings. You will not repeat any of the above.
+
+<Danger title="Never uninstall to update">
+  Install the new APK **over** the old app. Uninstalling deletes your playlists, liked songs and listening history — Android wipes app data on uninstall and there is no way to get it back. The in-app updater always installs over the top, which is the safe path.
+
+  Your **downloads** survive either way: they live in your own music folder, outside the app's storage.
+</Danger>
+
+See **[Updates](/reference/updates)** for how the check and the install flow actually work.

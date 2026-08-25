@@ -1,0 +1,68 @@
+# The Player
+
+This is where the app stops feeling like a search box. Tap the mini player to open it; drag it down to put it away.
+
+## Reading the screen
+
+| Where | What it is |
+| --- | --- |
+| **Top strip** | The album you are inside of, or “Now playing”. The chevron minimises — so does dragging anywhere on this strip |
+| **Artwork** | Swipe it sideways to change song, double-tap either edge to seek |
+| **Title** | The song, at full width |
+| **Artist** | Its own line. Tapping it opens that artist; where several are credited, it asks which one first |
+| **Badges** | Which source is streaming and at what bitrate. Both can be switched off under Settings → Appearance |
+| **⊕ ♥ ⭳** | Add to a playlist, like, download. The download glyph becomes a green tick once the file is on the phone |
+| **Output** | Under the buttons, in green, when something other than the phone speaker is connected |
+| **Capsule** | Song or lyrics, in the middle of the timestamp row. It goes dim when the track genuinely has no lyrics |
+| **Grip** | “Your queue”, at the bottom. Pull it up, or tap it |
+
+## The seek bar
+
+Drag to scrub, tap to jump. The played portion fills ahead of the handle, so position reads at a glance.
+
+<SeekDemo />
+
+Two things are true of it that are not obvious:
+
+- **The seek happens on release**, not continuously. One range request, not one per pixel — which is what keeps scrubbing smooth on a slow connection.
+- **The touch target is 44 pixels tall for a 4-pixel line.** A thin bar is easy to look at and impossible to hit. A clearly *vertical* drag that starts on the bar still falls through to minimising the player, so the two gestures do not fight.
+
+## Transport
+
+**Shuffle** is a real toggle, not a re-roll. Turning it on shuffles everything still to come; turning it off puts the original order back. Pressing it repeatedly does not keep re-shuffling — that behaviour reads as "still on" and leaves songs playing in an order you never chose.
+
+**Previous** restarts the current song first. It only jumps to the song before when you are already within the first three seconds. One stray tap cannot lose your place.
+
+**Repeat** is two-state: off, or repeat this song. It loops the current track when it ends — dominating shuffle and autoplay, which is what "replay" means — while the next button still moves on manually.
+
+## Song and lyrics
+
+The capsule in the middle of the timestamp row switches the artwork for the lyrics.
+
+It goes **dim** when this song genuinely has none, which is common for SoundCloud and YouTube uploads. That is not a failed fetch — the app checked and there is nothing there. Tapping it says so rather than opening a pane that only ever reads "nothing here". See [Lyrics](/guide/lyrics).
+
+## The queue grip
+
+At the bottom. **Pull it up or tap it.**
+
+The pull opens the sheet as the drag is recognised, not when you let go, so it is already on its way up under your finger. Push back down before releasing and it goes away again.
+
+The pull is upward-only on purpose: a downward drag there has to keep falling through to the dismiss, or the strip where your thumb naturally rests becomes a dead zone for minimising the player.
+
+## Notification and lock screen
+
+While music plays, Fix_Music shows a notification with transport controls. The same controls appear on your lock screen, and on Bluetooth devices, car head units and headsets.
+
+- Play, pause, skip and the scrubber all work from there.
+- The notification is what **keeps music alive when you leave the app** — Android requires a foreground service for background audio, and that notification is it.
+- A headset's **previous** button restarts the track first, same as the in-app button.
+
+<Note>
+  Swiping the app away from Recents stops playback and removes the notification. That is intended. If music kept playing after a swipe-away on an older build, updating fixes it — see [Troubleshooting](/reference/troubleshooting).
+</Note>
+
+## Resume
+
+The app reopens on the song and timestamp you left, **paused**, with your queue.
+
+Paused rather than playing is deliberate. An app that starts making noise the moment you open it is an app you stop opening in public.

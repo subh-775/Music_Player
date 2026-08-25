@@ -1,0 +1,84 @@
+# How It Works
+
+You need none of this to use the app. It is here because "where does my data go" deserves a real answer rather than a promise.
+
+## The shape of it
+
+```
+┌─────────────────────────────────────────────┐
+│  Your phone                                 │
+│                                             │
+│  ┌───────────────┐      ┌────────────────┐  │
+│  │  Interface    │─────▶│  Search engine │  │
+│  │  React Native │      │  Python, Flask │  │
+│  │  (native UI)  │◀─────│  127.0.0.1     │  │
+│  └───────┬───────┘      └────────┬───────┘  │
+│          │                       │          │
+│  ┌───────▼───────┐               │          │
+│  │  Playback     │               │          │
+│  │  ExoPlayer    │               │          │
+│  └───────────────┘               │          │
+└──────────────────────────────────┼──────────┘
+                                   │
+                    ┌──────────────┼──────────────┐
+                    ▼              ▼              ▼
+               JioSaavn      SoundCloud       YouTube
+```
+
+Three parts, all on the handset:
+
+- **The interface** is native Android, written in React Native. Not a web view — the lists, the gestures and the player are real Android views.
+- **The engine** is a Python service (Flask, embedded with Chaquopy) bound to `127.0.0.1`. It does search, ranking, stream resolution and downloads.
+- **Playback** is ExoPlayer, through a foreground service, which is what keeps audio alive when you leave the app.
+
+## There is no server of ours
+
+The engine that would normally live in a data centre runs **inside the app**, on a loopback address nothing outside the phone can reach.
+
+Consequences, good and bad, stated honestly:
+
+| | |
+| --- | --- |
+| **No account** | There is nothing to hold an account against |
+| **No telemetry** | There is nowhere to send it |
+| **Nothing to block** | No domain of ours for a network to blacklist |
+| **Nothing to subpoena** | Your history is on your phone and only there |
+| **Slower cold search** | Three public catalogues, from a phone, with no shared cache in front |
+| **Sources break sometimes** | When a catalogue changes its API, it breaks until an update ships |
+
+The last two are the real cost, and they are why an update occasionally exists purely to fix search.
+
+## What is stored, and where
+
+| What | Where |
+| --- | --- |
+| Playlists, likes, history, settings | App storage on the device |
+| Downloaded songs | Your own music folder, outside app storage |
+| Lyrics, artwork, temporary files | Cache, cleared by **Settings → Clear cache** |
+| Anything at all | *Nowhere else* |
+
+Uninstalling the app removes the first row. It does not touch the second — see [Downloads](/guide/downloads).
+
+## Why the engine is Python
+
+Because it is the same engine as the desktop edition. One codebase for search, ranking, stream resolution and downloads means a fix lands in both places at once, and the ranking rules that make search feel good are written once.
+
+The alternative — a second implementation in Kotlin — is two implementations that drift.
+
+## Audio effects
+
+The equalizer and volume normalization are Android's own `Equalizer` and `LoudnessEnhancer`, attached to the live audio session that ExoPlayer is playing through.
+
+That is why they need something playing to attach to, why your device's real band count shows up in the hint, and why an effect is only ever created when it is going to be used — inserting one makes the audio system re-route the mix, which is audible.
+
+## Playback survives the app
+
+Android requires a **foreground service** for background audio, and that service is what the playback notification represents.
+
+Swiping the app away from Recents stops playback and removes the notification, which requires the service to actually be released — a service that anything is still bound to cannot be destroyed, and that was a real bug through v1.0.11.
+
+## The build
+
+Tag `v*` on the repository, and CI builds a release APK and attaches it to a GitHub Release. The version name and code are derived **from the tag**, so the number in Settings cannot drift from the build it came from.
+
+This documentation is built from `docs/` in the same repository and deployed to GitHub Pages, for the same reason: docs that live next to the code they describe are docs that get updated in the same commit.

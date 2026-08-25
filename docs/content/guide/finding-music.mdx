@@ -1,0 +1,68 @@
+# Finding Music
+
+One search box, three catalogues. This page is what happens between typing and the list appearing.
+
+## The three sources
+
+| Source | Best for | What to expect |
+| --- | --- | --- |
+| **JioSaavn** | Studio releases, Indian catalogue | Full-catalogue streaming up to 320 kbps, with proper album artwork and metadata |
+| **SoundCloud** | Remixes, uploads, independent artists | Some uploads are preview-only or region-locked and get skipped automatically |
+| **YouTube** | Anything the other two do not have | The fallback of last resort — slower to resolve, and the most likely to carry a live or cover version |
+
+All three are searched **together**, not in turn. The results come back as one list.
+
+## One song, one row
+
+If a track exists on all three sources you see it once. The other two are kept as silent backups on the same row.
+
+This matters more than it sounds. It is why:
+
+- The list is short enough to read instead of three near-identical blocks.
+- A stream that dies **swaps source** rather than failing — you usually do not notice.
+- The **source badge** on a row tells you where it is playing *from right now*, which can change between plays.
+
+## How results are ranked
+
+The ranking is query-aware, which is the whole trick. Derivative uploads — live, cover, karaoke, instrumental, remix, nightcore, "slowed + reverb", "chopped and screwed" — are **demoted when your query did not ask for them**, and not demoted when it did.
+
+So searching *blinding lights* gives you the studio cut. Searching *blinding lights slowed reverb* gives you exactly what you asked for. You do not have to fight the ranking to get the version you wanted.
+
+Beyond that:
+
+- Title and artist are matched fuzzily, so a missing apostrophe or a different transliteration still finds the song.
+- Exact-ish matches on both title and artist outrank a strong match on one.
+- Sources that answer within the deadline are ranked; a slow source **degrades the results rather than hanging the search**.
+
+<Note>
+  That last point is why a search occasionally returns fewer rows than you expected and more if you search again. The engine returns what arrived in time. Searching again with the caches warm usually finds the rest.
+</Note>
+
+## Suggestions and history
+
+Typing shows suggestions; the box remembers what you searched before. Clearing your history is under **Settings → Clear cache**, which also drops saved lyrics and temporary files. It does not touch downloads, playlists or likes.
+
+## Browsing instead of searching
+
+**Home** carries rows built from what is popular and what you have been playing — albums, playlists and tracks. Tapping a card opens it as a collection, the same as anything in your library, so Play, Shuffle and long-press all behave identically.
+
+The **genre tiles** on Search resolve the same way.
+
+## When a song will not play
+
+The app skips it, moves on, and tells you which one:
+
+> Skipped "Song Title" — unavailable
+
+That means every source it had for that track failed: a preview-only SoundCloud upload, a region-locked track, or a dead link. The same song is often available from a different source — search it again and pick a row with a different badge.
+
+<Tip>
+  Playback failures are logged with the reason. **Settings → Diagnostics** shows what the engine saw, which turns "some songs just don't work" into a line that says why.
+</Tip>
+
+## Pasting links
+
+The search box takes more than words:
+
+- A **Spotify** playlist, album or track URL → see [Spotify Import](/guide/spotify-import).
+- A direct **SoundCloud** or **YouTube** link → resolved and played directly.

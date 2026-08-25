@@ -1,0 +1,54 @@
+# Gestures
+
+The app is built to be driven one-handed. Nothing below is the only way to do the thing — there is always a button — but these are the fast ways, and they are what the app was designed around.
+
+<GestureGrid />
+
+## Everywhere else
+
+| Gesture | Where | What it does |
+| --- | --- | --- |
+| **Swipe sideways** | Mini player | Next or previous song — the same motion as the artwork |
+| **Tap** | Mini player | Opens the full player |
+| **Long-press** | Any song row | Its actions: play next, add to queue, playlist, artist, album, download |
+| **Drag down** | Any sheet | Dismisses it. So does tapping the dimmed area behind it |
+| **Drag** | Equalizer band | Sets that frequency, snapping to whole decibels |
+| **Drag or tap** | Crossfade bar | Sets the overlap, snapping to whole seconds |
+| **Press and hold, then drag** | Queue row grip | Reorders it |
+| **Back** | Anywhere | Closes what is actually on top, one layer at a time |
+
+## How two gestures share the artwork
+
+The artwork carries a swipe *and* a double-tap, and they never fight, because the axis is decided **before either has taken a frame**:
+
+- A clearly horizontal movement is a **swipe**, claimed as soon as it is unambiguous.
+- A clearly vertical movement falls through to the **dismiss**.
+- A touch that does not move is a **tap**, and the double-tap zones get it.
+
+A swipe also needs a real push before it commits. Let go early and the cover springs back and nothing changes — that threshold is what stops a sloppy double-tap becoming an accidental skip.
+
+<Tip title="Stacking seeks">
+  Double-tap the same side repeatedly and the jumps stack: 10 → 20 → 30 seconds. Once the chain has started, single taps keep counting, so you do not have to keep double-tapping.
+</Tip>
+
+## Back
+
+Back walks the same stack the on-screen arrows do — innermost surface first, one layer per press.
+
+Queue sheet → player → sheet → overlay → tab → Home. On Home with nothing open, one press warns and a second within two seconds exits, so a stray press cannot kill the music by accident.
+
+## About that left edge
+
+Android reserves roughly the outer 20–24 density pixels of each side of the screen for its own back gesture, and it takes those touches **before any app sees them**.
+
+Fix_Music formally asks the system for a 28-pixel strip on the left edge of Home. That is why the drawer swipe works at all, and why it is a narrow strip rather than the whole screen.
+
+<Note>
+  If your phone is set to three-button navigation the conflict disappears entirely. Either way the hamburger in the Home header always opens the drawer.
+</Note>
+
+## Why these are gestures and not buttons
+
+Every one of them replaces a target you would otherwise have to aim at with your thumb, near the top of a screen that is now six inches tall.
+
+The artwork is the biggest target in the app. Making it *do* something — three things, in fact — is worth more than any number of small icons arranged around it.

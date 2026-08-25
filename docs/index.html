@@ -9,7 +9,7 @@
       name="description"
       content="Fix_Music for Android: search, stream and download from JioSaavn, SoundCloud and YouTube. No account. Every gesture, setting and feature, documented."
     />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#0e100f" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Fix_Music — Documentation" />
     <meta
@@ -21,6 +21,28 @@
          one anyway. -->
     <meta property="og:image" content="https://subh-775.github.io/Music_Player/logo.png" />
     <meta property="og:url" content="https://subh-775.github.io/Music_Player/" />
+
+    <script>
+      /*
+       * Before first paint, not in React.
+       *
+       * The theme has to be on <html> before the browser paints anything, or a
+       * reader who chose light gets a black screen for one frame on every
+       * navigation - the flash that makes a site feel cheap. This is the one
+       * thing that cannot wait for a framework to mount.
+       */
+      (function () {
+        try {
+          var saved = localStorage.getItem('fm-theme');
+          if (saved === 'light' || saved === 'dark') {
+            document.documentElement.dataset.theme = saved;
+          }
+        } catch (e) {
+          /* private window, or site data blocked - fall through to the media
+             query in the stylesheet, which needs no JS at all */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,0 +1,50 @@
+# Releases
+
+Every build, with its notes, lives on GitHub.
+
+<div className="hero-actions">
+  <a className="btn btn-primary" href="https://github.com/subh-775/Music_Player/releases/latest">Download the latest APK</a>
+  <a className="btn btn-ghost" href="https://github.com/subh-775/Music_Player/releases">All releases and notes</a>
+</div>
+
+## How to update
+
+Install the new APK **over** the old app. The in-app updater does exactly this — **Settings → Updates → Check for updates**, then Install — and it is the path to prefer.
+
+<Danger title="Never uninstall first">
+  Uninstalling deletes your playlists, liked songs and listening history. Android wipes app data on uninstall and there is no way to get it back.
+
+  Your **downloads** survive either way; they live in your own music folder, outside app storage.
+</Danger>
+
+See **[Updates](/reference/updates)** for how the check, the download and the install actually work.
+
+## Version numbering
+
+`v1.0.12`, `v1.0.11`, and so on. The version is derived from the git tag by CI — nobody types it into a file — so the number in **Settings → App version** is always the tag the build came from and cannot drift from it.
+
+## Recent history
+
+The notes on each release are the real ones. A summary of the arc:
+
+| Version | The headline |
+| --- | --- |
+| **v1.0.12** | This documentation site. Crossfade became a draggable bar again; Help replaced About and Shortcuts |
+| **v1.0.11** | The queue sheet scrolls and opens with your finger. Swiping the app away actually stops playback. The app stopped re-rendering itself on every state change |
+| **v1.0.10** | Download identity fixed, the update dot finally appears, new player layout |
+| **v1.0.9** | The player left its Modal window; audio effects stopped inserting themselves; the drawer moved to a real edge strip |
+| **v1.0.8** | Sheets left their Modal windows; autoplay moved off the JavaScript timer; gestures moved onto the UI thread |
+
+<Note>
+  A pattern worth naming: several of those are the *same* fix applied in different places. Android's `Modal` is a separate window, not a view, and almost every "it opens late" and "it is behind the thing that raised it" complaint traced back to that one fact.
+</Note>
+
+## Reporting a problem
+
+**[Open an issue](https://github.com/subh-775/Music_Player/issues)** with:
+
+- What you did, and what happened instead.
+- Your Android version and phone model.
+- The output of **Settings → Diagnostics** if it is anything to do with playback or sound.
+
+That last one answers most questions on its own.

@@ -1,0 +1,63 @@
+# The Queue
+
+Pull the grip at the bottom of the player, or tap it.
+
+What you see is the playback engine's **real** queue, not a copy kept alongside it in the interface. It cannot drift from what will actually play.
+
+## Reading it
+
+```
+Queue
+Playing Prateek Kuhad · 🎧 OnePlus Nord Buds 2r
+
+[art]  Kasoor                    ← now playing, pinned
+⇄  Shuffling from
+[art]  Kho Gaye Hum Kahan    ≡
+[art]  Tum Se Hi             ≡
+```
+
+- **Now playing is pinned** above the list and stays there however far you scroll.
+- The subtitle names the artist and, when something is connected, where the sound is going.
+- The section heading says where the order came from: **Next up** normally, **Shuffling from** when shuffle is on.
+- Songs marked **Recommended** were added by autoplay rather than by you.
+
+## Reordering
+
+**Press and hold the ≡ handle** on any upcoming song, then drag it where you want it.
+
+Hold rather than grab-on-touch, because the list also has to be scrollable — grabbing on first touch would swallow every fling.
+
+<Note title="Why the playing song has no handle">
+  Removing the track that is currently playing tears down playback — the engine's remove maps onto ExoPlayer's `removeMediaItem`, and removing the active item stops the music. So the playing row is not draggable and nothing can be dropped above it. The alternative is a queue where a mis-drag kills the audio.
+</Note>
+
+A drop is applied optimistically: the list shows the new order immediately and the engine is brought into line behind it. If the engine refuses the move, the list snaps back to the truth rather than showing you a lie.
+
+## Jumping
+
+**Tap any row** to skip straight to it. Everything before it stays in the queue — jumping is not the same as clearing.
+
+## Adding to it
+
+**Long-press any song row**, anywhere in the app:
+
+| Choice | What happens |
+| --- | --- |
+| **Play next** | Inserted directly after the current song |
+| **Add to queue** | Appended to the end |
+
+Several *play next* choices in a row keep **their** order rather than each one jumping ahead of the last, which is the behaviour people expect and almost no player gets right.
+
+## Shuffle
+
+Shuffle reorders everything after the current track. With the queue open you will see the order change under you — that is the engine, not a redraw.
+
+Turning it **off** puts the original order back. It is a toggle, not a re-roll: pressing it repeatedly does not keep shuffling.
+
+## Autoplay
+
+With Autoplay on (the default), the queue tops itself up from a radio built around what you have been listening to, so the music does not simply stop when a playlist runs out.
+
+The top-up rides the engine's own track-change event rather than a timer. That matters more than it sounds: **Android freezes an app's JavaScript timers once the screen is off**, so a timer-driven version would leave the last song of a queue ending in silence until you next picked the phone up. Which is exactly what used to happen.
+
+Turn it off under **Settings → Playback → Autoplay** if you would rather the queue simply end.

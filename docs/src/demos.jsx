@@ -1,16 +1,18 @@
 /**
- * Live reproductions of the app's own controls.
+ * Live reproductions of the app's own controls, and the gesture loops.
  *
  * A screenshot of a slider tells you it exists; a slider you can drag tells you
- * how it behaves. These are the three controls people actually ask about, built
- * with the same rules the app uses — whole-number snapping, a knob that grows
- * under the finger, and a value that is only ever what is on screen.
+ * how it behaves. These follow the same rules the app does — whole-number
+ * snapping, a knob that grows under the finger, a value that is only ever what
+ * is on screen — so the page is a rehearsal rather than a description.
  *
- * Pointer events rather than mouse/touch pairs: one code path covers a mouse, a
- * finger and a stylus, and setPointerCapture means a drag that wanders off the
- * element keeps tracking instead of dying silently.
+ * Pointer events rather than mouse/touch pairs: one path covers a mouse, a
+ * finger and a stylus, and setPointerCapture keeps a drag alive when it wanders
+ * off the element instead of dying silently.
  */
 import {useCallback, useEffect, useRef, useState} from 'react';
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 /* ── Equalizer ───────────────────────────────────────────────────────────── */
 
@@ -30,11 +32,7 @@ const PRESETS = [
   {id: 'vocal', label: 'Vocal', gains: [-3, -2, 2, 5, 5, 3, 0, -2]},
 ];
 
-function hzLabel(hz) {
-  return hz >= 1000 ? `${hz / 1000}k` : String(hz);
-}
-
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const hzLabel = hz => (hz >= 1000 ? `${hz / 1000}k` : String(hz));
 
 export function EqDemo() {
   const [gains, setGains] = useState(PRESETS[1].gains);
@@ -56,18 +54,13 @@ export function EqDemo() {
         <span>drag a band</span>
       </div>
       <p className="demo-sub">
-        Eight bands, −12 to +12&nbsp;dB, snapping to whole decibels. Moving any
-        one of them puts you in Custom.
+        Eight bands, −12 to +12 dB, snapping to whole decibels. Moving any one of
+        them puts you in Custom.
       </p>
 
       <div className="bands">
         {BANDS.map((hz, i) => (
-          <Band
-            key={hz}
-            hz={hz}
-            value={gains[i]}
-            onChange={db => setBand(i, db)}
-          />
+          <Band key={hz} hz={hz} value={gains[i]} onChange={db => setBand(i, db)} />
         ))}
       </div>
 
@@ -97,8 +90,6 @@ export function EqDemo() {
 
 function Band({hz, value, onChange}) {
   const col = useRef(null);
-
-  // 0 at the bottom of the column, 1 at the top.
   const t = (value - MIN_DB) / (MAX_DB - MIN_DB);
 
   const apply = useCallback(
@@ -122,13 +113,28 @@ function Band({hz, value, onChange}) {
       <div
         ref={col}
         className="band-col"
+        role="slider"
+        aria-label={`${hzLabel(hz)} hertz`}
+        aria-valuenow={value}
+        aria-valuemin={MIN_DB}
+        aria-valuemax={MAX_DB}
+        tabIndex={0}
+        onKeyDown={e => {
+          if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            onChange(Math.min(MAX_DB, value + 1));
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            onChange(Math.max(MIN_DB, value - 1));
+          }
+        }}
         onPointerDown={e => {
           e.currentTarget.setPointerCapture(e.pointerId);
           apply(e);
         }}
         onPointerMove={e => {
-          // buttons is a bitmask of what is held down — 0 means this is a hover,
-          // not a drag, and a hover must not move the band.
+          // `buttons` is a bitmask of what is held. Zero means this is a hover,
+          // and a hover must not move the band.
           if (e.buttons) {
             apply(e);
           }
@@ -144,32 +150,22 @@ function Band({hz, value, onChange}) {
 
 /* ── Horizontal bars ─────────────────────────────────────────────────────── */
 
-/**
- * The shared body of the seek bar and the crossfade slider.
- *
- * `steps` of 0 means continuous (the seek bar); any other number snaps to that
- * many divisions on release, which is how the crossfade lands on a whole second
- * rather than on 8.62.
- */
-function HBar({value, max, steps, green, onChange, onCommit}) {
+/** `steps` of 0 means continuous (the seek bar); anything else snaps, which is
+ *  how the crossfade lands on a whole second rather than on 8.62. */
+function HBar({value, max, steps, onChange, label}) {
   const track = useRef(null);
   const [held, setHeld] = useState(false);
 
   const apply = useCallback(
-    (e, commit) => {
+    e => {
       const box = track.current?.getBoundingClientRect();
       if (!box) {
         return;
       }
-      const frac = clamp((e.clientX - box.left) / box.width, 0, 1);
-      const raw = frac * max;
-      const v = steps ? Math.round(raw) : raw;
-      onChange(v);
-      if (commit) {
-        onCommit?.(v);
-      }
+      const raw = clamp((e.clientX - box.left) / box.width, 0, 1) * max;
+      onChange(steps ? Math.round(raw) : raw);
     },
-    [max, steps, onChange, onCommit],
+    [max, steps, onChange],
   );
 
   const pct = (value / max) * 100;
@@ -178,29 +174,35 @@ function HBar({value, max, steps, green, onChange, onCommit}) {
     <div
       ref={track}
       className="hbar"
+      role="slider"
+      aria-label={label}
+      aria-valuenow={Math.round(value)}
+      aria-valuemin={0}
+      aria-valuemax={max}
+      tabIndex={0}
+      onKeyDown={e => {
+        const step = steps ? 1 : max / 40;
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          onChange(Math.min(max, value + step));
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          onChange(Math.max(0, value - step));
+        }
+      }}
       onPointerDown={e => {
         e.currentTarget.setPointerCapture(e.pointerId);
         setHeld(true);
-        apply(e, false);
+        apply(e);
       }}
-      onPointerMove={e => {
-        if (e.buttons) {
-          apply(e, false);
-        }
-      }}
-      onPointerUp={e => {
-        setHeld(false);
-        apply(e, true);
-      }}
+      onPointerMove={e => e.buttons && apply(e)}
+      onPointerUp={() => setHeld(false)}
       onPointerCancel={() => setHeld(false)}>
       <div className="hbar-track">
-        <div
-          className={`hbar-fill${green ? ' green' : ''}`}
-          style={{width: `${pct}%`}}
-        />
+        <div className="hbar-fill" style={{width: `${pct}%`}} />
       </div>
       <div
-        className={`hbar-knob${green ? ' green' : ''}${held ? ' big' : ''}`}
+        className={`hbar-knob${held ? ' big' : ''}`}
         style={{left: `${pct}%`}}
       />
     </div>
@@ -223,12 +225,10 @@ export function SeekDemo() {
         <span>drag or tap</span>
       </div>
       <p className="demo-sub">
-        Scrubbing is continuous; the seek itself happens once, on release — one
-        range request rather than one per pixel.
+        Scrubbing is continuous; the seek happens once, on release — one range
+        request rather than one per pixel.
       </p>
-
-      <HBar value={pos} max={DURATION} steps={0} onChange={setPos} />
-
+      <HBar value={pos} max={DURATION} steps={0} onChange={setPos} label="Position" />
       <div className="hbar-ends">
         <span>{clock(pos)}</span>
         <span>{clock(DURATION)}</span>
@@ -244,29 +244,21 @@ export function CrossfadeDemo() {
     <div className="demo">
       <div className="demo-head">
         <h4>Crossfade</h4>
-        <span>drag or tap</span>
-      </div>
-      <p className="demo-sub">
-        Nought to twelve seconds, snapping to whole ones. Nought reads as Off.
-      </p>
-
-      <div className="demo-head" style={{marginBottom: 2}}>
-        <span style={{textTransform: 'none', letterSpacing: 0, fontSize: 13}}>
-          Overlap the end of one song into the next
-        </span>
         <span className={`hbar-value${secs === 0 ? ' off' : ''}`}>
           {secs > 0 ? `${secs}s` : 'Off'}
         </span>
       </div>
-
+      <p className="demo-sub">
+        Overlap the end of one song into the next. Nought to twelve seconds,
+        snapping to whole ones.
+      </p>
       <HBar
         value={secs}
         max={12}
         steps={12}
-        green
         onChange={v => setSecs(Math.round(v))}
+        label="Crossfade seconds"
       />
-
       <div className="hbar-ends">
         <span>Off</span>
         <span>12s</span>
@@ -277,26 +269,11 @@ export function CrossfadeDemo() {
 
 /* ── Gesture cards ───────────────────────────────────────────────────────── */
 
-export function GestureCard({title, children, stage}) {
-  return (
-    <div className="gcard">
-      <div className="gstage" aria-hidden="true">
-        {stage}
-      </div>
-      <div className="gtext">
-        <h4>{title}</h4>
-        <p>{children}</p>
-      </div>
-    </div>
-  );
-}
-
-/** The phone body every stage is drawn inside. */
 function Phone({children, className = ''}) {
   return <div className={`phone ${className}`}>{children}</div>;
 }
 
-const artAndLines = (
+const art = (
   <>
     <div className="pill-art" />
     <div className="pill-line a" />
@@ -304,68 +281,48 @@ const artAndLines = (
   </>
 );
 
-export const stages = {
-  swipeArt: (
+const STAGES = {
+  swipe: (
     <>
       <Phone>
-        <div className="anim-art">{artAndLines}</div>
+        <div className="anim-art">{art}</div>
       </Phone>
-      <div
-        className="finger f-left"
-        style={{left: 'calc(50% - 10px)', top: '58px'}}
-      />
+      <div className="finger f-left" style={{left: 'calc(50% - 10px)', top: 60}} />
     </>
   ),
-
   doubleTap: (
     <>
       <Phone>
-        {artAndLines}
+        {art}
         <div className="seekflash f-flash">+10s</div>
       </Phone>
-      <div
-        className="finger f-tap"
-        style={{left: 'calc(50% + 16px)', top: '54px'}}
-      />
+      <div className="finger f-tap" style={{left: 'calc(50% + 16px)', top: 56}} />
     </>
   ),
-
   dragDown: (
     <>
-      <Phone className="anim-drop">{artAndLines}</Phone>
-      <div
-        className="finger f-down"
-        style={{left: 'calc(50% - 10px)', top: '24px'}}
-      />
+      <Phone className="anim-drop">{art}</Phone>
+      <div className="finger f-down" style={{left: 'calc(50% - 10px)', top: 26}} />
     </>
   ),
-
-  pullQueue: (
+  pullUp: (
     <>
       <Phone>
-        {artAndLines}
+        {art}
         <div className="sheet-up anim-pull" />
       </Phone>
-      <div
-        className="finger f-up"
-        style={{left: 'calc(50% - 10px)', top: '104px'}}
-      />
+      <div className="finger f-up" style={{left: 'calc(50% - 10px)', top: 106}} />
     </>
   ),
-
-  edgeDrawer: (
+  edge: (
     <>
       <Phone>
-        {artAndLines}
+        {art}
         <div className="drawer-in anim-drawer" />
       </Phone>
-      <div
-        className="finger f-right"
-        style={{left: 'calc(50% - 34px)', top: '64px'}}
-      />
+      <div className="finger f-right" style={{left: 'calc(50% - 34px)', top: 66}} />
     </>
   ),
-
   reorder: (
     <>
       <Phone>
@@ -373,18 +330,52 @@ export const stages = {
         <div className="qrow r2" />
         <div className="qrow r3 anim-lift" />
       </Phone>
-      <div
-        className="finger f-up"
-        style={{left: 'calc(50% + 26px)', top: '106px'}}
-      />
+      <div className="finger f-up" style={{left: 'calc(50% + 26px)', top: 108}} />
     </>
   ),
 };
 
-/** Pauses every looping animation while the section is off screen. A grid of
- *  six infinite CSS loops running behind content nobody is looking at is a
- *  battery cost with no benefit. */
-export function useAnimationGate(ref) {
+const CARDS = [
+  [
+    'swipe',
+    'Swipe the artwork',
+    'Left for the next song, right for the previous one. The incoming title travels with the cover, so you can see where you are heading before you let go — and you can change your mind mid-drag.',
+  ],
+  [
+    'doubleTap',
+    'Double-tap to seek',
+    'Two taps on the right half of the artwork jump forward ten seconds; the left half goes back. Consecutive taps stack, so a quick triple-tap goes twenty and a fourth thirty.',
+  ],
+  [
+    'dragDown',
+    'Drag down to minimise',
+    'From the top strip or from the artwork. Let go past about a third of the way and it finishes the slide by itself, carrying the speed you gave it; let go early and it springs back.',
+  ],
+  [
+    'pullUp',
+    'Pull up the queue',
+    'From the grip at the bottom of the player. It opens as the drag is recognised rather than when you let go, so the sheet is already on its way up under your finger. Push back down to change your mind.',
+  ],
+  [
+    'edge',
+    'Swipe in from the edge',
+    'On Home, drag in from the left edge for the drawer. The panel tracks your finger from the first pixel; the release decides whether it opens or returns.',
+  ],
+  [
+    'reorder',
+    'Hold a grip to reorder',
+    'In the queue, press and hold the handle on any upcoming song and drag it where you want it. The playing track stays pinned and cannot be moved — moving it would stop the music.',
+  ],
+];
+
+/**
+ * Every loop pauses while the grid is off screen. Six infinite CSS animations
+ * running behind content nobody is looking at is a battery cost with no
+ * benefit, and on a phone that is a real one.
+ */
+export function GestureGrid() {
+  const ref = useRef(null);
+
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof IntersectionObserver === 'undefined') {
@@ -392,19 +383,30 @@ export function useAnimationGate(ref) {
     }
     const io = new IntersectionObserver(
       ([entry]) => {
-        el.style.setProperty(
-          'animation-play-state',
-          entry.isIntersecting ? 'running' : 'paused',
-        );
-        el.querySelectorAll('*').forEach(node => {
-          node.style.animationPlayState = entry.isIntersecting
-            ? 'running'
-            : 'paused';
+        const state = entry.isIntersecting ? 'running' : 'paused';
+        el.querySelectorAll('*').forEach(n => {
+          n.style.animationPlayState = state;
         });
       },
-      {rootMargin: '120px'},
+      {rootMargin: '140px'},
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [ref]);
+  }, []);
+
+  return (
+    <div className="gestures" ref={ref}>
+      {CARDS.map(([stage, title, body]) => (
+        <div className="gcard" key={stage}>
+          <div className="gstage" aria-hidden="true">
+            {STAGES[stage]}
+          </div>
+          <div className="gtext">
+            <h4>{title}</h4>
+            <p>{body}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

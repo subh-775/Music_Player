@@ -1,0 +1,69 @@
+# Sound & Quality
+
+Everything that changes what comes out of the speaker, and what each control is actually doing underneath.
+
+## Streaming quality
+
+| Setting | Bitrate | Rough data per hour |
+| --- | --- | --- |
+| **Auto** | Source's choice | Varies |
+| **Low** | 96 kbps | ~43 MB |
+| **Normal** | 128 kbps | ~58 MB |
+| **High** | 256 kbps | ~115 MB |
+| **Very High** | 320 kbps | ~144 MB |
+
+The setting is a **ceiling**. Asking for 320 does not conjure a 320 kbps stream out of a source that only publishes 128 — you get that source's best, and the badge on the row says what you actually got.
+
+That is why the badge exists at all. Without it, "Very High" in Settings and a 128 kbps stream in your ears are indistinguishable.
+
+<Note>
+  On a metered connection, **Normal** is the honest default. The difference between 128 and 320 on phone speakers or budget earbuds is far smaller than the difference in your data bill.
+</Note>
+
+## Crossfade
+
+Overlaps the end of one song into the start of the next, 0–12 seconds.
+
+<CrossfadeDemo />
+
+Nought is off — the right answer for albums that were sequenced to run together, where a crossfade destroys a transition the artist built.
+
+The overlap is a real fade on both tracks, not a cut. Near the end of a song the outgoing track ramps down while the incoming one ramps up, which is why the setting is in seconds rather than being a switch.
+
+<Warn>
+  Crossfade and **Repeat this song** do not combine usefully: a track crossfading into itself is a track played twice, quietly, over itself. Repeat wins.
+</Warn>
+
+## Normalize volume
+
+Evens out perceived loudness between tracks, so a quiet 1970s master and a loudness-war remaster sit at roughly the same level.
+
+It is implemented as a gain on the **live audio session**, which means:
+
+- It takes effect immediately, on the song already playing.
+- It costs literally nothing when switched off — no effect is created at all.
+- It cannot make a quiet recording sound like a loud one; it moves the level, not the dynamics.
+
+## Equalizer
+
+Eight bands, ±12 dB, interpolated onto your device's real hardware bands. It has its own page — **[Equalizer](/guide/equalizer)**.
+
+## Output devices
+
+When something other than the phone speaker is connected, the app says so: a green headphones glyph and the device name, on the mini player and in the full player.
+
+It is there to answer one specific question — *why is nothing coming out of my phone* — which is almost always a headset that reconnected without you noticing.
+
+## What the app does not do
+
+Worth stating plainly, because their absence is deliberate:
+
+- **No upscaling.** A 128 kbps source is a 128 kbps source. Nothing here claims to add detail that was never encoded.
+- **No "hi-res" badge.** The badge reports the stream's real bitrate.
+- **No loudness war of its own.** Normalize moves quiet things up toward a target, it does not push everything to the ceiling.
+
+## Bluetooth and codecs
+
+Codec selection is Android's, not the app's. Whether your headphones get SBC, AAC, aptX or LDAC is negotiated between the phone and the headset, and it is visible in Android's own **Developer options → Bluetooth audio codec**.
+
+The app hands Android decoded audio and Android does the rest, which is why a codec that sounds bad in this app sounds bad in every app.
