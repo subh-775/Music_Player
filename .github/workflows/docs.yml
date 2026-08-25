@@ -7,12 +7,28 @@ name: Documentation
 # fires on docs changes, so neither can ever be waiting on the other. A docs
 # typo does not rebuild an APK, and a code-only release does not redeploy a page
 # that did not change.
+#
+# ## Why `main` and not `mobile`, where the work happens
+#
+# Enabling Pages creates a `github-pages` environment with a deployment branch
+# policy that permits the DEFAULT branch and nothing else. A push to `mobile`
+# therefore builds perfectly and is then refused at the deploy step with
+# "Branch mobile is not allowed to deploy to github-pages due to environment
+# protection rules" — which is the environment doing its job, not a
+# misconfiguration.
+#
+# Publishing from the default branch is also the more honest rule: the docs
+# describe the app people can actually install, and merging to `main` is what
+# says a change is real. Pointing this at `mobile` instead would need `mobile`
+# added under Settings → Environments → github-pages → Deployment branches, and
+# until someone did that every docs commit would leave a red run behind.
 on:
   push:
-    branches: [mobile]
+    branches: [main]
     paths:
       - "docs/**"
       - ".github/workflows/docs.yml"
+  # Run it by hand from the Actions tab — from `main`, for the reason above.
   workflow_dispatch:
 
 # The three the deploy action needs. `id-token` is what lets Pages verify the
