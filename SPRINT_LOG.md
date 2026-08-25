@@ -788,6 +788,83 @@ momentary level step. It has to: band count and gain range can only be read off
 a live `Equalizer`.
 
 
+---
+
+## v1.0.12 — documentation site, and Help replaces About
+
+**The site**
+
+`docs/` is a Vite + React single page, deployed to
+<https://subh-775.github.io/Music_Player/> by `.github/workflows/docs.yml` on
+any push to `mobile` that touches it. Path-filtered so it can never collide with
+the release workflow, which fires on `v*` tags.
+
+It lives in the app's own repository on purpose. Every number on the page — the
+eight EQ bands, the ±12 dB range, the twelve-second crossfade ceiling, the
+ten-second seek step, the 28-pixel drawer strip — is the value the code actually
+uses, and keeping the two in one repo is what stops them drifting apart. Written
+against `src/`, not from memory.
+
+The palette is `src/theme.ts` verbatim rather than approximated, so the page and
+a screenshot of the app sit beside each other without either looking like a copy
+of the other. The mobile navigation is a left drawer with a scrim — the app's own
+drawer, on purpose.
+
+Three controls are reproduced as working demos rather than screenshots: the
+equalizer (eight draggable bands, whole-dB snapping, the real presets), the seek
+bar, and the new crossfade slider. A screenshot of a slider says it exists; a
+slider you can drag says how it behaves. Six gesture cards animate the motions
+that have no still image — swipe, double-tap, drag-down, pull-up, edge-swipe,
+reorder — and pause themselves when scrolled off screen.
+
+Two things caught in the build rather than in review:
+- `og:image` as `/logo.png` would have shipped dead. Vite rewrites `href` and
+  `src` against the base path and never a `meta content` attribute, and a
+  crawler cannot resolve a relative URL anyway. Absolute now.
+- `touch-action: none` on the demo panels would have made 250px-tall blocks of
+  the page unscrollable on a phone: the drag would work and reading past it
+  would not. It is on the 26px band columns only, and `pan-y` on the horizontal
+  bars, so a vertical swipe is always the page.
+
+**Crossfade is a bar again**
+
+It became a ‹‹ 9s ›› stepper because an earlier draggable bar was fiddly to land
+on an exact second. That bar was fiddly for a reason this one does not share: it
+ran on the JS thread so the fill trailed the finger, and it reported a continuous
+value the label then rounded — you could not see which second you were on until
+you let go. This one is the equalizer band's machinery turned on its side: a
+shared value written straight from the worklet, a readout derived from the
+position that crosses to JS only when the whole second changes, and a release
+that snaps the fill to the second it committed.
+
+The gesture is horizontal-only and needs no `blocksExternalGesture`, unlike the
+EQ. Android's vertical ScrollView intercepts on vertical travel past the touch
+slop and ignores horizontal travel entirely, so `activeOffsetX` + `failOffsetY`
+is sufficient — the equalizer needed more because its band drags along the SAME
+axis as its scroller.
+
+**Help replaces About and Shortcuts**
+
+- Settings' **About** section is gone. It held one row pointing at the source
+  repository, which answers "how is this built" — not the question anyone taps
+  Help to ask.
+- **Shortcuts** is gone from the drawer, and `TipsScreen.tsx` is deleted with
+  it. It was a list of gestures maintained by hand inside the app: it went stale
+  every time a gesture changed, and it could only ever describe the version you
+  had already installed. (Settings' `panel === 'tips'` branch went too — nothing
+  had set it since v1.0.10.)
+- **Help** takes its place in the drawer and opens the documentation. Handled in
+  App rather than inside Sidebar, so every drawer destination is still resolved
+  in one place: the drawer says what was tapped, App says what that means.
+
+One door, not three.
+
+**Pages needs enabling once**
+
+Repository → Settings → Pages → Source: **GitHub Actions**. Until that is set the
+workflow builds and the deploy step fails; nothing else is affected.
+
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

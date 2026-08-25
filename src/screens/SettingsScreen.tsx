@@ -1,9 +1,8 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Animated,
   BackHandler,
   Easing,
-  Linking,
   NativeModules,
   ScrollView,
   StyleSheet,
@@ -15,17 +14,24 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  ExternalLink,
   Eye,
   Gauge,
   HardDrive,
-  Info,
   Radio,
   RefreshCw,
   SlidersHorizontal,
 } from 'lucide-react-native';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+// Aliased: this file already has react-native's own Animated, for the refresh
+// glyph's rotation loop. Two different `Animated`s in one file is a bug waiting
+// to be written.
+import ReAnimated, {
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {C, S, T} from '../theme';
 import {
   appVersion,
@@ -42,7 +48,6 @@ import {createStore, useStoreValue} from '../storage';
 import {clearSearchHistory} from '../searchHistory';
 import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
-import {TipsScreen} from './TipsScreen';
 import {ConfirmModal} from '../components/ConfirmModal';
 import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
@@ -55,8 +60,6 @@ import {
   startSleepTimer,
   useSleepTimer,
 } from '../sleepTimer';
-
-const DOCS_URL = 'https://github.com/subh-775/Music_Player';
 
 function formatBytes(n: number): string {
   if (n < 1024) {
@@ -265,55 +268,160 @@ function ToggleRow({
 
 const CROSSFADE_MAX = 12;
 
+/** Position along the track (0..1) for a touch at `x` on a track `w` wide. */
+function fracAt(x: number, w: number): number {
+  'worklet';
+  return Math.max(0, Math.min(1, x / (w || 1)));
+}
+
+/** Whole seconds for a track position — the value is only ever an integer. */
+function secsAt(f: number): number {
+  'worklet';
+  return Math.round(f * CROSSFADE_MAX);
+}
+
 /**
- * The crossfade control: a plain −/+ stepper (0–12s), 0 reads as Off.
+ * The crossfade control: a horizontal bar you drag, 0–12s, 0 reads as Off.
  *
- * Replaced the draggable bar — precise dragging on a thin track was fiddly to
- * land on an exact second. Two big taps are exact and comfortable one-handed.
- * The number pops on each change so the press registers.
+ * It was a ‹‹ 9s ›› stepper because an earlier draggable bar was fiddly to land
+ * on an exact second. That bar was fiddly for a reason this one does not share:
+ * it ran on the JS thread, so the fill trailed the finger, and it reported a
+ * continuous value the label then rounded — you could not see which second you
+ * were on until you let go. Here the fill is a shared value written straight
+ * from the worklet, the readout is derived from the position and crosses to JS
+ * only when the WHOLE second changes, and the release snaps the fill to the
+ * second it committed. Same machinery as the equalizer bands.
+ *
+ * The gesture is horizontal-only on purpose. Android's vertical ScrollView
+ * intercepts on vertical travel past the touch slop and ignores horizontal
+ * travel entirely, so activeOffsetX + failOffsetY is enough here — unlike the
+ * equalizer, where the band drags along the SAME axis as its scroller and needs
+ * blocksExternalGesture to stop the touch being taken.
  */
-function CrossfadeStepper({
+function CrossfadeSlider({
   value,
   onChange,
 }: {
   value: number;
   onChange: (secs: number) => void;
 }) {
-  const step = (delta: number) => {
-    const next = Math.max(0, Math.min(CROSSFADE_MAX, value + delta));
-    if (next !== value) {
-      onChange(next);
+  const t = useSharedValue(value / CROSSFADE_MAX);
+  /** The track's real measured width, so the worklet never has to ask JS. */
+  const w = useSharedValue(1);
+  /** 0 at rest, 1 while held — the thumb grows under the finger. */
+  const grow = useSharedValue(0);
+  const [shown, setShown] = useState(Math.round(value));
+  const dragging = useRef(false);
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
+
+  // Follow the setting when it changes from OUTSIDE a drag (a reset, mostly).
+  useEffect(() => {
+    if (!dragging.current) {
+      t.value = value / CROSSFADE_MAX;
     }
-  };
-  const atMin = value <= 0;
-  const atMax = value >= CROSSFADE_MAX;
+  }, [value, t]);
+
+  // The readout, derived from the position rather than pushed by the gesture,
+  // so it is right whoever moved the bar — and it reaches JS about twelve times
+  // across a full drag instead of sixty times a second.
+  useAnimatedReaction(
+    () => secsAt(t.value),
+    (secs, prev) => {
+      if (secs !== prev) {
+        runOnJS(setShown)(secs);
+      }
+    },
+  );
+
+  const setDragging = useCallback((on: boolean) => {
+    dragging.current = on;
+  }, []);
+  const commit = useCallback((secs: number) => changeRef.current(secs), []);
+
+  const gesture = useMemo(() => {
+    const scrub = Gesture.Pan()
+      .activeOffsetX([-4, 4])
+      .failOffsetY([-14, 14])
+      .onBegin(() => {
+        runOnJS(setDragging)(true);
+      })
+      .onStart(e => {
+        grow.value = withTiming(1, {duration: 120});
+        t.value = fracAt(e.x, w.value);
+      })
+      .onUpdate(e => {
+        t.value = fracAt(e.x, w.value);
+      })
+      .onEnd(() => {
+        // Snap the FILL to the second being committed, so what is on screen and
+        // what was stored are the same thing.
+        const secs = secsAt(t.value);
+        t.value = withTiming(secs / CROSSFADE_MAX, {duration: 90});
+        runOnJS(commit)(secs);
+      })
+      .onFinalize(() => {
+        grow.value = withTiming(0, {duration: 180});
+        runOnJS(setDragging)(false);
+      });
+
+    // Tap to jump. A Pan cannot serve this without activating on touch-down,
+    // and activating on touch-down would take every touch that was meant for
+    // the page scroll.
+    const jump = Gesture.Tap()
+      .maxDuration(400)
+      .onEnd((e, success) => {
+        if (!success) {
+          return;
+        }
+        const secs = secsAt(fracAt(e.x, w.value));
+        t.value = withTiming(secs / CROSSFADE_MAX, {duration: 120});
+        runOnJS(commit)(secs);
+      });
+
+    return Gesture.Race(scrub, jump);
+  }, [grow, t, w, setDragging, commit]);
+
+  const fillStyle = useAnimatedStyle(() => ({width: `${t.value * 100}%`}));
+  const thumbStyle = useAnimatedStyle(() => ({
+    left: `${t.value * 100}%`,
+    transform: [{scale: 1 + grow.value * 0.3}],
+  }));
 
   return (
-    <View style={styles.row}>
-      <View style={styles.rowText}>
-        <Text style={styles.rowLabel}>Crossfade</Text>
-        <Text style={styles.rowHint}>
-          Overlap the end of one song into the next
+    <View style={styles.slider}>
+      <View style={styles.sliderHead}>
+        <View style={styles.rowText}>
+          <Text style={styles.rowLabel}>Crossfade</Text>
+          <Text style={styles.rowHint}>
+            Overlap the end of one song into the next
+          </Text>
+        </View>
+        <Text style={[styles.sliderValue, shown === 0 && styles.sliderOff]}>
+          {shown > 0 ? `${shown}s` : 'Off'}
         </Text>
       </View>
-      <View style={styles.stepper}>
-        <TouchableOpacity
-          onPress={() => step(-1)}
-          disabled={atMin}
-          hitSlop={8}
-          activeOpacity={0.6}
-          style={styles.stepBtn}>
-          <ChevronsLeft size={22} color={atMin ? C.faint : C.text} />
-        </TouchableOpacity>
-        <Text style={styles.stepValue}>{value > 0 ? `${value}s` : 'Off'}</Text>
-        <TouchableOpacity
-          onPress={() => step(1)}
-          disabled={atMax}
-          hitSlop={8}
-          activeOpacity={0.6}
-          style={styles.stepBtn}>
-          <ChevronsRight size={22} color={atMax ? C.faint : C.text} />
-        </TouchableOpacity>
+
+      {/* ~28px visual, 44px touch (Fitts') — a 4px bar is unhittable. */}
+      <GestureDetector gesture={gesture}>
+        <View
+          style={styles.sliderTouch}
+          onLayout={e => {
+            w.value = e.nativeEvent.layout.width;
+          }}>
+          <View style={styles.sliderTrack}>
+            <ReAnimated.View style={[styles.sliderFill, fillStyle]} />
+          </View>
+          <ReAnimated.View
+            style={[styles.sliderThumb, thumbStyle]}
+            pointerEvents="none"
+          />
+        </View>
+      </GestureDetector>
+
+      <View style={styles.sliderEnds}>
+        <Text style={styles.sliderEnd}>Off</Text>
+        <Text style={styles.sliderEnd}>{CROSSFADE_MAX}s</Text>
       </View>
     </View>
   );
@@ -346,9 +454,7 @@ export function SettingsScreen({
    *  rings it briefly — what the dot on the hamburger now points at. */
   focus?: 'update' | null;
 }) {
-  const [panel, setPanel] = useState<'equalizer' | 'tips' | 'playback' | null>(
-    null,
-  );
+  const [panel, setPanel] = useState<'equalizer' | 'playback' | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -365,7 +471,7 @@ export function SettingsScreen({
   const updateY = useRef(0);
   const [glow, setGlow] = useState(false);
 
-  // A sub-panel (Equalizer, Tips) must catch the hardware back itself and
+  // A sub-panel (Equalizer, Playback) must catch the hardware back itself and
   // return to Settings — NOT fall through to the app-level handler, which would
   // close Settings entirely and drop you on Home. Registered after the app's
   // handler, so it runs first; when no panel is open it declines and the app's
@@ -567,9 +673,6 @@ export function SettingsScreen({
   if (panel === 'equalizer') {
     return <EqualizerScreen onClose={() => setPanel(null)} />;
   }
-  if (panel === 'tips') {
-    return <TipsScreen onClose={() => setPanel(null)} />;
-  }
   if (panel === 'playback') {
     return (
       <View style={styles.wrap}>
@@ -607,7 +710,7 @@ export function SettingsScreen({
           </Section>
 
           <Section title="Crossfade">
-            <CrossfadeStepper
+            <CrossfadeSlider
               value={settings.crossfadeDuration}
               onChange={secs => writeSetting('crossfadeDuration', secs)}
             />
@@ -927,20 +1030,6 @@ export function SettingsScreen({
           </Section>
         </View>
 
-        {/* Shortcuts used to live here as well as in the drawer. One home
-              each: gestures are in the drawer, this screen is settings. */}
-        <Section title="About" Icon={Info}>
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.7}
-            onPress={() => Linking.openURL(DOCS_URL).catch(() => {})}>
-            <Text style={[styles.rowLabel, styles.rowText]}>
-              Help &amp; documentation
-            </Text>
-            <ExternalLink size={18} color={C.faint} />
-          </TouchableOpacity>
-        </Section>
-
         <TouchableOpacity
           style={styles.reset}
           activeOpacity={0.7}
@@ -1101,8 +1190,43 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     marginTop: -6,
   },
-  stepper: {flexDirection: 'row', alignItems: 'center', gap: 2},
-  stepBtn: {padding: 6, borderRadius: 999},
+  slider: {paddingHorizontal: S.gutter, paddingTop: 14, paddingBottom: 6},
+  sliderHead: {flexDirection: 'row', alignItems: 'flex-start', gap: 14},
+  sliderValue: {
+    ...T.rowTitle,
+    color: C.accent,
+    fontSize: 16,
+    // Tabular, or the whole row twitches sideways every time the number goes
+    // from one digit to two while you are dragging.
+    fontVariant: ['tabular-nums'],
+    minWidth: 40,
+    textAlign: 'right',
+  },
+  sliderOff: {color: C.faint},
+  sliderTouch: {justifyContent: 'center', height: 44, marginTop: 4},
+  sliderTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.13)',
+    overflow: 'hidden',
+  },
+  sliderFill: {height: '100%', backgroundColor: C.accent, borderRadius: 2},
+  sliderThumb: {
+    position: 'absolute',
+    // Half the thumb's width, so it sits centred on the value.
+    marginLeft: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: C.accentBright,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    shadowOffset: {width: 0, height: 1},
+    elevation: 3,
+  },
+  sliderEnds: {flexDirection: 'row', justifyContent: 'space-between'},
+  sliderEnd: {...T.sub, color: C.faint, fontSize: 11},
   stepValue: {
     color: C.text,
     fontSize: 15,

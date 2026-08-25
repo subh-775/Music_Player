@@ -1,0 +1,70 @@
+name: Documentation
+
+# Builds docs/ and publishes it to GitHub Pages at
+# https://subh-775.github.io/Music_Player/ — the URL the app's Help entry opens.
+#
+# Path-filtered on purpose: the release workflow fires on v* tags and this one
+# fires on docs changes, so neither can ever be waiting on the other. A docs
+# typo does not rebuild an APK, and a code-only release does not redeploy a page
+# that did not change.
+on:
+  push:
+    branches: [mobile]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+# The three the deploy action needs. `id-token` is what lets Pages verify the
+# artifact came from this workflow rather than being uploaded by anything else.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, newest wins. cancel-in-progress is safe here because a
+# superseded docs build has nothing to clean up.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      # `ci`, not `install`: the lockfile is committed and the build must use
+      # exactly what was tested rather than resolving fresh versions.
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          # GitHub Pages serves a project repo from /<repo>/. Getting this wrong
+          # is silent — the page loads and every asset 404s.
+          DOCS_BASE: /Music_Player/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

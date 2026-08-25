@@ -1,0 +1,1204 @@
+/*
+ * Fix_Music documentation — the app's own palette, verbatim.
+ *
+ * Every colour here is lifted from src/theme.ts rather than approximated, so a
+ * screenshot of the app and a screenshot of this page sit next to each other
+ * without either looking like a copy of the other. True black is deliberate:
+ * the app targets AMOLED panels where #000 is pixels switched off, and a
+ * near-black docs page beside it reads as grey.
+ */
+:root {
+  --bg: #000000;
+  --surface: #121212;
+  --surface-hi: #1c1c1c;
+  --text: #f4f5f7;
+  --sub: #9096a2;
+  --faint: #5c626e;
+  --accent: #1db954;
+  --accent-bright: #1ed760;
+  --danger: #ff6b6b;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  --top-h: 60px;
+  --side-w: 244px;
+  --measure: 780px;
+
+  /* Decelerate in, accelerate out — never the default. The app's sheets use
+     exactly this curve, and it is what stops motion feeling like latency. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--accent-bright);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+::selection {
+  background: rgba(29, 185, 84, 0.3);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+
+.top {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--top-h);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  font-size: 16px;
+}
+.brand:hover {
+  text-decoration: none;
+}
+.brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: block;
+}
+.brand small {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--faint);
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.top-spacer {
+  flex: 1;
+}
+
+.top-links {
+  display: none;
+  gap: 4px;
+}
+.top-links a {
+  color: var(--sub);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 7px 11px;
+  border-radius: 8px;
+  transition: color 0.15s, background 0.15s;
+}
+.top-links a:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  text-decoration: none;
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--accent);
+  color: #04140a;
+  font-weight: 800;
+  font-size: 13.5px;
+  letter-spacing: -0.1px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: transform 0.12s var(--ease-out), background 0.15s;
+}
+.cta:hover {
+  background: var(--accent-bright);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.cta:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.burger {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.burger:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Shell ───────────────────────────────────────────────────────────────── */
+
+.shell {
+  display: block;
+  padding-top: var(--top-h);
+}
+
+.side {
+  display: none;
+}
+
+.main {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 20px 96px;
+}
+
+/* ── Sidebar / drawer nav ────────────────────────────────────────────────── */
+
+.nav-title {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 0 12px;
+  margin: 22px 0 8px;
+}
+
+.nav-link {
+  display: block;
+  position: relative;
+  color: var(--sub);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 9px;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-link:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.045);
+  text-decoration: none;
+}
+.nav-link.on {
+  color: var(--accent-bright);
+  background: rgba(29, 185, 84, 0.09);
+}
+
+/* The mobile drawer is the app's own drawer, on purpose: same 82%-width panel,
+   same scrim, same slide. Someone who has used the app already knows it. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s var(--ease-out);
+}
+.scrim.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 46;
+  width: min(310px, 82vw);
+  padding: 14px 12px 28px;
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  transform: translateX(-102%);
+  transition: transform 0.26s var(--ease-out);
+}
+.drawer.on {
+  transform: translateX(0);
+}
+.drawer .brand {
+  padding: 4px 10px 10px;
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+
+.hero {
+  padding: 68px 0 42px;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+.eyebrow::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(29, 185, 84, 0.16);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(38px, 8vw, 62px);
+  line-height: 1.02;
+  font-weight: 800;
+  letter-spacing: -2px;
+  text-wrap: balance;
+}
+
+.hero .lede {
+  margin: 20px 0 0;
+  font-size: clamp(16px, 2.4vw, 19px);
+  line-height: 1.6;
+  color: var(--sub);
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ghost:hover {
+  border-color: var(--accent);
+  background: rgba(29, 185, 84, 0.07);
+  text-decoration: none;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.fact b {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.fact span {
+  font-size: 12px;
+  color: var(--faint);
+  font-weight: 600;
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.sec {
+  padding: 54px 0 8px;
+  /* Clears the fixed header when an anchor is jumped to. Without it every
+     in-page link lands with the heading hidden behind the bar. */
+  scroll-margin-top: calc(var(--top-h) + 16px);
+}
+.sec + .sec {
+  border-top: 1px solid var(--line);
+}
+
+.sec h2 {
+  margin: 0 0 6px;
+  font-size: clamp(25px, 4.6vw, 33px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1.15;
+}
+
+.sec h3 {
+  margin: 34px 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.sec p {
+  margin: 12px 0;
+  color: var(--sub);
+  max-width: 68ch;
+  text-wrap: pretty;
+}
+.sec p strong,
+.sec li strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.sec ul {
+  margin: 12px 0;
+  padding-left: 20px;
+  color: var(--sub);
+  max-width: 68ch;
+}
+.sec li {
+  margin: 7px 0;
+}
+.sec li::marker {
+  color: var(--faint);
+}
+
+.kicker {
+  margin: 0 0 20px;
+  font-size: 16px;
+  color: var(--sub);
+  max-width: 62ch;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--surface-hi);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1.5px 5px;
+  color: var(--text);
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  margin: 22px 0 6px;
+}
+
+.card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.028),
+    rgba(255, 255, 255, 0)
+  );
+  transition: border-color 0.18s, transform 0.18s var(--ease-out);
+}
+.card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+.card h4 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.card p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--sub);
+}
+.card .ico {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
+  border-radius: 9px;
+  background: rgba(29, 185, 84, 0.12);
+  color: var(--accent-bright);
+}
+
+/* ── Callouts ────────────────────────────────────────────────────────────── */
+
+.note {
+  margin: 22px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 14px;
+  color: var(--sub);
+  max-width: 68ch;
+}
+.note b {
+  color: var(--text);
+}
+.note.warn {
+  border-color: rgba(255, 107, 107, 0.28);
+  background: rgba(255, 107, 107, 0.05);
+}
+.note.tip {
+  border-color: rgba(29, 185, 84, 0.26);
+  background: rgba(29, 185, 84, 0.05);
+}
+
+/* ── Reference tables ────────────────────────────────────────────────────── */
+
+.tablewrap {
+  margin: 20px 0;
+  /* Wide content scrolls inside its own box; the page body must never scroll
+     sideways. */
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 12px 16px;
+  color: var(--sub);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+tr:last-child td {
+  border-bottom: 0;
+}
+td:first-child {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Gesture cards ───────────────────────────────────────────────────────── */
+
+.gestures {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  margin: 24px 0 8px;
+}
+
+.gcard {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.gstage {
+  position: relative;
+  height: 168px;
+  overflow: hidden;
+  background: radial-gradient(
+    120% 90% at 50% 0%,
+    rgba(29, 185, 84, 0.09),
+    rgba(0, 0, 0, 0) 65%
+  );
+  border-bottom: 1px solid var(--line);
+}
+
+/* A phone, abstracted to what the gesture needs: a frame, a surface and a
+   finger. Anything more detailed competes with the motion for attention. */
+.phone {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  width: 96px;
+  height: 140px;
+  border-radius: 13px;
+  border: 1.5px solid var(--line-strong);
+  background: #000;
+  overflow: hidden;
+}
+
+.pill-art {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 14px;
+  height: 62px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #1f7a42, #0f3d22);
+}
+.pill-line {
+  position: absolute;
+  left: 12px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+}
+.pill-line.a {
+  top: 86px;
+  width: 46px;
+}
+.pill-line.b {
+  top: 97px;
+  width: 30px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sheet-up {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 76px;
+  border-radius: 10px 10px 0 0;
+  background: var(--surface-hi);
+  border-top: 1px solid var(--line-strong);
+}
+
+.drawer-in {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 62px;
+  background: var(--surface-hi);
+  border-right: 1px solid var(--line-strong);
+}
+
+.finger {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.12);
+}
+
+.gtext {
+  padding: 15px 16px 17px;
+}
+.gtext h4 {
+  margin: 0 0 4px;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.gtext p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--sub);
+}
+
+/* One loop per gesture. 3.2s is long enough to read and short enough that a
+   grid of them does not feel like a slot machine. */
+@keyframes swipe-art {
+  0%,
+  12% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  46% {
+    transform: translateX(-72px);
+    opacity: 0;
+  }
+  47% {
+    transform: translateX(72px);
+    opacity: 0;
+  }
+  76%,
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes finger-left {
+  0%,
+  12% {
+    transform: translate(28px, 0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  46% {
+    transform: translate(-30px, 0);
+    opacity: 1;
+  }
+  56%,
+  100% {
+    transform: translate(-30px, 0);
+    opacity: 0;
+  }
+}
+@keyframes drop-down {
+  0%,
+  14% {
+    transform: translateY(0);
+  }
+  60% {
+    transform: translateY(128px);
+  }
+  62% {
+    transform: translateY(128px);
+  }
+  92%,
+  100% {
+    transform: translateY(0);
+  }
+}
+@keyframes finger-down {
+  0%,
+  14% {
+    transform: translate(0, -6px);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  60% {
+    transform: translate(0, 96px);
+    opacity: 1;
+  }
+  70%,
+  100% {
+    transform: translate(0, 96px);
+    opacity: 0;
+  }
+}
+@keyframes pull-up {
+  0%,
+  16% {
+    transform: translateY(76px);
+  }
+  56%,
+  84% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(76px);
+  }
+}
+@keyframes finger-up {
+  0%,
+  16% {
+    transform: translate(0, 40px);
+    opacity: 0;
+  }
+  22% {
+    opacity: 1;
+  }
+  56% {
+    transform: translate(0, -22px);
+    opacity: 1;
+  }
+  66%,
+  100% {
+    transform: translate(0, -22px);
+    opacity: 0;
+  }
+}
+@keyframes slide-in {
+  0%,
+  16% {
+    transform: translateX(-62px);
+  }
+  56%,
+  84% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-62px);
+  }
+}
+@keyframes finger-right {
+  0%,
+  16% {
+    transform: translate(-38px, 0);
+    opacity: 0;
+  }
+  22% {
+    opacity: 1;
+  }
+  56% {
+    transform: translate(14px, 0);
+    opacity: 1;
+  }
+  66%,
+  100% {
+    transform: translate(14px, 0);
+    opacity: 0;
+  }
+}
+@keyframes tap-twice {
+  0%,
+  20% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  26% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  36% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  46% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  58%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+@keyframes flash-seek {
+  0%,
+  44% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  56% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  84%,
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+@keyframes lift-row {
+  0%,
+  18% {
+    transform: translateY(0) scale(1);
+    box-shadow: none;
+  }
+  30% {
+    transform: translateY(0) scale(1.06);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  }
+  62% {
+    transform: translateY(-28px) scale(1.06);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  }
+  76%,
+  100% {
+    transform: translateY(-28px) scale(1);
+    box-shadow: none;
+  }
+}
+
+.anim-art {
+  animation: swipe-art 3.4s var(--ease-out) infinite;
+}
+.anim-drop {
+  animation: drop-down 3.4s var(--ease-out) infinite;
+}
+.anim-pull {
+  animation: pull-up 3.4s var(--ease-out) infinite;
+}
+.anim-drawer {
+  animation: slide-in 3.4s var(--ease-out) infinite;
+}
+.anim-lift {
+  animation: lift-row 3.4s var(--ease-out) infinite;
+}
+.f-left {
+  animation: finger-left 3.4s var(--ease-out) infinite;
+}
+.f-down {
+  animation: finger-down 3.4s var(--ease-out) infinite;
+}
+.f-up {
+  animation: finger-up 3.4s var(--ease-out) infinite;
+}
+.f-right {
+  animation: finger-right 3.4s var(--ease-out) infinite;
+}
+.f-tap {
+  animation: tap-twice 3.4s var(--ease-out) infinite;
+}
+.f-flash {
+  animation: flash-seek 3.4s var(--ease-out) infinite;
+}
+
+.seekflash {
+  position: absolute;
+  right: 10px;
+  top: 34px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(29, 185, 84, 0.22);
+  border: 1px solid rgba(29, 185, 84, 0.4);
+  color: var(--accent-bright);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.qrow {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 18px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.qrow.r1 {
+  top: 46px;
+}
+.qrow.r2 {
+  top: 70px;
+}
+.qrow.r3 {
+  top: 94px;
+  background: rgba(29, 185, 84, 0.25);
+}
+
+/* ── Live demos ──────────────────────────────────────────────────────────── */
+
+.demo {
+  margin: 22px 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.demo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+.demo-head h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.demo-head span {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.demo-sub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--faint);
+}
+
+/* Equalizer */
+.bands {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+.band {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: ns-resize;
+}
+.band-db {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+}
+.band-col {
+  position: relative;
+  width: 26px;
+  height: 148px;
+  /* Only the 26px column itself claims the finger. Putting this on the whole
+     demo panel would have made a 250px-tall block of the page unscrollable on
+     a phone — the drag would work and reading past it would not. */
+  touch-action: none;
+}
+.band-track {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.13);
+}
+.band-fill {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.band-knob {
+  position: absolute;
+  left: 50%;
+  width: 15px;
+  height: 15px;
+  margin-left: -7.5px;
+  margin-bottom: -7.5px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.band-hz {
+  margin-top: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--faint);
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.preset {
+  padding: 7px 13px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.preset:hover {
+  border-color: var(--line-strong);
+}
+.preset.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04140a;
+  font-weight: 800;
+}
+
+/* Horizontal bars — seek and crossfade */
+.hbar {
+  position: relative;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  cursor: ew-resize;
+  /* pan-y, not none: a horizontal drag is ours, a vertical one is the page
+     scrolling past. A horizontal control has no business blocking that. */
+  touch-action: pan-y;
+}
+.hbar-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+.hbar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--text);
+}
+.hbar-fill.green {
+  background: var(--accent);
+}
+.hbar-knob {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 0.12s var(--ease-out);
+}
+.hbar-knob.green {
+  background: var(--accent-bright);
+}
+.hbar-knob.big {
+  transform: scale(1.3);
+}
+.hbar-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.hbar-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--accent-bright);
+  font-variant-numeric: tabular-nums;
+}
+.hbar-value.off {
+  color: var(--faint);
+}
+
+/* ── Scroll reveal ───────────────────────────────────────────────────────── */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.6s var(--ease-out), transform 0.6s var(--ease-out);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.foot {
+  border-top: 1px solid var(--line);
+  padding: 34px 20px 54px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 13px;
+}
+.foot a {
+  color: var(--sub);
+}
+.foot .foot-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin-bottom: 16px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (min-width: 720px) {
+  .top {
+    padding: 0 28px;
+  }
+  .main {
+    padding: 0 28px 110px;
+  }
+  .top-links {
+    display: flex;
+  }
+}
+
+@media (min-width: 1060px) {
+  .burger {
+    display: none;
+  }
+  .shell {
+    display: grid;
+    grid-template-columns: var(--side-w) minmax(0, 1fr);
+    gap: 40px;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+  .side {
+    display: block;
+    position: sticky;
+    top: var(--top-h);
+    align-self: start;
+    max-height: calc(100vh - var(--top-h));
+    overflow-y: auto;
+    padding: 8px 0 40px;
+  }
+  .main {
+    margin: 0;
+    padding: 0 0 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}

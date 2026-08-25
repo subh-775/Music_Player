@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BackHandler,
+  Linking,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -15,7 +16,6 @@ import {
   SettingsScreen,
   prefetchSettingsRemote,
 } from './src/screens/SettingsScreen';
-import {TipsScreen} from './src/screens/TipsScreen';
 import {EqualizerScreen} from './src/screens/EqualizerScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
 import {SpotifyImportScreen} from './src/screens/SpotifyImportScreen';
@@ -71,6 +71,15 @@ import {toggleFollow} from './src/artists';
 import {toast} from './src/toast';
 import {diag} from './src/diag';
 
+/**
+ * Where "Help" goes.
+ *
+ * The documentation, not the source repository — the repo answers "how is this
+ * built", which is not the question anyone taps Help to ask. Settings used to
+ * point its About row at the repo for want of anywhere better.
+ */
+const DOCS_URL = 'https://subh-775.github.io/Music_Player/';
+
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
   // A small navigation stack of overlays. These are plain absolutely-positioned
@@ -99,9 +108,6 @@ function Shell() {
    *  you there, so you arrive at the update instead of the top of the list. */
   const [settingsFocus, setSettingsFocus] = useState<'update' | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  /** Shortcuts, opened from the drawer. Its own overlay, not nested inside
-   *  Settings — see navigateFromDrawer. */
-  const [tipsOpen, setTipsOpen] = useState(false);
   /** Equalizer, same reasoning as Shortcuts. Settings keeps its own row and
    *  both point at the one component. */
   const [eqOpen, setEqOpen] = useState(false);
@@ -347,7 +353,6 @@ function Shell() {
     setArtist(null);
     setImportUrl(null);
     setSettingsOpen(false);
-    setTipsOpen(false);
     setActivity(null);
   }, []);
 
@@ -380,10 +385,6 @@ function Shell() {
     if (settingsOpen) {
       setSettingsOpen(false);
       setSettingsFocus(null);
-      return true;
-    }
-    if (tipsOpen) {
-      setTipsOpen(false);
       return true;
     }
     // The Equalizer was simply never in this chain. It is a full-screen overlay
@@ -510,14 +511,14 @@ function Shell() {
         setEqOpen(true);
       } else if (dest === 'sleep') {
         setSleepOpen(true);
-      } else if (dest === 'shortcuts') {
-        // Its OWN overlay, not a panel pushed inside Settings. It used to be —
-        // Settings would mount underneath with panel='tips' — so back from
-        // Shortcuts revealed a full Settings LIST the user never asked to open,
-        // landing them somewhere unrelated to what they tapped in the drawer.
-        // Shortcuts is reached from the drawer; its back should return to
-        // wherever the drawer was opened from, same as every other drawer item.
-        setTipsOpen(true);
+      } else if (dest === 'help') {
+        // The one drawer item that is not an overlay: it leaves the app. Handled
+        // HERE rather than inside Sidebar so every destination is still resolved
+        // in one place — the drawer says what was tapped, this says what that
+        // means.
+        Linking.openURL(DOCS_URL).catch(() =>
+          toast('Could not open the documentation'),
+        );
       } else if (dest === 'stats') {
         setActivity(dest);
       }
@@ -661,12 +662,6 @@ function Shell() {
                 setSettingsFocus(null);
               }}
             />
-          </View>
-        )}
-
-        {tipsOpen && (
-          <View style={StyleSheet.absoluteFill}>
-            <TipsScreen onClose={() => setTipsOpen(false)} />
           </View>
         )}
 

@@ -34,9 +34,9 @@ import Animated, {
   useAnimatedStyle,
 } from 'react-native-reanimated';
 import {
+  BookOpen,
   ChevronRight,
   Clock,
-  Keyboard,
   Moon,
   Settings as SettingsIcon,
   SlidersHorizontal,
@@ -50,12 +50,7 @@ import {DRAWER_W, drawerX, settleDrawer} from '../drawer';
 
 const ICON = require('../assets/app-icon.png');
 
-export type SidebarDest =
-  | 'settings'
-  | 'shortcuts'
-  | 'stats'
-  | 'sleep'
-  | 'equalizer';
+export type SidebarDest = 'settings' | 'help' | 'stats' | 'sleep' | 'equalizer';
 
 // No per-item hint text any more — "Everything you have listened to" under
 // "Recents" was explaining a label that already explains itself, and it made
@@ -69,11 +64,18 @@ export type SidebarDest =
 // it, one swipe from where you already are. Recents is gone too — it was the
 // same history "Your sound" already presents, sorted differently, and one
 // listening page is enough.
+//
+// Shortcuts is gone as well, and so is the screen behind it. It was a list of
+// gestures maintained by hand inside the app, which meant it went stale every
+// time a gesture changed and it could only ever describe the version you had
+// already installed. Help opens the documentation instead — the same content,
+// kept next to the code that implements it, and reachable before you install
+// anything. That is also why "About" left Settings: one door, not two.
 const ITEMS: {id: SidebarDest; label: string; Icon: typeof Clock}[] = [
   {id: 'sleep', label: 'Sleep timer', Icon: Moon},
   {id: 'equalizer', label: 'Equalizer', Icon: SlidersHorizontal},
   {id: 'stats', label: 'Your sound', Icon: Sparkles},
-  {id: 'shortcuts', label: 'Shortcuts', Icon: Keyboard},
+  {id: 'help', label: 'Help', Icon: BookOpen},
   {id: 'settings', label: 'Settings', Icon: SettingsIcon},
 ];
 
