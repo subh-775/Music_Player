@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Tags are needed to work out the version of a MANUAL release build.
+          # The default shallow clone has none.
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -66,6 +70,31 @@ jobs:
         working-directory: android
         run: |
           if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
+            # Derive versionName/versionCode from the tag (v1.2.3 -> 1.2.3), so
+            # the installed app reports the release version and the in-app
+            # updater compares correctly.
+            case "$GITHUB_REF_NAME" in
+              v*) VER="${GITHUB_REF_NAME#v}" ;;
+              *)
+                # MANUAL release build (no tag). It used to fall through to the
+                # gradle defaults — versionCode 1 — which Android rejects as a
+                # DOWNGRADE against any installed release, surfacing on most
+                # ROMs as "package appears to be invalid". So: take the newest
+                # tag and bump the patch, giving a code above whatever is
+                # installed and equal to the release this is a test build for
+                # (an equal code still installs over itself).
+                LAST="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0)"
+                B="${LAST#v}"
+                VER="$(echo "$B" | awk -F. '{printf "%d.%d.%d", $1, $2, $3 + 1}')"
+                echo "No tag — test build versioned $VER from last tag $LAST"
+                ;;
+            esac
+            MA="$(echo "$VER" | cut -d. -f1)"; MA="${MA:-0}"
+            MI="$(echo "$VER" | cut -d. -f2)"; MI="${MI:-0}"
+            PA="$(echo "$VER" | cut -d. -f3)"; PA="${PA:-0}"
+            export APP_VERSION_NAME="$VER"
+            export APP_VERSION_CODE="$(( MA * 10000 + MI * 100 + PA ))"
+            echo "Building release $APP_VERSION_NAME (code $APP_VERSION_CODE)"
             ./gradlew assembleRelease --no-daemon --stacktrace
           else
             ./gradlew assembleDebug --no-daemon --stacktrace

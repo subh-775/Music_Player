@@ -11,14 +11,39 @@ meant search ranking and cross-source dedup silently did NOTHING on mobile —
 results came back in raw source order, unranked and unfiltered.
 
 Import `fuzz` from here instead and the algorithm behaves the same on both
-platforms; only the speed differs. Song titles are short, so the Python path
-costs microseconds and nothing here is on a hot loop.
+platforms; only the speed differs.
+
+This file used to claim "nothing here is on a hot loop". That was wrong twice
+over: SourceMerger._resolve_key runs token_set_ratio against EVERY existing
+bucket, for every result, from every source (O(n x buckets)), and
+_rank_by_relevance makes three fuzz calls per track. Every one of those bottoms
+out in SequenceMatcher, which is O(n^2) and slow even by CPython standards — so
+a single ~40-result search was building thousands of SequenceMatcher objects.
+
+Hence the cache on `ratio` below: every other method here is defined in terms of
+it, and the same short strings recur constantly (across sources, and again
+between the merge pass and the rank pass), so memoising the one primitive speeds
+up all of them.
 
 Scores are 0-100 floats, matching rapidfuzz.
 """
 
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import List
+
+
+@lru_cache(maxsize=4096)
+def _ratio_cached(s1: str, s2: str) -> float:
+    """The single expensive primitive, memoised.
+
+    Keyed on the arguments IN ORDER. Sorting the pair to halve the key space is
+    tempting and wrong: SequenceMatcher.ratio is not symmetric — it builds its
+    b2j index from the second argument only — and a 3000-pair random check found
+    ratio(a,b) != ratio(b,a) about 13% of the time. Normalising order therefore
+    changes real scores, which changes search ranking.
+    """
+    return SequenceMatcher(None, s1, s2).ratio() * 100.0
 
 try:
     from rapidfuzz import fuzz  # noqa: F401  (re-exported)
@@ -30,6 +55,20 @@ except ImportError:
 
 def _tokens(s: str) -> List[str]:
     return (s or "").split()
+
+
+def _ceiling(s1: str, s2: str) -> float:
+    """The highest score ratio(s1, s2) could possibly return, from lengths alone.
+
+    SequenceMatcher.ratio() is 2*M/T, where T is the combined length and M — the
+    number of matched characters — can never exceed the length of the shorter
+    string. So 200*min/(len1+len2) is an exact upper bound, and costs two len()
+    calls instead of a quadratic match.
+    """
+    l1, l2 = len(s1), len(s2)
+    if not (l1 + l2):
+        return 100.0
+    return 200.0 * min(l1, l2) / (l1 + l2)
 
 
 class _PyFuzz:
@@ -45,7 +84,9 @@ class _PyFuzz:
             return 100.0
         if not s1 or not s2:
             return 0.0
-        return SequenceMatcher(None, s1, s2).ratio() * 100.0
+        if s1 == s2:
+            return 100.0  # the commonest case across sources — skip the matcher
+        return _ratio_cached(s1, s2)
 
     @staticmethod
     def partial_ratio(s1: str, s2: str, **_kw) -> float:
@@ -60,12 +101,30 @@ class _PyFuzz:
         n = len(shorter)
         if n == len(longer):
             return _PyFuzz.ratio(shorter, longer)
+        # A contained substring IS a perfect window — and it is the case this
+        # method exists for ("blinding lights" inside "the weeknd - blinding
+        # lights (official video)"). Checking it costs one C-level scan and
+        # skips the entire sliding loop below, which is the most expensive thing
+        # in the whole module.
+        if shorter in longer:
+            return 100.0
 
         best = 0.0
         # Slide a window the size of the shorter string across the longer one.
-        # Titles are tens of characters, so the quadratic cost is irrelevant.
+        #
+        # The old comment said "the quadratic cost is irrelevant". Measured, it
+        # was the single most expensive thing in search: ratio() is O(n^2) and
+        # this calls it once per window position.
+        #
+        # quick_ratio() is stdlib's own UPPER BOUND on ratio(), computed from a
+        # character multiset in O(n). A window whose upper bound cannot beat the
+        # best score so far cannot possibly win, so its O(n^2) pass is skipped
+        # entirely. This is exact — it changes the cost, never the answer.
         for i in range(len(longer) - n + 1):
-            score = SequenceMatcher(None, shorter, longer[i : i + n]).ratio() * 100.0
+            sm = SequenceMatcher(None, shorter, longer[i : i + n])
+            if sm.quick_ratio() * 100.0 <= best:
+                continue
+            score = sm.ratio() * 100.0
             if score > best:
                 best = score
                 if best == 100.0:
@@ -104,11 +163,21 @@ class _PyFuzz:
         full1 = (base + " " + " ".join(sorted(t1 - t2))).strip()
         full2 = (base + " " + " ".join(sorted(t2 - t1))).strip()
 
-        return max(
-            _PyFuzz.ratio(base, full1),
-            _PyFuzz.ratio(base, full2),
-            _PyFuzz.ratio(full1, full2),
-        )
+        # Take the best of the three pairings, skipping any whose ceiling is
+        # already beaten. SequenceMatcher.ratio() is 2*M/T where M can never
+        # exceed the shorter string's length, so _ceiling() is an exact upper
+        # bound computed from lengths alone — a pair that cannot win never pays
+        # for its O(n^2) compare. This runs against every existing bucket for
+        # every result from every source, so the constant here is what a search
+        # actually costs.
+        best = 0.0
+        for a, b in ((base, full1), (base, full2), (full1, full2)):
+            if _ceiling(a, b) <= best:
+                continue
+            score = _PyFuzz.ratio(a, b)
+            if score > best:
+                best = score
+        return best
 
     @staticmethod
     def WRatio(s1: str, s2: str, **_kw) -> float:

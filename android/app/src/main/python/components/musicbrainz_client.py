@@ -20,6 +20,7 @@ import requests
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
+from components.http import SESSION
 
 
 @dataclass
@@ -397,7 +398,7 @@ class MusicBrainzClient:
         """
         url = f"{self.COVER_ART_URL}/release/{release_mbid}/front-500"
         try:
-            response = requests.head(url, timeout=10, allow_redirects=True)
+            response = SESSION.head(url, timeout=10, allow_redirects=True)
             if response.status_code == 200:
                 return url
         except Exception:
@@ -408,7 +409,7 @@ class MusicBrainzClient:
         """Get all cover art info for a release."""
         url = f"{self.COVER_ART_URL}/release/{release_mbid}"
         try:
-            response = requests.get(url, timeout=10)
+            response = SESSION.get(url, timeout=10)
             if response.status_code == 200:
                 return response.json().get("images", [])
         except Exception:

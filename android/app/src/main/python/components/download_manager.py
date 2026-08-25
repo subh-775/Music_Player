@@ -23,6 +23,7 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional, List, Dict, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, Future
+from components.http import SESSION
 
 try:
     import mutagen
@@ -134,7 +135,11 @@ class DownloadQueueConfig:
     retry_backoff: float = 2.0
     max_retry_delay: float = 60.0
     timeout_seconds: float = 300.0
-    chunk_size: int = 8192
+    # 64KB, not 8KB. Two download loops run in the SAME CPython process as the
+    # audio proxy, so every chunk boundary is a GIL round-trip that playback has
+    # to contend with — which is exactly when stutter shows up. Eight times fewer
+    # boundaries per megabyte, same bytes.
+    chunk_size: int = 65536
     overwrite_existing: bool = False
     skip_existing: bool = False
     auto_start: bool = True
@@ -824,7 +829,7 @@ class MetadataEmbedder:
             try:
                 import requests
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     mime = "image/jpeg"
                     if cover_url.lower().endswith(".png"):
@@ -875,7 +880,7 @@ class MetadataEmbedder:
             try:
                 import requests
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     from mutagen.flac import Picture
 
@@ -926,7 +931,7 @@ class MetadataEmbedder:
             try:
                 import requests
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     mime = (
                         "image/jpeg"
@@ -979,7 +984,7 @@ class MetadataEmbedder:
                 import base64
                 import struct
 
-                resp = requests.get(cover_url, timeout=10)
+                resp = SESSION.get(cover_url, timeout=10)
                 if resp.status_code == 200:
                     pic_data = resp.content
                     mime = (
@@ -1243,6 +1248,8 @@ def scan_downloads(directory: str) -> List[Dict[str, Any]]:
         title = artist = album = ""
         duration_ms = 0
         bitrate = 0
+        isrc = ""
+        has_art = False
 
         # Read tags for album/duration/bitrate (and as a title/artist fallback).
         if MUTAGEN_AVAILABLE:
@@ -1259,6 +1266,10 @@ def scan_downloads(directory: str) -> List[Dict[str, Any]]:
                 album = _first("album")
                 tag_title = _first("title")
                 tag_artist = _first("artist")
+                # MetadataEmbedder writes this on every download, so reading it
+                # back is nearly free — and it is what lets the app match a file
+                # on disk to the catalog track it came from without guessing.
+                isrc = _first("isrc")
                 info = getattr(audio, "info", None)
                 if info is not None:
                     if getattr(info, "length", None):
@@ -1267,6 +1278,21 @@ def scan_downloads(directory: str) -> List[Dict[str, Any]]:
                         bitrate = int(info.bitrate / 1000)
             else:
                 tag_title = tag_artist = ""
+
+            # Whether a cover is embedded. Read from the NON-easy interface,
+            # because the picture frames are not exposed through EasyID3/EasyMP4.
+            # The app uses this to skip the /local/artwork request entirely for
+            # files that have none — which is why some rows sat as blank squares
+            # after a request that was always going to 404.
+            try:
+                raw_tags = mutagen.File(str(p))
+                if raw_tags is not None:
+                    has_art = bool(getattr(raw_tags, "pictures", None)) or any(
+                        str(k).startswith("APIC") or k in ("covr", "WM/Picture")
+                        for k in (getattr(raw_tags, "tags", None) or {})
+                    )
+            except Exception:
+                has_art = False
         else:
             tag_title = tag_artist = ""
 
@@ -1297,6 +1323,8 @@ def scan_downloads(directory: str) -> List[Dict[str, Any]]:
             "codec": p.suffix.lower().lstrip("."),
             "file_size": size,
             "file_path": str(p),
+            "isrc": isrc or None,
+            "has_embedded_art": has_art,
         })
 
     return out

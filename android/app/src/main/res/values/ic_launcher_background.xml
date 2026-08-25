@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Deep indigo, NOT the app's near-black surface.
+       On #121212 the mask left a black disc holding a blue disc, which at icon
+       size just reads as "a blue circle" — the same silhouette as half the
+       music apps on a phone. A saturated ground makes the tile itself the
+       recognisable part, so it stands out in the drawer at a glance. -->
+  <color name="ic_launcher_background">#0E1547</color>
+</resources>

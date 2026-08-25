@@ -20,6 +20,8 @@ or empty module is simply omitted, the page never aborts. Ceiling: unbounded +
 lost on restart (fine for a desktop session); upgrade path = TTL + size cap.
 """
 
+import json
+import os
 import threading
 import time
 
@@ -38,17 +40,69 @@ _cache_lock = threading.Lock()
 _TTL_SECONDS = 6 * 3600
 
 
+def _disk_path(key):
+    """Where a cache entry lives on disk, or None when there is no cache dir.
+
+    Guarded so this module still works off-device (desktop test runs, where
+    android_env was never configured) — it just stays memory-only there.
+    """
+    try:
+        import android_env
+        d = android_env.cache_dir()
+        if not d:
+            return None
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(key))
+        return os.path.join(d, f"home_{safe}.json")
+    except Exception:
+        return None
+
+
 def _cache_get(key):
     with _cache_lock:
         ent = _cache.get(key)
         if ent and (time.time() - ent[0] < _TTL_SECONDS):
             return ent[1]
+
+    # Fall back to disk before going to the network.
+    #
+    # The cache was process-local, so the 6h TTL only ever helped WITHIN one
+    # run — and on Android the process is killed constantly, so in practice
+    # every launch refetched getLaunchData and re-normalised every card, during
+    # the exact seconds Chaquopy is already competing for CPU. Surviving the
+    # process is the whole point of a 6h TTL.
+    path = _disk_path(key)
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                ts, value = json.load(f)
+            if time.time() - ts < _TTL_SECONDS:
+                with _cache_lock:
+                    _cache[key] = (ts, value)
+                return value
+        except Exception:
+            pass  # missing, corrupt or half-written — just refetch
     return None
 
 
 def _cache_put(key, value):
+    now = time.time()
     with _cache_lock:
-        _cache[key] = (time.time(), value)
+        _cache[key] = (now, value)
+    path = _disk_path(key)
+    if not path:
+        return
+    # Written via a temp file and renamed, so a kill mid-write can never leave a
+    # truncated JSON file that every later launch has to fail on first.
+    tmp = f"{path}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump([now, value], f)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _img(url):

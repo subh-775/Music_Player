@@ -106,9 +106,22 @@ class UnifiedTrack:
     provider_ids: Dict[SourceType, str] = field(default_factory=dict)
 
     def get_best_artwork(self, preferred_sizes: List[str] = None) -> Optional[str]:
-        """Get best available artwork URL."""
+        """Get best available artwork URL.
+
+        `source:jiosaavn` leads on purpose, ahead of the numeric sizes. Those
+        numeric keys ("600", "300", "100") only ever come from iTunes — its
+        artwork_100/300/600 fields — and iTunes is reached by a SEPARATE fuzzy
+        search/match than the one that found this track's actual audio. A
+        wrong-but-close iTunes hit (same album, different song — Aashiqui 2's
+        "Phir Se Ud Chala" showing up on "Aasan Nahin Yahan" was one confirmed
+        case) used to win here purely because "600" sorted before "source:x",
+        even though the JioSaavn source supplying the AUDIO already carried the
+        correct cover the whole time. A track's own playing source is the one
+        piece of art that cannot be mismatched by a different search.
+        """
         if preferred_sizes is None:
             preferred_sizes = [
+                "source:jiosaavn",
                 "1200",
                 "1000",
                 "600",
@@ -116,7 +129,6 @@ class UnifiedTrack:
                 "xl",
                 "300",
                 "large",
-                "source:jiosaavn",
                 "source:youtube",
                 "source:soundcloud",
                 "100",

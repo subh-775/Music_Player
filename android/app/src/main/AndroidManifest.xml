@@ -3,6 +3,25 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- In-app update: download the release APK and launch the system installer.
+         The user still confirms the install; this only lets us start it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Audio keeps playing when the app is backgrounded or the screen is off.
+         That requires a foreground service (typed mediaPlayback on API 34+), a
+         wake lock, and — on API 33+ — permission to post its notification, which
+         is also the lock-screen transport UI. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Cleartext is NOT permitted app-wide. network_security_config scopes it
+         to 127.0.0.1/localhost (the embedded Python backend) and leaves every
+         real source TLS-only. The blanket usesCleartextTraffic="true" that used
+         to sit here was redundant while the config was present, and would have
+         silently re-opened cleartext everywhere the moment anyone removed the
+         config attribute. -->
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"
@@ -10,7 +29,6 @@
       android:roundIcon="@mipmap/ic_launcher_round"
       android:allowBackup="false"
       android:theme="@style/AppTheme"
-      android:usesCleartextTraffic="true"
       android:networkSecurityConfig="@xml/network_security_config"
       android:supportsRtl="true">
       <activity
@@ -25,5 +43,18 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- Serves the downloaded update APK to the system installer as a
+           content:// URI (a file:// URI throws FileUriExposedException on
+           API 24+). -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+      </provider>
     </application>
 </manifest>

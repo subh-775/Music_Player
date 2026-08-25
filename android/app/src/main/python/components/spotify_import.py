@@ -14,6 +14,7 @@ import json
 import re
 
 import requests
+from components.http import SESSION
 
 _URL_RE = re.compile(
     r"open\.spotify\.com/(?:intl-[a-z]{2}/)?(playlist|album|track)/([A-Za-z0-9]+)"
@@ -42,7 +43,7 @@ def _norm_ws(s: str) -> str:
 def fetch_tracklist(kind: str, sid: str):
     """Read {name, image, tracks:[{title, artist}]} from Spotify's embed page,
     or None if it can't be read."""
-    r = requests.get(
+    r = SESSION.get(
         f"https://open.spotify.com/embed/{kind}/{sid}",
         headers={
             "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",

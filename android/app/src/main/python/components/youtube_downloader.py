@@ -20,6 +20,7 @@ import subprocess
 from typing import Optional, Dict, List, Any, Callable, Literal
 from dataclasses import dataclass
 from pathlib import Path
+from components.http import SESSION
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,7 @@ class YouTubeClient:
             try:
                 url = f"{instance}/api/v1/search"
                 params = {"q": query, "type": "video", "page": 1}
-                response = requests.get(url, params=params, timeout=10)
+                response = SESSION.get(url, params=params, timeout=10)
                 response.raise_for_status()
                 data = response.json()
 
@@ -762,7 +763,7 @@ class YouTubeClient:
             try:
                 # Get stream info from Invidious
                 api_url = f"{instance}/api/v1/videos/{video_id}"
-                response = requests.get(api_url, timeout=10)
+                response = SESSION.get(api_url, timeout=10)
                 response.raise_for_status()
                 data = response.json()
 

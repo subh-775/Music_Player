@@ -89,10 +89,25 @@ def read_settings() -> dict:
 
 
 def write_settings(data: dict) -> None:
+    """Write settings ATOMICALLY — temp file, then rename.
+
+    write_text() truncates the file and then writes. A kill (Android reclaiming
+    the process) or a concurrent read in that window leaves a truncated or empty
+    file, read_settings() falls back to {}, and every saved preference is gone —
+    which is what "YouTube turns itself off with no logic" looked like from the
+    outside. os.replace is atomic on the same filesystem: a reader sees either
+    the whole old file or the whole new one, never a half-written one.
+    """
+    path = _settings_path()
+    tmp = path.with_suffix(".json.tmp")
     try:
-        _settings_path().write_text(json.dumps(data), "utf-8")
+        tmp.write_text(json.dumps(data), "utf-8")
+        os.replace(tmp, path)
     except Exception:
-        pass
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _writable(path: str) -> bool:
