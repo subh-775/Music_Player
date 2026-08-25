@@ -53,7 +53,13 @@ jobs:
           # is silent — the page loads and every asset 404s.
           DOCS_BASE: /Music_Player/
 
+      # enablement: turns Pages on for the repo if it is not on already, rather
+      # than failing with "Get Pages site failed" and waiting for someone to
+      # find the toggle in Settings. It is the documented way to do this and it
+      # is why `pages: write` is in the permissions block above.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:

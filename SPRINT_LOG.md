@@ -859,10 +859,16 @@ axis as its scroller.
 
 One door, not three.
 
-**Pages needs enabling once**
+**Pages**
 
-Repository → Settings → Pages → Source: **GitHub Actions**. Until that is set the
-workflow builds and the deploy step fails; nothing else is affected.
+The first run failed at `actions/configure-pages` with "Get Pages site failed" —
+Pages was not enabled on the repository. Rather than leave that as a manual step
+in Settings, the workflow passes `enablement: true`, which is what the action's
+own error message suggests and what `permissions: pages: write` is there for. It
+turns Pages on itself on the first run and is a no-op afterwards.
+
+If it ever fails again with the same error, the manual path is Repository →
+Settings → Pages → Source: **GitHub Actions**.
 
 
 ### Standing constraints
