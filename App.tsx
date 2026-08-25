@@ -11,8 +11,12 @@ import {HomeScreen, type QuickDest} from './src/screens/HomeScreen';
 import {ActivityScreen} from './src/screens/ActivityScreen';
 import {SearchScreen} from './src/screens/SearchScreen';
 import {LibraryScreen} from './src/screens/LibraryScreen';
-import {SettingsScreen} from './src/screens/SettingsScreen';
+import {
+  SettingsScreen,
+  prefetchSettingsRemote,
+} from './src/screens/SettingsScreen';
 import {TipsScreen} from './src/screens/TipsScreen';
+import {EqualizerScreen} from './src/screens/EqualizerScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
 import {SpotifyImportScreen} from './src/screens/SpotifyImportScreen';
 import {ArtistScreen} from './src/screens/ArtistScreen';
@@ -23,7 +27,11 @@ import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
 import {UpdateModal} from './src/components/UpdateModal';
-import {checkUpdateOnLaunch, useUpdateAvailable} from './src/update';
+import {
+  checkUpdateOnLaunch,
+  useUpdateAvailable,
+  watchForegroundUpdates,
+} from './src/update';
 import {
   TrackActionSheet,
   type SheetContext,
@@ -94,16 +102,10 @@ function Shell() {
   /** Shortcuts, opened from the drawer. Its own overlay, not nested inside
    *  Settings — see navigateFromDrawer. */
   const [tipsOpen, setTipsOpen] = useState(false);
+  /** Equalizer, same reasoning as Shortcuts. Settings keeps its own row and
+   *  both point at the one component. */
+  const [eqOpen, setEqOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
-  /**
-   * Which pane the player should land on, bumped so the SAME request twice in a
-   * row still takes. A bare 'queue' | null would be swallowed the second time:
-   * the value never changes, so the effect inside the player never re-runs.
-   */
-  const [playerPane, setPlayerPane] = useState<{
-    pane: 'song' | 'queue';
-    nonce: number;
-  } | null>(null);
   const [sleepOpen, setSleepOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
@@ -175,23 +177,29 @@ function Shell() {
     // Silent update check on launch — the popup only appears if a newer release
     // is actually out. Delayed a little so it never competes with cold start.
     const u = setTimeout(checkUpdateOnLaunch, 3500);
+    // …and again on every return to the foreground, because a process kept
+    // alive by the playback service may not launch again for days.
+    watchForegroundUpdates();
     return () => {
       clearTimeout(u);
       clearTimeout(bootCap);
     };
   }, [liftSplash]);
 
-  const play = useCallback(async (track: Track, context?: Track[]) => {
-    try {
-      await playTrack(track, context);
-      setEngine(true);
-    } catch (e) {
-      // A toast, not a bar in the layout: the old notice sat above the mini
-      // player and covered it, hiding the song that was actually playing.
-      diag('play', `"${track?.title}" failed: ${String(e)}`);
-      toast(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+  const play = useCallback(
+    async (track: Track, context?: Track[], originId?: string) => {
+      try {
+        await playTrack(track, context, originId);
+        setEngine(true);
+      } catch (e) {
+        // A toast, not a bar in the layout: the old notice sat above the mini
+        // player and covered it, hiding the song that was actually playing.
+        diag('play', `"${track?.title}" failed: ${String(e)}`);
+        toast(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [],
+  );
 
   /** A single credited artist opens directly; several ask which one first.
    *  Either way the full player closes first — the artist page renders in the
@@ -450,11 +458,20 @@ function Shell() {
     resetDrawer();
     setDrawerOpen(true);
     settleDrawer(true);
+    // Start Settings' four backend reads NOW. Opening the drawer is the only
+    // gesture that ever precedes opening Settings, and it buys the whole
+    // animation plus however long the finger takes to reach the last row — by
+    // which point the answers are usually already back and Settings opens
+    // finished instead of filling in.
+    prefetchSettingsRemote();
   }, []);
 
   /** A drawer pull has begun. Mount without animating — HomeScreen has already
    *  parked the panel off-screen and is about to drive it directly. */
-  const beginDrawerDrag = useCallback(() => setDrawerOpen(true), []);
+  const beginDrawerDrag = useCallback(() => {
+    setDrawerOpen(true);
+    prefetchSettingsRemote();
+  }, []);
 
   /** The finger lifted. Carry its speed into the settle, and unmount only once
    *  a close has actually finished — unmounting early would snap it away
@@ -472,11 +489,12 @@ function Shell() {
       if (dest === 'settings') {
         setSettingsFocus(updateWaiting ? 'update' : null);
         setSettingsOpen(true);
-      } else if (dest === 'queue') {
-        // The queue could only be reached from inside the player before, which
-        // meant opening the player to find out what was coming next.
-        setPlayerPane(p => ({pane: 'queue', nonce: (p?.nonce ?? 0) + 1}));
-        setPlayerOpen(true);
+      } else if (dest === 'equalizer') {
+        // Its OWN overlay, not Settings-with-a-panel-preset. Same reasoning the
+        // Shortcuts entry already carries: back from a drawer destination has
+        // to return to where the drawer was opened, not drop you into a
+        // Settings list you never asked to see.
+        setEqOpen(true);
       } else if (dest === 'sleep') {
         setSleepOpen(true);
       } else if (dest === 'shortcuts') {
@@ -487,7 +505,7 @@ function Shell() {
         // Shortcuts is reached from the drawer; its back should return to
         // wherever the drawer was opened from, same as every other drawer item.
         setTipsOpen(true);
-      } else if (dest === 'recents' || dest === 'stats') {
+      } else if (dest === 'stats') {
         setActivity(dest);
       }
       // updateWaiting is read above, so it has to be a dependency — with an empty
@@ -550,7 +568,11 @@ function Shell() {
               collection={collection}
               loading={collectionLoading}
               onClose={() => setCollection(null)}
-              onPlay={play}
+              // The only play path with a collection behind it, so the only one
+              // that can tell the library where playback started. Everything
+              // else — search, radio, a tap on Home — passes nothing, which is
+              // the honest answer for a queue that came from no collection.
+              onPlay={(t, ctx) => play(t, ctx, collection.id)}
               onMenu={openSheet}
               onChanged={() => {
                 setCollection(null);
@@ -620,9 +642,27 @@ function Shell() {
             <TipsScreen onClose={() => setTipsOpen(false)} />
           </View>
         )}
+
+        {eqOpen && (
+          <View style={StyleSheet.absoluteFill}>
+            <EqualizerScreen onClose={() => setEqOpen(false)} />
+          </View>
+        )}
       </View>
 
-      <Toaster bottom={engine ? 132 : 78} />
+      {/*
+        ONE outlet, app-wide.
+
+        There used to be a second inside PlayerScreen, because when the player
+        was a Modal it was a separate Dialog window and this one genuinely was
+        behind it. The player is a view at zIndex 30 now and the toaster is at
+        9999, so this paints OVER it — and both outlets, subscribed to the same
+        singleton in toast.ts, were rendering the same message at once.
+
+        All it needs is to clear the player's own transport when the player is
+        up, rather than sitting at the mini player's height.
+      */}
+      <Toaster bottom={playerOpen ? 118 : engine ? 132 : 78} />
 
       {engine && <PlayerBar onExpand={() => setPlayerOpen(true)} />}
 
@@ -651,7 +691,6 @@ function Shell() {
       {engine && (
         <PlayerScreen
           visible={playerOpen}
-          focusPane={playerPane}
           onClose={() => setPlayerOpen(false)}
           onAddToPlaylist={setAddTo}
           onOpenArtist={openArtistCredit}

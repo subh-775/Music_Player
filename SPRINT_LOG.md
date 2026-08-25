@@ -452,6 +452,122 @@ overnight is capped at one track length instead of reporting eight hours.
   specifically that is a fair trade for telling the truth about the device.
 
 
+---
+
+## v1.0.10 batch — audit round 4
+
+Six of the nine reports were regressions from v1.0.9, and five of those trace to
+one change: the player left its `<Modal>` and joined App's view hierarchy. That
+was still the right move — it is what fixed the `+` sheet — but a Dialog window
+had been silently isolating the player from the rest of the app, and removing it
+exposed four things that were hidden behind it.
+
+**Stale in the report.** E1 (SeekPeek's flat fill), E2 (`PlayerBar` on
+PanResponder) and E3 (`Sheet`'s module-load `SCREEN_H`) were all already fixed in
+v1.0.9 — radial gradient, `Gesture.Pan`, and `max(w, h)` respectively. Verified
+before touching anything; no work done.
+
+**Regressions from the Modal removal**
+
+| # | Report | Root cause |
+|---|---|---|
+| A1 | Two toasts at once | Two `<Toaster>`s subscribed to the same singleton. The one inside the player existed because, as a Dialog window, the player genuinely covered the app-root toaster — the comment above it said exactly that, and it stopped being true the moment the player became a view at `zIndex: 30` under a toaster at 9999. One outlet now, positioned off `playerOpen`. |
+| A3 | The drawer no longer opens by swipe | `hitSlop({left: 0, width: 36})` did not survive contact with a real device, for two compounding reasons. RNGH's `{left, width}` hitSlop is built to EXPAND an activation region and its shrink behaviour is platform-specific — not something a core navigation gesture should rest on. And a 36dp strip overlaps the region Android reserves for its own back gesture, which is intercepted **before** the app's views see the touch at all. Now a real 28dp edge view, plus a new native `setEdgeExclusion` calling `View.setSystemGestureExclusionRects` so Android yields the strip. Without the exclusion no width works: too narrow to hit, or fighting the system for most of it. |
+| A4 | Settings loads on every open | The `remote` cache was module scope "because it should die with the process" — and the open that dies with the process is the FIRST open of every launch, which is the one you notice. Persisted now. Stacked on it: `await Promise.allSettled([...])` meant nothing rendered until the slowest of four returned, and `getSourcesStatus()` probes every source over the network while `getCacheSize()` walks a local directory. Each lands independently, the drawer prefetches them on open, and the source rows render from a static list — `getSourcesStatus()` is gone entirely, because nothing else in the app read it and the rows it gated are known at build time. |
+| A6 | (v1.0.9) | Confirmed fixed. |
+
+**A2 — the queue drag offset: reported mechanism does not hold**
+
+The audit's proposed cause was `gesture.absoluteY − containerPageY` shifting
+under the player's new Reanimated transform. That is not how
+`react-native-draggable-flatlist` works: `CellRendererComponent` measures with
+`viewNode.measureLayout(containerNode)` — relative to its own container — and
+`DraggableFlatList`'s pan sets `touchTranslate.value = evt.translationY`, also
+relative. There is no absolute or window coordinate anywhere in the path, so an
+ancestor transform cannot shift it.
+
+Applied the identity-transform guard anyway (it is free and correct on its own
+terms — a settled sheet stops handing Android a matrix to compose) and said so
+in the comment. The real answer is D3: the queue is a `Sheet` now and is no
+longer nested inside the player's transform, its `display:none` pane stack, or
+its permanently-mounted subtree.
+
+**The other reported bugs**
+
+| # | Report | Root cause |
+|---|---|---|
+| B1 | Every playlist containing the song turns green | The comment gave it away — "which collection the playing song **belongs to**". Containment is a different question from origin, and a song is typically in Liked Songs, a playlist and Downloads at once, so all three lit up and the highlight meant nothing. `playbackOrigin` is recorded by `playTrack` and only `CollectionScreen` passes one. |
+| B2 | Downloads don't show as downloaded | The identity changes between saving and looking. `getTrackId` includes the ISRC; `scan_downloads` returns no ISRC, because a file on disk does not know one. So the app stored `ordinary\|alex warren\|USUG…` and later asked for `ordinary\|alex warren\|` — never equal, and `markDownloaded` full-replaces, so the correct key was actively wiped. New `getDownloadKey` (title+artist, no ISRC) for on-disk identity only; `getTrackId` is untouched and stays right for everything else. The persisted set migrates itself on read by dropping the last segment. The scan also returns `isrc` and `has_embedded_art` now, so a file with no cover no longer costs a request that was always going to 404. |
+| B3 | Equalizer bands can't be dragged | The band drags vertically inside a vertical `ScrollView`. A tap worked because a tap has no movement to intercept — which is exactly the "I have to click a specific position" report. `onPanResponderTerminationRequest: () => false` looked like the guard and is not: it refuses requests from the JS responder system and has no bearing on what a native Android scroll view does. Now `Gesture.Pan().minDistance(0).blocksExternalGesture(scrollRef)`, so the scroller waits instead of stealing. `e.y` also replaces `nativeEvent.locationY`, which is relative to whichever view received the event and shifts mid-drag as the finger crosses the fill or the knob. Gains snap-to-whole-dB (the label rounded, `onChange` did not) and a 10px hitSlop. |
+| B4 | Sidebar items | Queue and Recents out, Equalizer in — promoted to its own overlay, not Settings-with-a-panel-preset, for the reason already recorded for Shortcuts: back from a drawer destination must return to where the drawer was opened. |
+
+**Reported mid-session: the update dot never appears**
+
+Also mine, from an earlier round, and the symptom named the cause precisely —
+"they have to go to Settings and check manually". Settings calls `checkUpdate()`
+directly; the launch path called `checkUpdateOnLaunch()`, which skipped for a DAY
+after any confirmed all-clear. The doc comment defended it with "a 'found' result
+never writes the timestamp, so a release still reaches everyone on their next
+launch", and that reasoning is simply wrong: the timestamp records when we last
+confirmed nothing was new, and it can say nothing about a release published
+afterwards. Confirm all-clear at 9am, release lands at 11am, and the app refuses
+to look again until 9am tomorrow.
+
+Three changes: the window drops from 24 hours to 15 minutes (it exists only to
+absorb a burst of restarts), the check now also runs on every return to the
+foreground — a process kept alive by the playback service may not launch again
+for days — and "dismiss" became durable per version, since a foreground re-check
+would otherwise re-raise a dismissed popup on every resume. The dot is unaffected
+by the dismissal: `useUpdateAvailable` reads `info`, not `phase`, which the
+existing comment already spelled out.
+
+**Part C — Settings, formal pass**
+
+Frozen switches became the words "Always on" (a disabled `Toggle` renders at 40%
+opacity, so two of them beside one live switch read as two *failed* toggles), the
+source dots are gone, the three ghost buttons under Downloads became four rows
+with the path as a right-aligned middle-ellipsised value, and the cards are flat
+— no fill, no radius, hairline rules — which removes every grey shade on the
+screen in one change. Terminology throughout; "Playback → Playback" and
+"Downloads → Downloads" no longer share names with their sections.
+
+**Part D — the new player layout**
+
+- The pane toggles collapsed into the timestamp row, which was empty, as two
+  icons. `Seekbar` gained a `center` slot; the timestamps are fixed-width and
+  tabular so the middle stays optically centred rather than drifting at 1:00 and
+  again at 1:00:00.
+- The Bluetooth output line moved into the credit row beside the source and
+  quality badges — it is metadata about this playback, which is what that row is
+  for, and `PlayerBar` already carries it there.
+- Transport moved up; the queue grip took the bottom, with the count in the
+  label because an affordance carrying no information is easy to ignore. Its
+  pull is upward-only (`activeOffsetY([-12, 1000])`) so a downward drag still
+  falls through to the dismiss — otherwise the strip where a thumb naturally
+  rests becomes a dead zone for minimising. It fades out during a horizontal
+  skip, off the same `slide` shared value.
+- The queue became a `Sheet`. `Sheet` gained `dragEnabled`, because its own
+  dismiss activates at 12px and `DraggableFlatList`'s `activationDistance` is
+  also 12 — a genuine tie the sheet has no business winning.
+
+**Deliberately not done**
+
+- `simultaneousWithExternalGesture(listRef)` on the queue sheet. It needs a ref
+  to a gesture RNGH owns, and `DraggableFlatList` does not expose its inner list
+  as one. The existing arbitration is what every other sheet in the app already
+  uses with a `ScrollView` inside and has not been reported; `dragEnabled` fixes
+  the tie that actually was.
+- The `getSourcesStatus` probe, deleted rather than kept — see A4.
+- **Following** (round 3's other A8 pick), and **C1** SoundCloud API v2.
+
+**Standing caveat, restated**
+
+`getCapabilities` remains the one place that attaches the effects chain
+unconditionally, so opening the Equalizer screen mid-song can still cost the
+momentary level step v1.0.9 removed everywhere else. It has to: band count and
+gain range can only be read off a live `Equalizer`.
+
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

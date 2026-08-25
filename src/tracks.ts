@@ -93,6 +93,29 @@ export function getTrackId(track: Track | null | undefined): string {
   ].join('|');
 }
 
+/**
+ * Identity for DOWNLOADS only — title + artist, deliberately WITHOUT the ISRC.
+ *
+ * A file on disk does not know its ISRC. `scan_downloads` reads title, artist,
+ * album, duration, bitrate, codec, size and path off the filesystem, so a
+ * scanned track's getTrackId() is "title|artist|" while the catalog track it
+ * came from is "title|artist|USUG12500123". Those two can never be equal, which
+ * meant a song was downloaded and the app immediately forgot: the tick never
+ * appeared, the remembered cover never matched, and the same file could be
+ * downloaded again indefinitely.
+ *
+ * getTrackId keeps the ISRC and stays correct for everything else — it is what
+ * distinguishes two genuinely different recordings with the same name. This is
+ * the narrower question of "is THIS song the one sitting in that folder", and
+ * the answer has to be reachable from a filename.
+ */
+export function getDownloadKey(track: Track | null | undefined): string {
+  return [
+    cleanText(track?.title).toLowerCase(),
+    cleanText(track?.artist).toLowerCase(),
+  ].join('|');
+}
+
 /** Ordered playable sources, best quality first. */
 export function getPlayableSources(
   track: Track | null | undefined,

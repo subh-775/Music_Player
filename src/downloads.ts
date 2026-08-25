@@ -12,7 +12,7 @@
  */
 import {useSyncExternalStore} from 'react';
 import {apiUrl, getDownloadStatus, startDownload, type Track} from './backend';
-import {getBestArtworkUrl, getTrackId} from './tracks';
+import {getBestArtworkUrl, getDownloadKey} from './tracks';
 import {createStore, asArray, useStoreSelector, useStoreValue} from './storage';
 import {toast} from './toast';
 
@@ -39,7 +39,9 @@ function rememberArtwork(track: Track): void {
   if (!art) {
     return;
   }
-  const id = getTrackId(track);
+  // Keyed the way the SCAN will ask for it — see getDownloadKey. Storing this
+  // under the catalog id meant the lookup below could never hit.
+  const id = getDownloadKey(track);
   const rest = artCache.get().filter(([k]) => k !== id);
   const entry: [string, string] = [id, art];
   artCache.set([entry, ...rest].slice(0, 500));
@@ -54,11 +56,14 @@ export function overlayDownloadArtwork(tracks: Track[]): Track[] {
     if (t.artwork_url) {
       return t;
     }
-    const remembered = map.get(getTrackId(t));
+    const remembered = map.get(getDownloadKey(t));
     if (remembered) {
       return {...t, artwork_url: remembered};
     }
-    if (t.file_path) {
+    // Only ask the backend for embedded art when the scan says there IS some.
+    // `has_embedded_art` is undefined on an older backend, in which case try
+    // anyway — that is the previous behaviour, and a miss costs one 404.
+    if (t.file_path && t.has_embedded_art !== false) {
       return {
         ...t,
         artwork_url: apiUrl(
@@ -80,6 +85,12 @@ export function overlayDownloadArtwork(tracks: Track[]): Track[] {
 const downloadedIds = createStore<string[]>('mp.downloadedIds.v1', [], raw =>
   asArray<string>(raw)
     .filter(x => typeof x === 'string')
+    // Migrate in place. Entries written before getDownloadKey existed are
+    // "title|artist|isrc"; keeping only the first two segments turns them into
+    // the new key and is a no-op on anything already in that form. Without
+    // this, every existing download would read as un-downloaded until the next
+    // Library visit re-scanned the folder.
+    .map(x => x.split('|').slice(0, 2).join('|'))
     .slice(0, 2000),
 );
 
@@ -87,13 +98,25 @@ export function isDownloaded(track: Track | null | undefined): boolean {
   if (!track) {
     return false;
   }
-  return !!track.file_path || downloadedIds.get().includes(getTrackId(track));
+  return !!track.file_path || downloadedIds.get().includes(getDownloadKey(track));
 }
 
-/** Feed a disk scan's results in so the set reflects reality — including
- *  files deleted outside the app (their ids drop out). */
+/**
+ * Feed a disk scan's results in so the set reflects reality — including files
+ * deleted outside the app, whose keys drop out.
+ *
+ * A full replace is right (the folder IS the truth) but it must not be able to
+ * un-mark a download that finished seconds ago and whose file the scan simply
+ * has not seen flushed yet. Anything still sitting in `jobs` as done is unioned
+ * back in; those rows clear themselves 1.5s later, which is the width of the
+ * race this covers.
+ */
 export function markDownloaded(tracks: Track[]): void {
-  const ids = tracks.map(getTrackId);
+  const scanned = tracks.map(getDownloadKey);
+  const settling = jobs
+    .filter(j => j.status === 'done')
+    .map(j => getDownloadKey(j.track));
+  const ids = Array.from(new Set([...scanned, ...settling]));
   const prev = downloadedIds.get();
   const same = prev.length === ids.length && ids.every((v, i) => v === prev[i]);
   if (!same) {
@@ -113,7 +136,7 @@ export function useDownloadedIds(): string[] {
  * row's own answer changes.
  */
 export function useIsDownloaded(track: Track | null | undefined): boolean {
-  const id = track ? getTrackId(track) : '';
+  const id = track ? getDownloadKey(track) : '';
   const onDisk = !!track?.file_path;
   return useStoreSelector(
     downloadedIds,
@@ -171,10 +194,14 @@ function ensurePolling() {
           if (t.status === 'completed' || t.status === 'done') {
             job.status = 'done';
             job.progress = 1;
-            const id = getTrackId(job.track);
+            const id = getDownloadKey(job.track);
             if (!downloadedIds.get().includes(id)) {
               downloadedIds.set([...downloadedIds.get(), id]);
             }
+            // Re-scan now, not on the next Library visit. Until this existed,
+            // the Downloaded collection and every ⋮ sheet outside Library were
+            // stale until you happened to open the tab.
+            onDownloadComplete.forEach(fn => fn());
           } else if (t.status === 'failed' || t.status === 'error') {
             job.status = 'error';
             job.error = t.error;
@@ -199,15 +226,32 @@ function ensurePolling() {
   }, 500);
 }
 
+/**
+ * Anyone who wants to know the moment a download lands.
+ *
+ * Library registers its disk scan here. A module-level set rather than a prop
+ * chain because the thing that needs re-scanning (the Downloaded collection,
+ * and every "already downloaded" tick in the app) is not on screen when the
+ * download finishes — that is the whole point.
+ */
+const onDownloadComplete = new Set<() => void>();
+
+export function onDownloadsChanged(fn: () => void): () => void {
+  onDownloadComplete.add(fn);
+  return () => {
+    onDownloadComplete.delete(fn);
+  };
+}
+
 /** Start a download and track it. Ignores a track already in flight — and one
  *  already ON DISK, which used to be re-downloadable indefinitely. */
 export async function enqueueDownload(track: Track): Promise<void> {
-  const id = getTrackId(track);
+  const id = getDownloadKey(track);
   if (isDownloaded(track)) {
     toast('Already downloaded');
     return;
   }
-  if (jobs.some(j => getTrackId(j.track) === id && j.status !== 'error')) {
+  if (jobs.some(j => getDownloadKey(j.track) === id && j.status !== 'error')) {
     return;
   }
   const res = await startDownload(track);

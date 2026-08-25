@@ -42,6 +42,7 @@ import {
   DRAWER_GRAB,
   DRAWER_W,
   drawerX,
+  reserveDrawerEdge,
   shouldOpen,
 } from '../drawer';
 
@@ -134,13 +135,22 @@ export function HomeScreen({
    * large first delta a fast flick delivers. activeOffsetX/failOffsetY are
    * evaluated on the raw touch stream, so speed stops mattering.
    *
-   * ARMED ONLY AT THE LEFT EDGE (see DRAWER_EDGE). hitSlop with an explicit
-   * {left, width} shrinks the region in which this gesture will even begin, so a
-   * touch that starts anywhere else is never arbitrated against the page's
-   * scrolling at all — it goes straight to the list as if this handler did
-   * not exist. That is a stronger guarantee than any activeOffset/failOffset
-   * pair can give, because those still have to LOSE a race that has already
-   * started, and losing it late is what cancelled a scroll in progress.
+   * ARMED ONLY AT THE LEFT EDGE, by being attached to a real view that only
+   * covers the edge (see styles.edge) rather than by shrinking this gesture's
+   * hitSlop.
+   *
+   * The hitSlop version did not work. Two reasons, and they compounded: RNGH's
+   * {left, width} hitSlop is designed to EXPAND an activation region and its
+   * behaviour when used to shrink one is platform-specific — not something a
+   * core navigation gesture should rest on — and, more decisively, a 36dp strip
+   * overlaps the region Android reserves for its own back gesture, which is
+   * intercepted before the app's views see the touch at all. Hence the narrower
+   * strip plus reserveDrawerEdge().
+   *
+   * A touch anywhere else now reaches the list as if this handler did not
+   * exist, which is a stronger guarantee than any activeOffset/failOffset pair:
+   * those still have to LOSE a race that has already started, and losing it
+   * late is what cancelled a scroll already in progress.
    *
    * failOffsetY still matters inside the strip: a vertical scroll that happens
    * to begin at the left edge has to stay a scroll.
@@ -164,7 +174,6 @@ export function HomeScreen({
       Gesture.Pan()
         .activeOffsetX([-1000, DRAWER_GRAB])
         .failOffsetY([-14, 14])
-        .hitSlop({left: 0, width: DRAWER_EDGE})
         .onBegin(() => {
           drawerX.value = -DRAWER_W; // start from closed, whatever came before
           runOnJS(begin)();
@@ -207,6 +216,12 @@ export function HomeScreen({
   useEffect(() => {
     load();
   }, [load]);
+
+  // Claim the left strip back from Android's system back gesture. Once per
+  // mount; the decor view outlives every re-layout so it does not need redoing.
+  useEffect(() => {
+    reserveDrawerEdge();
+  }, []);
 
   // Tell the app the moment there is real content (or a definite failure) —
   // the splash stays up until then, so Home is never seen mid-load.
@@ -321,31 +336,41 @@ export function HomeScreen({
   );
 
   return (
-    <GestureDetector gesture={pan}>
-      <View style={styles.fill}>
-        {/*
-          A FlatList, not a ScrollView.
+    <View style={styles.fill}>
+      {/*
+        A FlatList, not a ScrollView.
 
-          A ScrollView renders every child immediately and keeps them all
-          mounted — and every child here is a horizontal FlatList of cards with
-          remote images. The whole of Home, however far down it went, was being
-          built and held on the first frame. Virtualised, the rows below the fold
-          do not mount their cards until you scroll to them.
-        */}
-        <FlatList
-          data={rows}
-          keyExtractor={row => row.title}
-          renderItem={({item}) => <Row row={item} onPick={onPickTrack} />}
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          overScrollMode="never"
-          bounces={false}
-          ListHeaderComponent={header}
-          ListFooterComponent={<View style={styles.tail} />}
-          {...HOME_WINDOWING}
-        />
-      </View>
-    </GestureDetector>
+        A ScrollView renders every child immediately and keeps them all
+        mounted — and every child here is a horizontal FlatList of cards with
+        remote images. The whole of Home, however far down it went, was being
+        built and held on the first frame. Virtualised, the rows below the fold
+        do not mount their cards until you scroll to them.
+
+        Nothing wraps it any more: the drawer pull lives on the strip below, so
+        this list is completely uncontested.
+      */}
+      <FlatList
+        data={rows}
+        keyExtractor={row => row.title}
+        renderItem={({item}) => <Row row={item} onPick={onPickTrack} />}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        overScrollMode="never"
+        bounces={false}
+        ListHeaderComponent={header}
+        ListFooterComponent={<View style={styles.tail} />}
+        {...HOME_WINDOWING}
+      />
+
+      {/* The drawer-pull strip: transparent, full height, left edge only.
+          box-only so it takes the touch itself rather than passing it to a
+          child it does not have. The hamburger stays the primary route — an
+          edge swipe is a shortcut, and on a phone in a case or with a curved
+          screen the edge is genuinely awkward to hit. */}
+      <GestureDetector gesture={pan}>
+        <View style={styles.edge} pointerEvents="box-only" />
+      </GestureDetector>
+    </View>
   );
 }
 
@@ -441,6 +466,15 @@ const CARD = 138;
 
 const styles = StyleSheet.create({
   fill: {flex: 1},
+  edge: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: DRAWER_EDGE,
+    // Above the list, below everything the app layers on top of Home.
+    zIndex: 5,
+  },
   scroll: {paddingBottom: 24},
   header: {
     flexDirection: 'row',

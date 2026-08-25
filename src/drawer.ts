@@ -13,7 +13,7 @@
  * is written from the gesture worklet on the UI thread, so the panel keeps
  * tracking the finger even while JS is busy.
  */
-import {Dimensions} from 'react-native';
+import {Dimensions, NativeModules} from 'react-native';
 import {
   Easing,
   makeMutable,
@@ -55,8 +55,33 @@ export const DRAWER_GRAB = 12;
  * arbitrating it, which is what Gmail, Chrome and YouTube all do — and what
  * Android's own system back gesture does, at a comparable inset. Everything
  * outside this strip now scrolls with nothing else even listening.
+ *
+ * 28, not 36, and it comes with a system-gesture exclusion (see
+ * `reserveDrawerEdge`). Android reserves roughly the outer 20-24dp of each edge
+ * for its own back gesture and intercepts those touches before the app's views
+ * ever see them, so without the exclusion most of a 36dp strip was being eaten
+ * by system back — which is why the swipe stopped opening the drawer at all.
  */
-export const DRAWER_EDGE = 36;
+export const DRAWER_EDGE = 28;
+
+/**
+ * Ask Android to stop claiming the strip for its back gesture.
+ *
+ * Best-effort and idempotent. `false` comes back on API 28 and below, where
+ * there is no gesture navigation to yield — that is "not needed", not "failed",
+ * and the drawer pull works there regardless.
+ */
+export async function reserveDrawerEdge(): Promise<void> {
+  try {
+    await (
+      NativeModules.Backend as {
+        setEdgeExclusion?: (widthDp: number) => Promise<boolean>;
+      }
+    )?.setEdgeExclusion?.(DRAWER_EDGE);
+  } catch {
+    /* older APK without the method — the hamburger still works */
+  }
+}
 
 /**
  * Let go: run the rest of the way to open or closed.

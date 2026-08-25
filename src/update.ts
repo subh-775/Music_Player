@@ -9,7 +9,7 @@
  * phase: idle | checking | current | found | downloading | failed
  */
 import {useSyncExternalStore} from 'react';
-import {NativeEventEmitter, NativeModules} from 'react-native';
+import {AppState, NativeEventEmitter, NativeModules} from 'react-native';
 import {createStore} from './storage';
 import {readSettings} from './store';
 import {diag} from './diag';
@@ -18,15 +18,46 @@ import {diag} from './diag';
  * When we last confirmed there was NOTHING new — and deliberately only that.
  *
  * A "found" result never writes here, so an update that is genuinely waiting is
- * re-checked on every single launch and the popup keeps appearing until it is
- * installed. Only "you're up to date" earns the day of quiet, which is the
- * answer nothing is lost by not asking for again.
+ * re-checked on every launch and the popup keeps appearing until it is
+ * installed. A FAILED check never writes here either, so being offline once
+ * does not buy silence.
  */
 const lastAllClear = createStore<number>('mp.updateAllClearAt.v1', 0, raw =>
   typeof raw === 'number' && raw > 0 ? raw : 0,
 );
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long an all-clear is trusted for. Fifteen minutes, and it used to be a
+ * DAY — which is the whole reason the dot never appeared.
+ *
+ * The old reasoning was that "a 'found' result never writes the timestamp, so a
+ * real update still reaches everyone on their next launch". That is wrong, and
+ * wrong in a way that hides the feature completely: the timestamp says when we
+ * last confirmed nothing was new, and it cannot say anything about a release
+ * published AFTER it. Confirm all-clear at 9am, a release lands at 11am, and
+ * the app refuses to look again until 9am tomorrow — so the only way to find it
+ * was to open Settings and tap Check, which calls checkUpdate() directly and
+ * bypasses this. That is exactly the reported symptom.
+ *
+ * This window exists only to stop a burst of checks when the app is opened and
+ * closed repeatedly, or resumed several times in a row. One small HTTPS GET,
+ * fired 3.5s after launch and never blocking anything, is not worth hiding a
+ * release behind.
+ */
+const RECHECK_MS = 15 * 60 * 1000;
+
+/**
+ * The version whose popup the user has already dismissed.
+ *
+ * Now that a check also runs on every return to the foreground, "dismiss" has
+ * to mean something durable — otherwise the popup would come back every time
+ * the app was resumed, which is a nag, not a notice. It suppresses only the
+ * POPUP: `useUpdateAvailable` reads `info`, not `phase`, so the dot stays lit
+ * and Settings still offers to install.
+ */
+const dismissedVersion = createStore<string>('mp.updateDismissed.v1', '', raw =>
+  typeof raw === 'string' ? raw : '',
+);
 
 type UpdaterNative = {
   check?: () => Promise<boolean>;
@@ -98,11 +129,21 @@ function ensureRegistered() {
     if (!res?.available && !failed) {
       lastAllClear.set(Date.now());
     }
+    // A version already dismissed does not re-raise the popup — but `info` is
+    // still recorded, which is what keeps the dot lit and Settings offering it.
+    const alreadySeen =
+      !!res?.available && res.version === dismissedVersion.get();
     state = {
       ...state,
       info: res,
       error: res?.error || '',
-      phase: res?.available ? 'found' : failed ? 'failed' : 'current',
+      phase: res?.available
+        ? alreadySeen
+          ? 'idle'
+          : 'found'
+        : failed
+        ? 'failed'
+        : 'current',
     };
     emit();
   });
@@ -159,23 +200,44 @@ export function checkUpdate(): void {
 }
 
 /**
- * The launch check. Identical to checkUpdate, except it stays quiet for a day
- * after a confirmed all-clear — so a cold start doesn't spend a GitHub round
- * trip re-learning that nothing has changed since an hour ago.
- *
- * It does NOT throttle when an update is actually waiting (see lastAllClear),
- * so a release still reaches everyone on their very next launch.
+ * The automatic check: at launch, and every time the app comes back to the
+ * foreground. Identical to checkUpdate apart from the settings switch and a
+ * short debounce.
  */
 export function checkUpdateOnLaunch(): void {
   if (!readSettings().autoUpdateCheck) {
-    diag('update', 'launch check skipped — automatic updates are off');
+    diag('update', 'auto check skipped — automatic updates are off');
     return;
   }
-  if (Date.now() - lastAllClear.get() < DAY_MS) {
-    diag('update', 'launch check skipped — all clear less than a day ago');
+  if (Date.now() - lastAllClear.get() < RECHECK_MS) {
+    diag('update', 'auto check skipped — all clear a few minutes ago');
     return;
   }
   checkUpdate();
+}
+
+/**
+ * Re-check whenever the app returns to the foreground.
+ *
+ * A launch-only check reaches nobody who leaves the app running. Android keeps
+ * the process alive for days behind a mediaPlayback foreground service — which
+ * this app always has while something is playing — so "next launch" can be next
+ * week, and until then the dot the user is watching for simply never arrives.
+ *
+ * Registered once and never removed: the whole point is that it keeps working
+ * regardless of what is on screen.
+ */
+let foregroundWatch = false;
+export function watchForegroundUpdates(): void {
+  if (foregroundWatch) {
+    return;
+  }
+  foregroundWatch = true;
+  AppState.addEventListener('change', next => {
+    if (next === 'active') {
+      checkUpdateOnLaunch();
+    }
+  });
 }
 
 /** Begin downloading + installing (the user still confirms the OS install). */
@@ -189,8 +251,14 @@ export function startUpdateInstall(): void {
   native.install?.();
 }
 
-/** Hide the popup for now (a dismiss, not a permanent skip). */
+/**
+ * Hide the popup for this version. NOT a permanent skip of the update — the dot
+ * stays, Settings still offers it, and the next release raises the popup again.
+ */
 export function dismissUpdate(): void {
+  if (state.info?.version) {
+    dismissedVersion.set(state.info.version);
+  }
   state = {...state, phase: 'idle'};
   emit();
 }

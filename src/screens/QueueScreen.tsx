@@ -40,7 +40,63 @@ import {Event, TrackPlayer, moveQueueItem, sourceTrackFor} from '../player';
 
 const ROW_H = 60;
 
-export function QueuePane() {
+/**
+ * How many songs are still to come — for the player's queue grip label.
+ *
+ * Its own tiny hook rather than a value lifted out of QueuePane, because the
+ * grip is on screen while the queue sheet is closed and QueuePane is not
+ * mounted. Event-driven, so it costs one queue read per track change and
+ * nothing at all in between.
+ */
+export function useUpcomingCount(): number {
+  const [n, setN] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    const read = async () => {
+      try {
+        const [q, i] = await Promise.all([
+          TrackPlayer.getQueue(),
+          TrackPlayer.getActiveTrackIndex(),
+        ]);
+        if (alive) {
+          setN(Math.max(0, q.length - ((i ?? -1) + 1)));
+        }
+      } catch {
+        if (alive) {
+          setN(0);
+        }
+      }
+    };
+    read();
+    const sub = TrackPlayer.addEventListener(
+      Event.PlaybackActiveTrackChanged,
+      read,
+    );
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
+
+  return n;
+}
+
+export function QueuePane({
+  onDragBegin,
+  onDragEnd: onRowDragEnd,
+}: {
+  /**
+   * A row has been lifted. Surfaced so the sheet this now lives in can stand
+   * its own drag-to-dismiss down: Sheet activates at 12px of vertical travel
+   * and DraggableFlatList activates at 12px too — a genuine tie, and the sheet
+   * winning it means the row you meant to drag closes the queue instead.
+   *
+   * The state already existed internally as `dragging`; it just had no way out.
+   */
+  onDragBegin?: () => void;
+  onDragEnd?: () => void;
+} = {}) {
   const [queue, setQueue] = useState<RNTPTrack[]>([]);
   const [active, setActive] = useState<number | null>(null);
   const dragging = useRef(false);
@@ -90,7 +146,10 @@ export function QueuePane() {
   // -1 when nothing is active yet (a restored queue before the first play), so
   // the whole queue reads as "upcoming" rather than the list rendering blank.
   const activeIdx = active ?? -1;
-  const upcoming = useMemo(() => queue.slice(activeIdx + 1), [queue, activeIdx]);
+  const upcoming = useMemo(
+    () => queue.slice(activeIdx + 1),
+    [queue, activeIdx],
+  );
   const nowPlaying = active == null ? null : queue[active];
 
   const firstRecommended = useMemo(
@@ -105,6 +164,7 @@ export function QueuePane() {
   const onDragEnd = useCallback(
     async ({from, to, data}: {from: number; to: number; data: RNTPTrack[]}) => {
       dragging.current = false;
+      onRowDragEnd?.();
       if (from === to || activeIdx < 0) {
         return;
       }
@@ -117,7 +177,7 @@ export function QueuePane() {
         refresh(); // engine refused — show the truth rather than a lie
       }
     },
-    [activeIdx, refresh],
+    [activeIdx, refresh, onRowDragEnd],
   );
 
   const renderItem = useCallback(
@@ -167,6 +227,7 @@ export function QueuePane() {
         renderItem={renderItem}
         onDragBegin={() => {
           dragging.current = true;
+          onDragBegin?.();
         }}
         onDragEnd={onDragEnd}
         // Uniform rows: lets the list place the drop target without measuring,
@@ -282,5 +343,10 @@ const styles = StyleSheet.create({
   rec: {color: C.faint},
   grip: {paddingHorizontal: 14, paddingVertical: 18},
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40},
-  emptyText: {color: C.faint, fontSize: 13, textAlign: 'center', lineHeight: 19},
+  emptyText: {
+    color: C.faint,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
 });

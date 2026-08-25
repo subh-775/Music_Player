@@ -25,7 +25,6 @@ import {
   Radio,
   RefreshCw,
   SlidersHorizontal,
-  Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
@@ -33,14 +32,13 @@ import {
   clearBackendCache,
   getCacheSize,
   getDownloadsInfo,
-  getSourcesStatus,
   getYouTubeExperimental,
   setDownloadsDir,
   setYouTubeExperimental,
   type DownloadsInfo,
-  type SourceStatus,
 } from '../backend';
 import {resetSettings, useStore, writeSetting} from '../store';
+import {createStore, useStoreValue} from '../storage';
 import {clearSearchHistory} from '../searchHistory';
 import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
@@ -49,7 +47,6 @@ import {ConfirmModal} from '../components/ConfirmModal';
 import {applyAudioEffects} from '../audioEffects';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
-import {SOURCE_META} from '../components/Badges';
 import {checkUpdate, startUpdateInstall, useUpdate} from '../update';
 import {
   cancelSleepTimer,
@@ -80,15 +77,74 @@ function formatBytes(n: number): string {
  * as the initial state; the fetch still runs and overwrites it, but the screen
  * is already complete while that happens.
  *
- * Module scope, not a store: it is a cache of remote answers, not state anyone
- * else needs to read, and it should die with the process.
+ * PERSISTED, not module scope. It used to die with the process, on the
+ * reasoning that a cache of remote answers should — which is true of the
+ * answers and false of the experience: the open that dies with the process is
+ * the FIRST open of every launch, which is exactly the one where you sit and
+ * watch empty sources, a blank folder path and no cache size fill themselves
+ * in. Every launch showed the loading state once, so "it loads every time" was
+ * an accurate description of it.
+ *
+ * A stale answer here is harmless — the live fetch overwrites it a moment later
+ * — and being one launch out of date beats being blank.
  */
-const remote: {
-  sources: Record<string, SourceStatus>;
+type RemoteCache = {
   downloads: DownloadsInfo | null;
   yt: {supported: boolean; enabled: boolean} | null;
   cacheBytes: number | null;
-} = {sources: {}, downloads: null, yt: null, cacheBytes: null};
+};
+
+const EMPTY_REMOTE: RemoteCache = {
+  downloads: null,
+  yt: null,
+  cacheBytes: null,
+};
+
+const remoteCache = createStore<RemoteCache>(
+  'mp.settingsRemote.v1',
+  EMPTY_REMOTE,
+  (raw: unknown) => {
+    const r = (raw ?? {}) as Partial<RemoteCache>;
+    return {
+      downloads: r.downloads ?? null,
+      yt: r.yt ?? null,
+      cacheBytes: typeof r.cacheBytes === 'number' ? r.cacheBytes : null,
+    };
+  },
+);
+
+function patchRemote(p: Partial<RemoteCache>): void {
+  remoteCache.set({...remoteCache.get(), ...p});
+}
+
+/**
+ * Fetch the four backend-backed answers Settings shows.
+ *
+ * Each lands INDEPENDENTLY. They used to be awaited together through
+ * Promise.allSettled, which means nothing appeared until the slowest returned —
+ * and they are not remotely comparable: getSourcesStatus() probes every source's
+ * reachability over the network while getCacheSize() is a local directory walk.
+ * The three fast answers were waiting on the one slow one for no reason.
+ *
+ * Exported so the drawer can start them the moment it opens: by the time the
+ * "Settings" row is tapped the answers are usually already back, and the screen
+ * opens finished rather than filling in.
+ */
+export function prefetchSettingsRemote(): void {
+  // getSourcesStatus() is deliberately NOT here any more. It probed every
+  // source's reachability over the network — the slowest of the four by a wide
+  // margin — purely to decide which rows to render, and those rows are known at
+  // build time. Nothing else in the app reads it.
+  getDownloadsInfo()
+    .then(v => patchRemote({downloads: v}))
+    .catch(() => {});
+  getYouTubeExperimental()
+    .then(v => patchRemote({yt: v}))
+    .catch(() => {});
+  getCacheSize()
+    .then(v => patchRemote({cacheBytes: v.bytes}))
+    .catch(() => {});
+}
 
 const QUALITIES = [
   {value: 0, label: 'Auto', hint: 'Adjusts to the source'},
@@ -295,20 +351,13 @@ export function SettingsScreen({
   );
   const [resetOpen, setResetOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
-  const [cacheBytes, setCacheBytes] = useState<number | null>(
-    remote.cacheBytes,
-  );
   const [clearing, setClearing] = useState(false);
   const {settings} = useStore();
-  const [sources, setSources] = useState<Record<string, SourceStatus>>(
-    remote.sources,
-  );
-  const [downloads, setDownloads] = useState<DownloadsInfo | null>(
-    remote.downloads,
-  );
-  const [yt, setYt] = useState<{supported: boolean; enabled: boolean} | null>(
-    remote.yt,
-  );
+  // One subscription, four values. Four pieces of local state mirroring a cache
+  // meant every answer had to be written twice and could disagree with itself;
+  // the store IS the state now, so a prefetch that lands while the screen is
+  // open simply shows up.
+  const {downloads, yt, cacheBytes} = useStoreValue(remoteCache);
   const [ytBusy, setYtBusy] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const sleep = useSleepTimer();
@@ -333,46 +382,21 @@ export function SettingsScreen({
     return () => sub.remove();
   }, [panel]);
 
+  // Refresh on open. The screen is already populated from the cache, so this
+  // updates in place rather than filling in from nothing.
   useEffect(() => {
-    (async () => {
-      // Independent — one failing shouldn't blank the whole screen. And NOT
-      // gated behind a full-screen spinner: every setting above Sources is
-      // local and instant, so the screen paints immediately and the
-      // backend-backed rows (sources, download folder) fill in when ready.
-      // The old spinner made opening Settings feel like loading a web page.
-      const [s, d, y, c] = await Promise.allSettled([
-        getSourcesStatus(),
-        getDownloadsInfo(),
-        getYouTubeExperimental(),
-        getCacheSize(),
-      ]);
-      if (s.status === 'fulfilled') {
-        remote.sources = s.value;
-        setSources(s.value);
-      }
-      if (d.status === 'fulfilled') {
-        remote.downloads = d.value;
-        setDownloads(d.value);
-      }
-      if (y.status === 'fulfilled') {
-        remote.yt = y.value;
-        setYt(y.value);
-      }
-      if (c.status === 'fulfilled') {
-        remote.cacheBytes = c.value.bytes;
-        setCacheBytes(c.value.bytes);
-      }
-    })();
+    prefetchSettingsRemote();
   }, []);
 
   const toggleYt = useCallback(async (next: boolean) => {
     setYtBusy(true);
     try {
       const res = await setYouTubeExperimental(next);
-      setYt(v => {
-        const now = v ? {...v, enabled: !!res.enabled} : v;
-        remote.yt = now;
-        return now;
+      patchRemote({
+        yt: (() => {
+          const v = remoteCache.get().yt;
+          return v ? {...v, enabled: !!res.enabled} : v;
+        })(),
       });
     } finally {
       setYtBusy(false);
@@ -404,9 +428,8 @@ export function SettingsScreen({
         toast(res.error || 'Could not use that folder');
         return;
       }
-      setDownloads(d => {
-        remote.downloads = {...(d ?? {}), ...res};
-        return remote.downloads;
+      patchRemote({
+        downloads: {...(remoteCache.get().downloads ?? {}), ...res},
       });
       toast('Download folder updated');
     } catch {
@@ -418,9 +441,8 @@ export function SettingsScreen({
   const useDefaultFolder = useCallback(async () => {
     try {
       const res = await setDownloadsDir('');
-      setDownloads(d => {
-        remote.downloads = {...(d ?? {}), ...res};
-        return remote.downloads;
+      patchRemote({
+        downloads: {...(remoteCache.get().downloads ?? {}), ...res},
       });
       toast('Using the default download folder');
     } catch {
@@ -470,15 +492,11 @@ export function SettingsScreen({
     try {
       const freed = await clearBackendCache();
       clearSearchHistory();
-      remote.cacheBytes = 0;
-      setCacheBytes(0);
+      patchRemote({cacheBytes: 0});
       toast(freed > 0 ? `Cleared ${formatBytes(freed)}` : 'Cache cleared');
       // Re-read rather than assume zero — Android may hold files open.
       getCacheSize()
-        .then(r => {
-          remote.cacheBytes = r.bytes;
-          setCacheBytes(r.bytes);
-        })
+        .then(r => patchRemote({cacheBytes: r.bytes}))
         .catch(() => {});
     } catch {
       toast("Couldn't clear the cache");
@@ -573,13 +591,13 @@ export function SettingsScreen({
           <Section title="Listening controls">
             <ToggleRow
               label="Autoplay"
-              hint="Similar songs keep playing when your queue ends"
+              hint="Keep playing similar songs when the queue ends"
               value={settings.autoplay}
               onChange={v => writeSetting('autoplay', v)}
             />
             <ToggleRow
               label="Normalize volume"
-              hint="Set the same loudness level for all tracks."
+              hint="Play every track at the same loudness"
               value={settings.normalizeVolume}
               onChange={v => {
                 writeSetting('normalizeVolume', v);
@@ -671,11 +689,11 @@ export function SettingsScreen({
               last and on its own. */}
         <Section title="Playback" Icon={SlidersHorizontal}>
           <NavRow
-            label="Playback"
+            label="Crossfade"
             value={
               settings.crossfadeDuration > 0
-                ? `Crossfade ${settings.crossfadeDuration}s`
-                : undefined
+                ? `${settings.crossfadeDuration} seconds`
+                : 'Off'
             }
             onPress={() => setPanel('playback')}
           />
@@ -691,12 +709,14 @@ export function SettingsScreen({
           />
         </Section>
 
-        <Section title="Audio quality" Icon={Gauge}>
+        <Section
+          title="Audio quality"
+          Icon={Gauge}
+          footer="Downloads always use the best quality a source offers, regardless of this setting.">
           <Row
             label="Streaming quality"
             value={qualityLabel}
             onPress={() => setQualityOpen(v => !v)}
-            hint="Higher sounds better and uses more data"
           />
           {qualityOpen &&
             QUALITIES.map(q => (
@@ -725,125 +745,126 @@ export function SettingsScreen({
             ))}
         </Section>
 
-        <Section title="Sources" Icon={Radio}>
-          {Object.keys(sources).length === 0 && (
-            <Text style={styles.folderPath}>Checking sources…</Text>
-          )}
-          {Object.entries(sources)
-            .filter(([, v]) => v.type === 'audio')
-            .map(([name]) => {
-              // Same tints as the track badges, so "which source is this"
-              // reads the same everywhere.
-              const tint = SOURCE_META[name]?.tint || C.sub;
-              return name === 'youtube' ? (
-                <View key={name} style={styles.row}>
-                  <View style={[styles.dot, {backgroundColor: tint}]} />
-                  <View style={styles.rowText}>
-                    <Text style={styles.rowLabel}>YouTube</Text>
-                    <Text style={styles.rowHint}>
-                      {ytBusy
-                        ? 'Checking this device…'
-                        : yt?.supported
-                        ? 'Adds YouTube as a search and download source. No sign-in needed.'
-                        : 'Not available on this device.'}
-                    </Text>
-                  </View>
-                  <Toggle
-                    value={!!yt?.enabled}
-                    disabled={ytBusy || !yt?.supported}
-                    onChange={toggleYt}
-                  />
-                </View>
-              ) : (
-                <View key={name} style={styles.row}>
-                  <View style={[styles.dot, {backgroundColor: tint}]} />
-                  <View style={styles.rowText}>
-                    <Text style={styles.rowLabel}>
-                      {SOURCE_META[name]?.label ||
-                        (name === 'jiosaavn' ? 'JioSaavn' : 'SoundCloud')}
-                    </Text>
-                    <Text style={styles.rowHint}>
-                      {name === 'jiosaavn'
-                        ? 'High-quality tracks and albums'
-                        : 'Remixes, sets and independent uploads'}
-                    </Text>
-                  </View>
-                  {/* Always on — these two need no setup, so the switch is a
-                        frozen ON, not a status word. */}
-                  <Toggle value disabled onChange={() => {}} />
-                </View>
-              );
-            })}
+        {/*
+          Rendered from a STATIC list, not from the network answer.
+
+          These three are known at build time, so their rows never had any
+          business waiting on a reachability probe — and rendering
+          `Object.entries(sources)` meant that until it returned, the section
+          was one line of "Checking sources…" and nothing else. The row's
+          existence is a fact about the app; only its status is a fact about
+          the network.
+        */}
+        <Section
+          title="Content sources"
+          Icon={Radio}
+          footer="JioSaavn and SoundCloud are always available. YouTube is optional and searched alongside them when it is on.">
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>JioSaavn</Text>
+              <Text style={styles.rowHint}>
+                Full-catalogue streaming, up to 320 kbps
+              </Text>
+            </View>
+            {/* A word, not a frozen switch. A disabled Toggle renders at 40%
+                opacity, so two of these next to one live switch read as two
+                FAILED toggles rather than as two that need no setting. */}
+            <Text style={styles.statusValue}>Always on</Text>
+          </View>
+
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>SoundCloud</Text>
+              <Text style={styles.rowHint}>
+                Independent uploads, remixes and DJ sets
+              </Text>
+            </View>
+            <Text style={styles.statusValue}>Always on</Text>
+          </View>
+
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>YouTube</Text>
+              <Text style={styles.rowHint}>
+                {ytBusy
+                  ? 'Checking this device…'
+                  : yt && !yt.supported
+                  ? 'Not available on this device.'
+                  : 'Search and download from YouTube. No account required.'}
+              </Text>
+            </View>
+            <Toggle
+              value={!!yt?.enabled}
+              disabled={ytBusy || (!!yt && !yt.supported)}
+              onChange={toggleYt}
+            />
+          </View>
         </Section>
 
+        {/* Three ghost buttons in a row read as a toolbar, not as settings.
+            Each is its own row now, and the path is a VALUE — right-aligned,
+            middle-ellipsised, so a long path shows the start and the end
+            rather than wrapping to two lines of body text. */}
         <Section title="Downloads" Icon={HardDrive}>
-          <View style={styles.row}>
-            <HardDrive size={20} color={C.text} strokeWidth={1.9} />
+          <TouchableOpacity
+            style={styles.row}
+            onPress={pickDownloadFolder}
+            activeOpacity={0.7}>
             <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Downloads</Text>
-              <Text style={styles.rowHint} numberOfLines={2}>
-                {folder ||
-                  (downloads?.using_fallback
-                    ? 'Using private app storage'
-                    : 'Not available yet')}
-              </Text>
-              <View style={styles.btnRow}>
-                <TouchableOpacity
-                  style={styles.setBtn}
-                  onPress={pickDownloadFolder}
-                  activeOpacity={0.85}>
-                  <Text style={styles.setBtnText}>Select</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.ghostBtn}
-                  onPress={openDownloadFolder}
-                  activeOpacity={0.7}>
-                  <Text style={styles.ghostBtnText}>Open folder</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.ghostBtn}
-                  onPress={useDefaultFolder}
-                  activeOpacity={0.7}>
-                  <Text style={styles.ghostBtnText}>Reset to default</Text>
-                </TouchableOpacity>
-              </View>
+              <Text style={styles.rowLabel}>Download location</Text>
             </View>
-          </View>
+            <Text
+              style={styles.rowValue}
+              numberOfLines={1}
+              ellipsizeMode="middle">
+              {folder ||
+                (downloads?.using_fallback ? 'App storage' : 'Not set yet')}
+            </Text>
+            <ChevronRight size={17} color={C.faint} />
+          </TouchableOpacity>
 
-          <View style={styles.row}>
-            <Trash2 size={20} color={C.text} strokeWidth={1.9} />
+          <Row label="Open in Files" onPress={openDownloadFolder} />
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={useDefaultFolder}
+            activeOpacity={0.7}>
             <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Clear cache</Text>
+              <Text style={styles.rowLabel}>Reset to default location</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => setCacheOpen(true)}
+            disabled={clearing}
+            activeOpacity={0.7}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>
+                {clearing ? 'Clearing…' : 'Clear cached data'}
+              </Text>
               <Text style={styles.rowHint}>
                 {cacheBytes == null
-                  ? 'Temporary files, lyrics and search history'
-                  : `${formatBytes(
+                  ? 'Downloaded songs are kept.'
+                  : `Frees ${formatBytes(
                       cacheBytes,
-                    )} of temporary files, lyrics and search history`}
+                    )}. Downloaded songs are kept.`}
               </Text>
-              <TouchableOpacity
-                style={[styles.setBtn, styles.checkBtn]}
-                onPress={() => setCacheOpen(true)}
-                disabled={clearing}
-                activeOpacity={0.85}>
-                <Text style={styles.setBtnText}>
-                  {clearing ? 'Clearing…' : 'Clear'}
-                </Text>
-              </TouchableOpacity>
             </View>
-          </View>
+            <ChevronRight size={17} color={C.faint} />
+          </TouchableOpacity>
         </Section>
 
         <Section title="Appearance" Icon={Eye}>
           <ToggleRow
-            label="Source badge"
-            hint="Show which source a track came from"
+            label="Show source label"
+            hint="Marks which service each track came from"
             value={settings.showSourceBadge}
             onChange={v => writeSetting('showSourceBadge', v)}
           />
           <ToggleRow
-            label="Quality badge"
-            hint="Show the streaming bitrate"
+            label="Show quality label"
+            hint="Marks each track with its bitrate"
             value={settings.showQualityBadge}
             onChange={v => writeSetting('showQualityBadge', v)}
           />
@@ -899,7 +920,7 @@ export function SettingsScreen({
             </TouchableOpacity>
             <ToggleRow
               label="Automatic updates"
-              hint="Check once a day when the app opens"
+              hint="Check when the app opens and when it returns to the foreground"
               value={settings.autoUpdateCheck}
               onChange={v => writeSetting('autoUpdateCheck', v)}
             />
@@ -1000,14 +1021,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: C.faint,
   },
+  /**
+   * FLAT. No fill, no radius, no card.
+   *
+   * A rounded C.surface card on C.bg is a lot of chrome for what is a list, and
+   * stacking several of them is where every grey shade on this screen came
+   * from. A formal settings screen groups with a label and a hairline and
+   * nothing else — which reads as MORE scannable, not less, because the eye
+   * stops having to parse three container edges per section.
+   */
   card: {
-    marginHorizontal: S.gutter,
-    borderRadius: 12,
-    backgroundColor: C.surface,
-    overflow: 'hidden',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
   },
-  // A brief accent ring, for "this is the thing you came here for".
-  cardHighlight: {borderWidth: 1.5, borderColor: C.accent},
+  // A brief accent ring, for "this is the thing you came here for". Still a
+  // ring, because with no card fill there is nothing else to tint.
+  cardHighlight: {
+    borderWidth: 1.5,
+    borderColor: C.accent,
+    borderRadius: 10,
+  },
   sectionFooter: {
     ...T.sub,
     color: C.faint,
@@ -1018,12 +1052,13 @@ const styles = StyleSheet.create({
   sep: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: C.border,
-    marginLeft: 16,
+    marginLeft: S.gutter,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    // Aligned to the page gutter now that there is no card inset to sit inside.
+    paddingHorizontal: S.gutter,
     paddingVertical: 13,
     gap: 14,
   },
@@ -1040,7 +1075,16 @@ const styles = StyleSheet.create({
   rowLabel: {...T.body, color: C.text},
   rowLabelAccent: {color: C.accent},
   rowHint: {...T.sub, color: C.sub, marginTop: 3, lineHeight: 17},
-  rowValue: {...T.sub, color: C.sub, maxWidth: 140, textAlign: 'right'},
+  rowValue: {
+    ...T.sub,
+    color: C.sub,
+    flexShrink: 1,
+    maxWidth: 190,
+    textAlign: 'right',
+  },
+  /** For a setting that cannot be changed: a word in the slot where its
+   *  control would have been. */
+  statusValue: {...T.sub, color: C.faint, fontWeight: '600'},
   reset: {
     marginTop: 26,
     paddingHorizontal: S.gutter,

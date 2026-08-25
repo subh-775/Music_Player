@@ -99,6 +99,13 @@ export type Track = {
   is_playable?: boolean;
   /** Only on tracks scanned from disk — the real file, needed to delete it. */
   file_path?: string;
+  /**
+   * Disk scan only: whether the file has a cover embedded in its tags.
+   *
+   * Undefined on an older backend, which is why every read of it tests for
+   * `!== false` rather than truthiness — absent means "unknown, try anyway".
+   */
+  has_embedded_art?: boolean;
   isrc?: string;
   release_date?: string;
   genre?: string;

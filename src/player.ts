@@ -69,6 +69,47 @@ let queuedAhead = 0;
  */
 const FADE_IN_MS = 130;
 
+/**
+ * WHERE the current queue was started from — a collection id, or ''.
+ *
+ * The library used to answer "am I listening to this?" by asking whether the
+ * playing song was CONTAINED in each collection, which is a different question
+ * with a different answer: a song in Liked Songs, a playlist and Downloads made
+ * all three go green at once. Containment cannot distinguish them; only the
+ * origin can, and only playTrack knows it.
+ *
+ * Cleared whenever a queue is built from anywhere else, so it can never outlive
+ * the thing it describes. Autoplay/radio top-ups deliberately do NOT clear it:
+ * the queue genuinely did start there, and the highlight should survive the
+ * album running out.
+ */
+let playbackOrigin = '';
+const originListeners = new Set<() => void>();
+
+function setPlaybackOrigin(id: string): void {
+  if (playbackOrigin === id) {
+    return;
+  }
+  playbackOrigin = id;
+  originListeners.forEach(l => l());
+}
+
+export function getPlaybackOrigin(): string {
+  return playbackOrigin;
+}
+
+/** Subscribe to the origin. A string snapshot, so useSyncExternalStore bails
+ *  out on an unchanged value and nothing re-renders. */
+export function usePlaybackOrigin(): string {
+  return useSyncExternalStore(
+    l => {
+      originListeners.add(l);
+      return () => originListeners.delete(l);
+    },
+    () => playbackOrigin,
+  );
+}
+
 /** The full Track behind an engine queue item, or null if it isn't ours. */
 export function sourceTrackFor(
   active: {title?: string | null; artist?: string | null} | null | undefined,
@@ -379,9 +420,13 @@ async function requireEngine(): Promise<void> {
 export async function playTrack(
   track: Track,
   context?: Track[],
+  /** The collection this was launched from — see playbackOrigin. '' for a
+   *  search result, a radio pick, or a single tap with no list behind it. */
+  originId = '',
   bitrate = currentQuality(),
 ): Promise<void> {
   await requireEngine();
+  setPlaybackOrigin(originId);
 
   const list = context?.length ? context : [track];
   const items = list

@@ -39,8 +39,12 @@ import {
 } from '../playlists';
 import {MAX_PINS, isPinned, rowId, sortPinned, togglePin, usePins} from '../pins';
 import {CollectionArt, DOWNLOAD_TINT} from '../components/CollectionArt';
-import {markDownloaded, overlayDownloadArtwork} from '../downloads';
-import {useActiveTrack} from '../player';
+import {
+  markDownloaded,
+  onDownloadsChanged,
+  overlayDownloadArtwork,
+} from '../downloads';
+import {usePlaybackOrigin} from '../player';
 import {toast} from '../toast';
 import {Sheet} from '../components/Sheet';
 import {listWindowing} from '../components/TrackRow';
@@ -88,23 +92,21 @@ export function LibraryScreen({
   const artists = useFollowedArtists();
   const library = useLibrary(likes, downloads);
 
-  // Which collection the playing song belongs to — its title renders green,
-  // so the library answers "what am I listening to" at a glance.
-  const engineTrack = useActiveTrack();
+  /**
+   * Which collection playback was STARTED from — its title renders green, so
+   * the library answers "what am I listening to" at a glance.
+   *
+   * This used to ask which collections CONTAIN the playing song, which is a
+   * different question: one song is typically in Liked Songs, a playlist and
+   * Downloads all at once, so all three lit up together and the highlight meant
+   * nothing. Containment cannot tell them apart — only the origin can.
+   */
+  const origin = usePlaybackOrigin();
   const isPlayingFrom = useCallback(
     (c: Collection) => {
-      if (!engineTrack || !c.tracks.length) {
-        return false;
-      }
-      const at = String(engineTrack.title ?? '').toLowerCase();
-      const aa = String(engineTrack.artist ?? '').toLowerCase();
-      return c.tracks.some(
-        t =>
-          (t.title || '').toLowerCase() === at &&
-          (t.artist || '').toLowerCase() === aa,
-      );
+      return !!origin && c.id === origin;
     },
-    [engineTrack],
+    [origin],
   );
 
   // Followed artists render as rows too, so one list handles everything.
@@ -146,6 +148,11 @@ export function LibraryScreen({
       loadDownloads();
     }
   }, [visible, loadDownloads]);
+
+  // …and whenever a download actually lands, on screen or not. Waiting for a
+  // tab visit is why a song downloaded from Search still offered "Download"
+  // afterwards, and why the Downloaded collection was a scan behind.
+  useEffect(() => onDownloadsChanged(loadDownloads), [loadDownloads]);
 
   const rows = useMemo(() => {
     const matches = (c: Collection) => {

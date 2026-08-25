@@ -2,9 +2,12 @@ package com.musicplayer
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.util.Log
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.Promise
@@ -206,7 +209,58 @@ class BackendModule(reactContext: ReactApplicationContext) :
         ""
     }
 
+    /**
+     * Ask Android not to claim a strip at the left edge for its own back
+     * gesture, so the app's drawer pull can live there.
+     *
+     * Without this, an edge-swipe drawer is unreachable on any device with
+     * gesture navigation on. The system reserves roughly the outer 20-24dp of
+     * each edge and intercepts those touches BEFORE the app's view hierarchy
+     * sees them — so a pull that starts inside the strip goes to system back,
+     * and one that starts outside it is not in the strip at all. There is no
+     * width that works: too narrow to hit, or fighting the system for most of
+     * it.
+     *
+     * Android allows up to 200dp of exclusion per edge and silently ignores the
+     * excess; 28dp is well inside that, so nothing here is discarded.
+     *
+     * API 29+. On 28 and below there is no gesture navigation to yield, so
+     * `false` here means "not needed", not "failed".
+     */
+    @ReactMethod
+    fun setEdgeExclusion(widthDp: Int, promise: Promise) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            promise.resolve(false)
+            return
+        }
+        val activity = currentActivity
+        if (activity == null) {
+            promise.resolve(false)
+            return
+        }
+        activity.runOnUiThread {
+            try {
+                val root = activity.window?.decorView
+                if (root != null) {
+                    val density = reactApplicationContext.resources.displayMetrics.density
+                    val px = (widthDp * density).toInt()
+                    // Height comes from the decor view rather than from a
+                    // measured RN view: the strip is full-height by
+                    // construction, and reading it here means the exclusion
+                    // cannot go stale against a JS layout that has not
+                    // re-reported yet.
+                    root.systemGestureExclusionRects =
+                        listOf(Rect(0, 0, px, root.height))
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "could not set edge exclusion: " + e.message)
+            }
+        }
+        promise.resolve(true)
+    }
+
     companion object {
+        private const val TAG = "BackendModule"
         private const val PICK_FOLDER = 51423
         private const val PICK_IMAGE = 51424
     }

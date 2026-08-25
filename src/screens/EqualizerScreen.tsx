@@ -12,8 +12,6 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Animated,
   Dimensions,
-  PanResponder,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -40,6 +38,16 @@ import {
   getEqCapabilities,
   type EqCapabilities,
 } from '../audioEffects';
+import {
+  Gesture,
+  GestureDetector,
+  // NOT react-native's ScrollView. blocksExternalGesture needs a ref to
+  // something gesture-handler knows about, and RNGH's ScrollView is RN's
+  // wrapped in a NativeViewGestureHandler — which is precisely the handler the
+  // band drag has to be allowed to block.
+  ScrollView as GHScrollView,
+} from 'react-native-gesture-handler';
+import {runOnJS} from 'react-native-reanimated';
 import {Toggle} from '../components/Toggle';
 
 /** Renders a preset's glyph by name — the preset list owns which icon it uses,
@@ -54,6 +62,9 @@ const SLIDER_H = 150;
 export function EqualizerScreen({onClose}: {onClose: () => void}) {
   const settings = useSettings();
   const [caps, setCaps] = useState<EqCapabilities | null>(null);
+  /** Handed to every Band so its drag can block this scroller rather than
+   *  losing the touch to it — see the note on the band gesture. */
+  const scrollRef = useRef<GHScrollView>(null);
 
   useEffect(() => {
     getEqCapabilities().then(setCaps);
@@ -109,7 +120,10 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
         <Text style={styles.barTitle}>Equalizer</Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
+      <GHScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.body}>
         <View style={styles.row}>
           <View style={styles.rowText}>
             <Text style={styles.rowLabel}>Enable equalizer</Text>
@@ -144,6 +158,7 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
           {EQ_BANDS.map((hz, i) => (
             <Band
               key={hz}
+              scrollRef={scrollRef}
               hz={hz}
               value={gains[i]}
               disabled={!settings.eqEnabled}
@@ -165,10 +180,7 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
                 activeOpacity={0.75}
                 onPress={() => pickPreset(p.id)}
                 style={[styles.preset, on && styles.presetOn]}>
-                <PresetIcon
-                  name={p.icon}
-                  color={on ? C.bg : C.sub}
-                />
+                <PresetIcon name={p.icon} color={on ? C.bg : C.sub} />
                 <Text style={[styles.presetText, on && styles.presetTextOn]}>
                   {p.label}
                 </Text>
@@ -176,7 +188,7 @@ export function EqualizerScreen({onClose}: {onClose: () => void}) {
             );
           })}
         </View>
-      </ScrollView>
+      </GHScrollView>
     </View>
   );
 }
@@ -199,11 +211,14 @@ function Band({
   value,
   disabled,
   onChange,
+  scrollRef,
 }: {
   hz: number;
   value: number;
   disabled?: boolean;
   onChange: (db: number) => void;
+  /** The page's scroller, so the drag can tell it to wait rather than steal. */
+  scrollRef: React.RefObject<GHScrollView>;
 }) {
   const t = useRef(new Animated.Value(toT(value))).current;
   const [labelDb, setLabelDb] = useState(Math.round(value));
@@ -226,45 +241,96 @@ function Band({
     (y: number) => {
       const tt = clamp01(1 - y / (heightRef.current || 1));
       t.setValue(tt); // native view update, no React render
+      // WHOLE dB, and the same number the label shows. The label already
+      // rounded while onChange got the raw value, so the gain you set could sit
+      // up to 0.5dB away from the figure you were reading — which made "set it
+      // to exactly +4" impossible to hit.
       const db = Math.round(EQ_MIN_DB + tt * (EQ_MAX_DB - EQ_MIN_DB));
       setLabelDb(prev => (prev === db ? prev : db));
-      return EQ_MIN_DB + tt * (EQ_MAX_DB - EQ_MIN_DB);
+      return db;
     },
     [t],
   );
 
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => !disabledRef.current,
-      onMoveShouldSetPanResponder: () => !disabledRef.current,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: e => {
-        draggingRef.current = true;
-        apply(e.nativeEvent.locationY);
-      },
-      onPanResponderMove: e => apply(e.nativeEvent.locationY),
-      onPanResponderRelease: e => {
-        const db = apply(e.nativeEvent.locationY);
-        draggingRef.current = false;
-        changeRef.current(db);
-      },
-      onPanResponderTerminate: () => {
-        draggingRef.current = false;
-      },
-    }),
-  ).current;
+  // Held in refs so the gesture, built once, always calls the current closures.
+  const applyRef = useRef(apply);
+  applyRef.current = apply;
+  const commitRef = useRef((y: number) => changeRef.current(apply(y)));
+  commitRef.current = (y: number) => changeRef.current(apply(y));
+
+  /**
+   * The band drag, natively recognised — and blocking the page scroller.
+   *
+   * As a PanResponder this could not work, and a tap was the only thing that
+   * did: the band drags VERTICALLY inside a vertical ScrollView, so the moment
+   * the finger moved ~8dp Android's native ScrollView.onInterceptTouchEvent
+   * claimed the touch and the slider got onPanResponderTerminate. A tap has no
+   * movement to intercept, which is exactly why "I have to click on a specific
+   * position" was the only way to set a band.
+   *
+   * `onPanResponderTerminationRequest: () => false` looked like the guard for
+   * this and is not: it only refuses requests from the JS responder system and
+   * has no bearing on what a native Android scroll view does.
+   *
+   * blocksExternalGesture is the real answer — the ScrollView now WAITS for
+   * this to fail instead of taking the touch out from under it. And `e.y` is
+   * relative to this gesture's own view, unlike nativeEvent.locationY, which is
+   * relative to whichever view received the event and shifts mid-drag as the
+   * finger crosses the fill or the knob.
+   */
+  const drag = useMemo(
+    () =>
+      Gesture.Pan()
+        // Respond from the first pixel: this is a slider, not a scroller, and
+        // there is no ambiguity left to resolve once the touch is ours.
+        .minDistance(0)
+        .blocksExternalGesture(scrollRef)
+        .onBegin(e => {
+          if (disabledRef.current) {
+            return;
+          }
+          draggingRef.current = true;
+          runOnJS(applyRef.current)(e.y);
+        })
+        .onUpdate(e => {
+          if (!draggingRef.current) {
+            return;
+          }
+          runOnJS(applyRef.current)(e.y);
+        })
+        .onFinalize((e, success) => {
+          if (!draggingRef.current) {
+            return;
+          }
+          draggingRef.current = false;
+          if (success) {
+            runOnJS(commitRef.current)(e.y);
+          }
+        }),
+    [scrollRef],
+  );
 
   // Bottom-anchored fill via scaleY, and the knob via translateY — both are
   // transform-only, so they composite on the UI thread at 60fps.
   const fillStyle = {
     transform: [
-      {translateY: t.interpolate({inputRange: [0, 1], outputRange: [SLIDER_H / 2, 0]})},
+      {
+        translateY: t.interpolate({
+          inputRange: [0, 1],
+          outputRange: [SLIDER_H / 2, 0],
+        }),
+      },
       {scaleY: t},
     ],
   };
   const knobStyle = {
     transform: [
-      {translateY: t.interpolate({inputRange: [0, 1], outputRange: [0, -SLIDER_H]})},
+      {
+        translateY: t.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -SLIDER_H],
+        }),
+      },
     ],
   };
 
@@ -274,21 +340,25 @@ function Band({
         {labelDb > 0 ? '+' : ''}
         {labelDb}
       </Text>
-      <View
-        style={[styles.column, disabled && styles.columnOff]}
-        onLayout={(e: LayoutChangeEvent) => {
-          heightRef.current = e.nativeEvent.layout.height;
-        }}
-        {...pan.panHandlers}>
-        <View style={styles.columnTrack} />
-        <Animated.View
-          style={[styles.columnFill, fillStyle, disabled && styles.fillOff]}
-        />
-        <Animated.View
-          style={[styles.handle, knobStyle, disabled && styles.handleOff]}
-          pointerEvents="none"
-        />
-      </View>
+      <GestureDetector gesture={drag}>
+        <View
+          style={[styles.column, disabled && styles.columnOff]}
+          // A 26px-wide target is thin for a drag; widen what responds without
+          // widening what is drawn.
+          hitSlop={{left: 10, right: 10}}
+          onLayout={(e: LayoutChangeEvent) => {
+            heightRef.current = e.nativeEvent.layout.height;
+          }}>
+          <View style={styles.columnTrack} />
+          <Animated.View
+            style={[styles.columnFill, fillStyle, disabled && styles.fillOff]}
+          />
+          <Animated.View
+            style={[styles.handle, knobStyle, disabled && styles.handleOff]}
+            pointerEvents="none"
+          />
+        </View>
+      </GestureDetector>
       <Text style={styles.bandHz}>{bandLabel(hz)}</Text>
     </View>
   );
@@ -394,7 +464,9 @@ const styles = StyleSheet.create({
   preset: {
     // Three per row, computed in px — a % width resolved against the screen
     // rather than the padded content box overflowed to two per row on-device.
-    width: Math.floor((Dimensions.get('window').width - 2 * S.gutter - 2 * 10) / 3),
+    width: Math.floor(
+      (Dimensions.get('window').width - 2 * S.gutter - 2 * 10) / 3,
+    ),
     alignItems: 'center',
     gap: 6,
     paddingVertical: 14,

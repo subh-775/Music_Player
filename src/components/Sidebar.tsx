@@ -37,9 +37,9 @@ import {
   ChevronRight,
   Clock,
   Keyboard,
-  ListMusic,
   Moon,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   Sparkles,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -51,25 +51,27 @@ import {DRAWER_W, drawerX, settleDrawer} from '../drawer';
 const ICON = require('../assets/app-icon.png');
 
 export type SidebarDest =
-  | 'recents'
   | 'settings'
   | 'shortcuts'
   | 'stats'
-  | 'queue'
-  | 'sleep';
+  | 'sleep'
+  | 'equalizer';
 
 // No per-item hint text any more — "Everything you have listened to" under
 // "Recents" was explaining a label that already explains itself, and it made
 // every row two lines for no reason. The label is enough.
 //
-// Queue and Sleep timer are both NOW actions and sit above the reference-y
-// ones: the queue could only be reached from inside the player, and the sleep
-// timer only from inside Settings, which is the wrong depth for something you
-// reach for with the phone already face-down.
+// Sleep timer and Equalizer are both things you reach for WHILE listening, and
+// both were buried inside Settings — the wrong depth for something you want
+// with the phone already face-down.
+//
+// Queue is gone from here: the player's own queue handle is a better home for
+// it, one swipe from where you already are. Recents is gone too — it was the
+// same history "Your sound" already presents, sorted differently, and one
+// listening page is enough.
 const ITEMS: {id: SidebarDest; label: string; Icon: typeof Clock}[] = [
-  {id: 'queue', label: 'Queue', Icon: ListMusic},
   {id: 'sleep', label: 'Sleep timer', Icon: Moon},
-  {id: 'recents', label: 'Recents', Icon: Clock},
+  {id: 'equalizer', label: 'Equalizer', Icon: SlidersHorizontal},
   {id: 'stats', label: 'Your sound', Icon: Sparkles},
   {id: 'shortcuts', label: 'Shortcuts', Icon: Keyboard},
   {id: 'settings', label: 'Settings', Icon: SettingsIcon},

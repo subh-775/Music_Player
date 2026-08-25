@@ -72,12 +72,22 @@ export function Sheet({
   onClose,
   children,
   style,
+  dragEnabled = true,
 }: {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
   /** Extra styling for the sheet body — height caps, mostly. */
   style?: ViewStyle;
+  /**
+   * Turn the drag-to-dismiss off while something inside owns the vertical
+   * axis — a lifted, reorderable row, specifically.
+   *
+   * This gesture activates at 12px of downward travel and
+   * DraggableFlatList's activationDistance is also 12: a genuine tie, and one
+   * the sheet has no business winning. Whoever holds the row says so.
+   */
+  dragEnabled?: boolean;
 }) {
   const y = useSharedValue(HIDE_Y);
   /**
@@ -139,6 +149,7 @@ export function Sheet({
   // anything scrollable inside the sheet only when the drag is clearly vertical
   // and downward.
   const drag = Gesture.Pan()
+    .enabled(dragEnabled)
     .activeOffsetY([-1000, 12])
     .failOffsetX([-20, 20])
     .onUpdate(e => {
@@ -157,7 +168,8 @@ export function Sheet({
     });
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{translateY: y.value}],
+    // No identity transform on a settled sheet — see the note in PlayerScreen.
+    transform: y.value === 0 ? [] : [{translateY: y.value}],
   }));
   // One value drives both, so the dim and the slide can never disagree
   // mid-gesture.

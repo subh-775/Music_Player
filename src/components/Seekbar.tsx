@@ -53,10 +53,17 @@ export function Seekbar({
   position,
   duration,
   onSeek,
+  center,
 }: {
   position: number;
   duration: number;
   onSeek: (seconds: number) => void;
+  /**
+   * Rendered BETWEEN the two timestamps. The player's pane toggles live here
+   * rather than in a row of their own — three labelled tabs were a whole strip
+   * of screen spent on two states.
+   */
+  center?: React.ReactNode;
 }) {
   /** 0..1 along the bar. The single source of truth for fill and thumb. */
   const t = useSharedValue(0);
@@ -100,7 +107,8 @@ export function Seekbar({
         return;
       }
     }
-    const frac = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
+    const frac =
+      duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
     t.value = frac;
     setLabel(position);
   }, [position, duration, t]);
@@ -215,7 +223,8 @@ export function Seekbar({
       </GestureDetector>
       <View style={styles.times}>
         <Text style={styles.time}>{clock(label)}</Text>
-        <Text style={styles.time}>{clock(duration)}</Text>
+        {center}
+        <Text style={[styles.time, styles.timeEnd]}>{clock(duration)}</Text>
       </View>
     </View>
   );
@@ -245,6 +254,15 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 1},
     elevation: 3,
   },
-  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 6},
-  time: {color: C.sub, fontSize: 11, fontVariant: ['tabular-nums']},
+  // Not space-between: with a centre slot, space-between drifts it sideways
+  // every time the left timestamp changes width — at 1:00, and again at 1:00:00.
+  // Two fixed-width tabular ends and a flexing middle keep it dead centre.
+  times: {flexDirection: 'row', alignItems: 'center', marginTop: 6},
+  time: {
+    color: C.sub,
+    fontSize: 11,
+    width: 46,
+    fontVariant: ['tabular-nums'],
+  },
+  timeEnd: {textAlign: 'right'},
 });

@@ -41,17 +41,16 @@ import {
   ChevronDown,
   CircleArrowDown,
   CirclePlus,
+  Disc3,
   Heart,
-  ListMusic,
   Info,
-  Music,
   Pause,
   Play,
+  Quote,
   Repeat2,
   Shuffle,
   SkipBack,
   SkipForward,
-  Type,
 } from 'lucide-react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Animated, {
@@ -88,8 +87,8 @@ import {toward, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
 import {Seekbar} from '../components/Seekbar';
 import {SeekPeek} from '../components/SeekPeek';
-import {QueuePane} from './QueueScreen';
-import {Toaster} from '../components/Toaster';
+import {QueuePane, useUpcomingCount} from './QueueScreen';
+import {Sheet} from '../components/Sheet';
 import {toast} from '../toast';
 
 /**
@@ -121,31 +120,30 @@ const SWIPE_COMMIT = 64; // px before a swipe actually changes track
 // shared number is what makes them move as one thing instead of two.
 const ART_TRAVEL = 400;
 
+/**
+ * Two panes, not three, and no labels.
+ *
+ * The queue left the pane stack entirely — it is a sheet now, pulled up from
+ * the bottom, which is both what it should always have been and the thing that
+ * takes DraggableFlatList out from under the player's own transform. What is
+ * left is a binary — artwork or lyrics — and a binary does not need a labelled
+ * tab strip taking a whole row of the screen. Two icons ride in the middle of
+ * the timestamp row instead, which was empty.
+ */
 const PANES = [
-  {id: 'song', label: 'Song', Icon: Music},
-  {id: 'lyrics', label: 'Lyrics', Icon: Type},
-  {id: 'queue', label: 'Queue', Icon: ListMusic},
+  {id: 'song', Icon: Disc3},
+  {id: 'lyrics', Icon: Quote},
 ] as const;
 
 type Pane = (typeof PANES)[number]['id'];
 
 export function PlayerScreen({
   visible,
-  focusPane,
   onClose,
   onAddToPlaylist,
   onOpenArtist,
 }: {
   visible: boolean;
-  /**
-   * Land on a particular pane — set when the drawer's Queue entry is what
-   * opened the player, so you arrive at the queue rather than at the artwork.
-   *
-   * Carries a nonce because the request is an EVENT, not a state: asking for
-   * the queue twice in a row is two requests, and a bare string would only
-   * ever fire the first.
-   */
-  focusPane?: {pane: Pane; nonce: number} | null;
   onClose: () => void;
   onAddToPlaylist: (track: Track) => void;
   onOpenArtist: (credit: string) => void;
@@ -214,6 +212,11 @@ export function PlayerScreen({
   );
 
   const [pane, setPane] = useState<Pane>('song');
+  const [queueOpen, setQueueOpen] = useState(false);
+  /** True while a queue row is lifted — the sheet's own drag stands down, or it
+   *  wins a 12px-vs-12px tie it has no business winning. */
+  const [rowDragging, setRowDragging] = useState(false);
+  const upcoming = useUpcomingCount();
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
   // From the player module, not local state — the playlist screen toggles the
   // same thing, and two copies of this flag is why the icon went stale.
@@ -424,6 +427,40 @@ export function PlayerScreen({
 
   const headerDismiss = useMemo(() => makeDismiss(), [makeDismiss]);
 
+  /**
+   * The queue handle: swipe up, or just tap.
+   *
+   * activeOffsetY is UPWARD-only ([-12, 1000]) on purpose. A downward drag here
+   * has to keep falling through to the sheet dismiss — otherwise the bottom
+   * strip of the player, which is where a thumb naturally rests, becomes a dead
+   * zone for minimising.
+   */
+  const queuePull = useMemo(
+    () =>
+      Gesture.Race(
+        Gesture.Tap().onEnd((_e, success) => {
+          if (success) {
+            runOnJS(setQueueOpen)(true);
+          }
+        }),
+        Gesture.Pan()
+          .activeOffsetY([-12, 1000])
+          .failOffsetX([-24, 24])
+          .onEnd((e, success) => {
+            if (success && (e.translationY < -40 || e.velocityY < -600)) {
+              runOnJS(setQueueOpen)(true);
+            }
+          }),
+      ),
+    [],
+  );
+
+  /** The grip steps aside while the artwork is being swiped — during a skip the
+   *  eye belongs on the cover, not on an affordance for something else. */
+  const gripStyle = useAnimatedStyle(() => ({
+    opacity: 1 - Math.min(1, Math.abs(slide.value) / 120),
+  }));
+
   const commit = useCallback(
     (to: 'next' | 'prev') => {
       // Fire the skip IMMEDIATELY so the engine advances during the animation,
@@ -518,7 +555,18 @@ export function PlayerScreen({
   );
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{translateY: sheetY.value}],
+    // Drop the transform PROPERTY entirely once the sheet has settled, rather
+    // than leaving an identity translate on it.
+    //
+    // Honest caveat: this is not a proven fix for the queue's drag offset.
+    // react-native-draggable-flatlist measures its cells with
+    // measureLayout(container) — relative — and drags them with
+    // gesture.translationY — also relative — so it never reads an absolute
+    // coordinate that an ancestor transform could shift. What it does buy is
+    // that a settled sheet stops handing Android a matrix to compose at all,
+    // which is free and correct on its own terms. The structural fix is the
+    // queue moving out of this stack entirely.
+    transform: sheetY.value === 0 ? [] : [{translateY: sheetY.value}],
   }));
   const artStyle = useAnimatedStyle(() => ({
     transform: [{translateX: slide.value}],
@@ -582,12 +630,6 @@ export function PlayerScreen({
       setDownloading(false);
     }
   }, [track, downloading]);
-
-  useEffect(() => {
-    if (focusPane) {
-      setPane(focusPane.pane);
-    }
-  }, [focusPane]);
 
   // Skipping to a song with no lyrics while the Lyrics pane is open would
   // otherwise strand you on a dead pane behind a dead tab.
@@ -662,9 +704,6 @@ export function PlayerScreen({
               visible={visible && pane === 'lyrics'}
             />
           </View>
-          <View style={pane === 'queue' ? styles.paneFill : styles.paneOff}>
-            <QueuePane />
-          </View>
           {pane === 'song' && (
             <GestureDetector gesture={artGesture}>
               <View style={styles.artArea}>
@@ -732,6 +771,18 @@ export function PlayerScreen({
                   </TouchableOpacity>
                   <SourceBadge track={track} />
                   <QualityBadge track={track} />
+                  {/* Where the sound is GOING is metadata about this playback,
+                      which is what this row is for. It used to share a row with
+                      the pane tabs, and that row is gone; PlayerBar already
+                      carries it in exactly this place. */}
+                  {!!output && (
+                    <View style={styles.output}>
+                      <Bluetooth size={12} color={C.accent} />
+                      <Text style={styles.outputText} numberOfLines={1}>
+                        {output}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </Animated.View>
 
@@ -790,60 +841,48 @@ export function PlayerScreen({
             </View>
           </View>
 
+          {/* The pane toggles ride in the MIDDLE of the timestamp row, which
+              was empty. Two icons for a binary choice, where a labelled tab
+              strip used to spend a whole row of the screen on it. */}
           <ProgressArea
             ref={progressApi}
             live={visible}
             onSample={onProgressSample}
-          />
-
-          {/* Pane toggles left, audio output right — above the transport so
-              the play controls never shift. */}
-          <View style={styles.paneRow}>
-            <View style={styles.paneTabs}>
-              {PANES.map(({id, label, Icon}) => {
-                const on = pane === id;
-                // Lyrics goes dead when this song genuinely has none — common
-                // on SoundCloud/YouTube uploads. The info glyph replaces the
-                // tab's own icon and explains itself on tap, rather than
-                // opening a pane that only ever says "nothing here".
-                const dead = id === 'lyrics' && !lyricsState.available;
-                const Glyph = dead ? Info : Icon;
-                return (
-                  <TouchableOpacity
-                    key={id}
-                    onPress={() =>
-                      dead
-                        ? toast('No lyrics available for this song')
-                        : setPane(id)
-                    }
-                    activeOpacity={0.8}
-                    style={[
-                      styles.paneTab,
-                      on && !dead && styles.paneTabOn,
-                      dead && styles.paneTabDead,
-                    ]}>
-                    <Glyph size={15} color={on && !dead ? C.text : C.faint} />
-                    <Text
+            center={
+              <View style={styles.centerSlot}>
+                {PANES.map(({id, Icon}) => {
+                  const on = pane === id;
+                  // Lyrics goes dead when this song genuinely has none — common
+                  // on SoundCloud/YouTube uploads. The info glyph replaces the
+                  // icon and explains itself on tap, rather than opening a pane
+                  // that only ever says "nothing here".
+                  const dead = id === 'lyrics' && !lyricsState.available;
+                  const Glyph = dead ? Info : Icon;
+                  return (
+                    <TouchableOpacity
+                      key={id}
+                      onPress={() =>
+                        dead
+                          ? toast('No lyrics available for this song')
+                          : setPane(id)
+                      }
+                      hitSlop={10}
+                      activeOpacity={0.8}
                       style={[
-                        styles.paneLabel,
-                        on && !dead && styles.paneLabelOn,
+                        styles.paneIcon,
+                        on && !dead && styles.paneIconOn,
                       ]}>
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {!!output && (
-              <View style={styles.output}>
-                <Bluetooth size={13} color={C.accent} />
-                <Text style={styles.outputText} numberOfLines={1}>
-                  {output}
-                </Text>
+                      <Glyph
+                        size={16}
+                        color={on && !dead ? C.text : C.faint}
+                        strokeWidth={2.1}
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
-            )}
-          </View>
+            }
+          />
 
           {/* Transport */}
           <View style={styles.transport}>
@@ -895,12 +934,47 @@ export function PlayerScreen({
               />
             </TouchableOpacity>
           </View>
+
+          {/* The queue, as an affordance rather than a tab: swipe up, or tap.
+              The count is IN the label because a grip carrying no information
+              is easy to ignore — "Your queue · 12 songs" is a reason to pull. */}
+          <GestureDetector gesture={queuePull}>
+            <Animated.View style={[styles.queueHandle, gripStyle]}>
+              <View style={styles.queueGrip} />
+              <Text style={styles.queueLabel}>
+                Your queue
+                {upcoming > 0
+                  ? ` · ${upcoming} song${upcoming === 1 ? '' : 's'}`
+                  : ''}
+              </Text>
+            </Animated.View>
+          </GestureDetector>
         </View>
 
-        {/* Toasts must be visible INSIDE the player — the app-root toaster
-            sits underneath it, so "Downloading…" was invisible until the
-            player was closed. Same queue, second outlet. */}
-        <Toaster bottom={40} />
+        {/*
+          The queue is a SHEET now, not a pane.
+
+          It is the layout you asked for, and it is also the structural answer
+          to the drag-offset report: DraggableFlatList is no longer nested
+          inside the player's own animated transform and its display:none pane
+          stack — it sits in a sheet of its own, mounted only once opened.
+        */}
+        <Sheet
+          open={queueOpen}
+          onClose={() => setQueueOpen(false)}
+          dragEnabled={!rowDragging}
+          style={styles.queueSheet}>
+          <View style={styles.queueHead}>
+            <Text style={styles.queueTitle}>Your queue</Text>
+            <TouchableOpacity onPress={() => setQueueOpen(false)} hitSlop={12}>
+              <ChevronDown size={22} color={C.sub} />
+            </TouchableOpacity>
+          </View>
+          <QueuePane
+            onDragBegin={() => setRowDragging(true)}
+            onDragEnd={() => setRowDragging(false)}
+          />
+        </Sheet>
       </Animated.View>
     </View>
   );
@@ -1034,8 +1108,10 @@ const ProgressArea = React.memo(
       /** False when the player is parked off-screen — see PARKED_POLL. */
       live: boolean;
       onSample: (p: number, d: number) => void;
+      /** Passed straight through to the Seekbar's timestamp row. */
+      center?: React.ReactNode;
     }
-  >(function ProgressArea({live, onSample}, ref) {
+  >(function ProgressArea({live, onSample, center}, ref) {
     const {position: enginePosition, duration} = useProgress(
       live ? 250 : PARKED_POLL,
     );
@@ -1073,7 +1149,12 @@ const ProgressArea = React.memo(
     useImperativeHandle(ref, () => ({seek: seekAndShow}), [seekAndShow]);
 
     return (
-      <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
+      <Seekbar
+        position={position}
+        duration={duration}
+        onSeek={seekAndShow}
+        center={center}
+      />
     );
   }),
 );
@@ -1209,6 +1290,40 @@ const styles = StyleSheet.create({
   },
 
   pane: {flex: 1, minHeight: 0},
+  /** The pane toggles, in the middle of the timestamp row. flex:1 between two
+   *  fixed-width timestamps is what keeps them optically centred. */
+  centerSlot: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  paneIcon: {padding: 7, borderRadius: 999},
+  paneIconOn: {backgroundColor: 'rgba(255,255,255,0.13)'},
+  queueHandle: {alignItems: 'center', paddingTop: 14, paddingBottom: 10},
+  queueGrip: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginBottom: 8,
+  },
+  queueLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.text,
+    letterSpacing: 0.2,
+  },
+  queueSheet: {maxHeight: '72%'},
+  queueHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  queueTitle: {...T.rowTitle, color: C.text, fontSize: 16},
   paneFill: {flex: 1, minHeight: 0},
   paneOff: {display: 'none'},
   // Less inset than before — the artwork is the thing you came here to look
@@ -1253,26 +1368,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  paneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 14,
-  },
-  paneTabs: {flexDirection: 'row', gap: 6},
-  paneTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  paneTabOn: {backgroundColor: 'rgba(255,255,255,0.14)'},
-  paneTabDead: {opacity: 0.45},
-  paneLabel: {fontSize: 11, fontWeight: '600', color: C.faint},
-  paneLabelOn: {color: C.text},
   output: {flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1},
   outputText: {color: C.accent, fontSize: 11, fontWeight: '600'},
 
@@ -1280,7 +1375,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 18,
+    // Up, and with the queue grip taking the space below it. The labelled pane
+    // strip that used to sit between the seekbar and this is gone.
+    marginTop: 22,
+    marginBottom: 4,
   },
   // 10px padding takes the 24px shuffle/repeat icons to a 44px touch target.
   tBtn: {padding: 10},
