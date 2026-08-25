@@ -937,6 +937,61 @@ keep the app's exact green in dark.
 with wide counters, so body text runs at 1.75 leading with slightly negative
 tracking — left at defaults it reads loose over a long paragraph.
 
+## Docs round 2 — the search never worked, and I could not have known
+
+**The bug.** Ctrl-K opened the palette and typing returned nothing, on every
+query, from the day it shipped. `import.meta.glob('...*.mdx', {query: '?raw'})`
+looks like it hands you the markdown. It does not, here: `@mdx-js/rollup` strips
+the query before it decides what to handle —
+
+```js
+const [path] = id.split('?')   // @mdx-js/rollup/lib/index.js
+```
+
+— so the raw text was handed straight back to the MDX compiler and what arrived
+at the import site was a *component*. `plain(md)` threw on `.replace`, the
+`Promise.all` rejected with nobody listening, and the index stayed `null`
+forever. The palette dutifully rendered "Nothing matches".
+
+Two things worth keeping from this. The note in the previous entry claiming the
+chunking was verified in the build output was half right and useless: the chunks
+were there, and their contents were wrong. And a rejected promise with no
+`.catch` is a silent failure by construction — this one shipped, was reviewed,
+and was found by a user pressing Ctrl-K.
+
+**The fix.** The corpus is one virtual module assembled from the filesystem at
+build time (`searchCorpus` in `vite.config.js`) and imported dynamically: one
+66 kB chunk, 23 kB over the wire, loaded the first time the palette opens. It
+never goes near the MDX compiler.
+
+**I installed a browser this time.** Everything below was measured in Chromium
+rather than reasoned about: 20 routes × 3 widths × 2 themes with no horizontal
+overflow and no console errors; Ctrl-K, `/`, arrow keys, Enter and Escape;
+theme persistence across a reload; hash links landing on their section.
+
+**Design pass.**
+
+- **Weights capped at 700.** Montserrat 800 is a display weight — fine for three
+  words of hero, wrong for a page read for minutes. 400 body / 500–600 chrome /
+  700 headings, which is where the Fix-Spotify docs sit.
+- **The only gradient left is three words of the home headline.** The radial
+  brand wash behind the gesture animations is gone: it tinted a stage whose one
+  job is to show a phone being touched, and gave the eye a second thing to look
+  at that meant nothing.
+- **The theme control is a switch, not an icon button.** A sun in a button is
+  read as "you are in light mode" as often as "press for light mode". A knob has
+  a position, and a position is a state.
+- **Under 700px the search field stops being a field** and becomes the same
+  40px icon slot as every other header control. A 420px box saying "Search
+  Ctrl K" offers a phone nothing — there is no Ctrl — and it collided with the
+  brand at exactly the width where every pixel is spoken for.
+
+**The releases page no longer hardcodes versions.** It reads the last eight
+releases from the GitHub API at view time, so it cannot fall behind the app. The
+hand-written table of versions and headlines is gone. Several releases were
+published by CI with an empty body, so where there are no notes the row shows
+the APK and its size — true of every release either way.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

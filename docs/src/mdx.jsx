@@ -11,6 +11,7 @@
  * are a tinted field and not the usual coloured rail down the left edge.
  */
 import {CrossfadeDemo, EqDemo, GestureGrid, SeekDemo} from './demos.jsx';
+import {ReleaseList} from './releases.jsx';
 import {External, Link as LinkIcon} from './icons.jsx';
 
 function heading(Tag) {
@@ -80,4 +81,5 @@ export const mdxComponents = {
   SeekDemo,
   CrossfadeDemo,
   GestureGrid,
+  ReleaseList,
 };

@@ -269,7 +269,7 @@ button {
   align-items: center;
   gap: var(--s-2);
   color: var(--text);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 1.0625rem;
   letter-spacing: -0.03em;
   flex: none;
@@ -342,6 +342,55 @@ button {
 }
 .icon-btn:active {
   transform: scale(0.94);
+}
+
+/*
+ * Theme control as a SWITCH, not an icon button.
+ *
+ * An icon button showing a sun is ambiguous in exactly the way a control for
+ * two states must not be: it is read as "you are in light mode" as often as
+ * "press for light mode". A track with a knob in it has a position, and a
+ * position is a state — the knob sits left on light, right on dark, and the
+ * icon rides with it.
+ */
+.theme-switch {
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: var(--bg-soft);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease-out),
+    background-color var(--t-fast) var(--ease-out);
+}
+.theme-switch:hover {
+  border-color: var(--brand-edge);
+}
+.theme-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-2);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--t-mid) var(--ease-out);
+}
+:root[data-theme='dark'] .theme-knob,
+:root:not([data-theme='light']) .theme-knob {
+  transform: translateX(20px);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .theme-knob {
+    transform: none;
+  }
 }
 
 .hdr-sep {
@@ -433,7 +482,7 @@ kbd {
   margin: 0 0 var(--s-2);
   padding: 0 var(--s-3);
   font-size: var(--fs-xs);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -507,7 +556,7 @@ kbd {
   margin: 0 0 var(--s-4);
   font-size: var(--fs-2xl);
   line-height: 1.1;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.035em;
   text-wrap: balance;
 }
@@ -694,7 +743,7 @@ kbd {
   border-bottom: 1px solid var(--line);
   color: var(--text-3);
   font-size: var(--fs-xs);
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -748,7 +797,7 @@ kbd {
   gap: 6px;
   margin-bottom: var(--s-2);
   font-size: var(--fs-xs);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -794,7 +843,7 @@ kbd {
 .toc-title {
   margin: 0 0 var(--s-3);
   font-size: var(--fs-xs);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -1069,20 +1118,34 @@ kbd {
   background: var(--brand);
   color: var(--brand-ink);
   font-size: 10.5px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .hero h1 {
   margin: var(--s-4) 0 0;
   font-size: clamp(2.4rem, 7vw, var(--fs-3xl));
   line-height: 1.03;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.04em;
   text-wrap: balance;
 }
 .hero h1 em {
   font-style: normal;
+  /* The site's only gradient, on three words of one headline. Gradient text is
+     a default worth refusing — it is usually decoration standing in for
+     hierarchy — but here it marks the single claim the product is built around,
+     and nothing else on the site competes with it. The solid colour underneath
+     is what anyone without background-clip gets. */
   color: var(--brand);
+  background: linear-gradient(
+    100deg,
+    var(--brand-400) 0%,
+    var(--brand-500) 55%,
+    var(--brand-600) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .hero-lede {
@@ -1228,7 +1291,7 @@ kbd {
 .stat b {
   display: block;
   font-size: var(--fs-lg);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
 }
@@ -1238,6 +1301,9 @@ kbd {
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--text-3);
+  /* Two-word labels break where they like otherwise, and four cards each
+     breaking differently reads as four different components. */
+  text-wrap: balance;
 }
 
 /* ── Live demos (shared with the guide pages) ────────────────────────────── */
@@ -1409,13 +1475,117 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 .hbar-value {
+  /* The demo header uppercases its right-hand slot — that is right for a hint
+     like DRAG A BAND and wrong for a unit, which is a word: 9s, not 9S. */
+  text-transform: none;
+  letter-spacing: 0;
   font-size: var(--fs-md);
-  font-weight: 800;
+  font-weight: 700;
   color: var(--brand);
   font-variant-numeric: tabular-nums;
 }
 .hbar-value.off {
   color: var(--text-3);
+}
+
+/* ── Release list ────────────────────────────────────────────────────────── */
+
+.rel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: var(--s-5) 0;
+}
+
+.rel {
+  display: block;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out),
+    background-color var(--t-fast) var(--ease-out);
+}
+.rel:hover {
+  border-color: var(--brand-edge);
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.rel-latest {
+  border-color: var(--brand-edge);
+  background: var(--brand-wash);
+}
+
+.rel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.rel-tag {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+.rel-chip {
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.rel-date {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rel-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+}
+
+/* Three grey bars while the request is out. A spinner says "wait"; this says
+   what is coming and how much of it, and the list does not jump when it
+   arrives. */
+.rel-skel {
+  pointer-events: none;
+}
+.rel-skel span {
+  display: block;
+  height: 11px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  animation: skel 1.4s var(--ease-out) infinite;
+}
+.rel-skel span:first-child {
+  width: 30%;
+}
+.rel-skel span:last-child {
+  width: 72%;
+  margin-top: var(--s-2);
+}
+@keyframes skel {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.rel-fallback {
+  margin: var(--s-5) 0;
+  padding: var(--s-4) var(--s-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-soft);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
 }
 
 /* ── Gesture cards ───────────────────────────────────────────────────────── */
@@ -1436,11 +1606,11 @@ kbd {
   position: relative;
   height: 172px;
   overflow: hidden;
-  background: radial-gradient(
-    120% 92% at 50% 0%,
-    var(--brand-wash),
-    transparent 62%
-  );
+  /* Flat, not a radial brand wash. The wash tinted a stage whose only job is
+     to show a phone being touched: it added a second thing to look at and said
+     nothing. A plain recessed surface reads as "screen" and gets out of the way
+     of the animation. */
+  background: var(--bg-soft);
   border-bottom: 1px solid var(--line-soft);
 }
 .gtext {
@@ -1537,7 +1707,7 @@ kbd {
   border: 1px solid var(--brand-edge);
   color: var(--brand);
   font-size: 9px;
-  font-weight: 800;
+  font-weight: 700;
 }
 .qrow {
   position: absolute;
@@ -1798,6 +1968,69 @@ kbd {
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
+
+/*
+ * Under 700px the search field stops being a field.
+ *
+ * A 420px box reading "Search  Ctrl K" has nothing to offer a phone: the
+ * keyboard hint is meaningless without a keyboard, and the box collides with
+ * the brand at exactly the width where every pixel is already spoken for. It
+ * collapses to the same 40px icon slot as every other control in the header,
+ * and the palette it opens is unchanged — the real field lives in there.
+ */
+@media (max-width: 699px) {
+  .hdr {
+    gap: var(--s-1);
+    padding: 0 var(--s-3);
+  }
+  .hdr-mid {
+    justify-content: flex-end;
+  }
+  .search-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: var(--text-2);
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .search-btn:hover {
+    background: var(--surface-2);
+    border-color: transparent;
+  }
+  .search-btn span,
+  .search-btn kbd {
+    display: none;
+  }
+  .brand {
+    font-size: 1rem;
+  }
+  .brand img {
+    width: 26px;
+    height: 26px;
+  }
+  .hdr-sep {
+    display: none;
+  }
+  .doc {
+    padding: var(--s-5) var(--s-4) var(--s-8);
+  }
+  .home {
+    padding: var(--s-6) var(--s-4) var(--s-8);
+  }
+  .pal-scrim {
+    padding: var(--s-4) var(--s-3);
+  }
+  .pal {
+    max-height: 78vh;
+  }
+  .pal-foot {
+    display: none;
+  }
+}
 
 @media (min-width: 700px) {
   .hdr-links {

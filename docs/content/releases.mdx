@@ -1,6 +1,6 @@
 # Releases
 
-Every build, with its notes, lives on GitHub.
+Every build is published on GitHub, and the app updates itself from the same place.
 
 <div className="hero-actions">
   <a className="btn btn-primary" href="https://github.com/subh-775/Music_Player/releases/latest">Download the latest APK</a>
@@ -19,24 +19,18 @@ Install the new APK **over** the old app. The in-app updater does exactly this �
 
 See **[Updates](/reference/updates)** for how the check, the download and the install actually work.
 
+## Every release
+
+Read straight from GitHub, so this list is never behind the app. Open one for its notes and its APK.
+
+<ReleaseList />
+
 ## Version numbering
 
-`v1.0.12`, `v1.0.11`, and so on. The version is derived from the git tag by CI — nobody types it into a file — so the number in **Settings → App version** is always the tag the build came from and cannot drift from it.
-
-## Recent history
-
-The notes on each release are the real ones. A summary of the arc:
-
-| Version | The headline |
-| --- | --- |
-| **v1.0.12** | This documentation site. Crossfade became a draggable bar again; Help replaced About and Shortcuts |
-| **v1.0.11** | The queue sheet scrolls and opens with your finger. Swiping the app away actually stops playback. The app stopped re-rendering itself on every state change |
-| **v1.0.10** | Download identity fixed, the update dot finally appears, new player layout |
-| **v1.0.9** | The player left its Modal window; audio effects stopped inserting themselves; the drawer moved to a real edge strip |
-| **v1.0.8** | Sheets left their Modal windows; autoplay moved off the JavaScript timer; gestures moved onto the UI thread |
+The version is derived from the git tag by CI — nobody types it into a file — so the number under **Settings → App version** is always the tag the build came from and cannot drift from it. Tags are `vMAJOR.MINOR.PATCH`, and the app compares them numerically rather than as text, so `v1.0.10` is correctly newer than `v1.0.9`.
 
 <Note>
-  A pattern worth naming: several of those are the *same* fix applied in different places. Android's `Modal` is a separate window, not a view, and almost every "it opens late" and "it is behind the thing that raised it" complaint traced back to that one fact.
+  A pattern worth naming, reading back through the notes: several fixes are the *same* fix applied in different places. Android's `Modal` is a separate window, not a view, and almost every "it opens late" and "it is behind the thing that raised it" complaint traced back to that one fact.
 </Note>
 
 ## Reporting a problem
