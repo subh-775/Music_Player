@@ -150,6 +150,20 @@ function ensureRegistered() {
     emit();
   });
   emitter.addListener('mp.update.progress', (p: number) => {
+    // -2 is a refusal, not a failure: Android will not let this app install
+    // packages, so nothing was downloaded and the native side has just opened
+    // the setting that fixes it. Saying "download failed" there would send
+    // people looking in entirely the wrong place.
+    if (p === -2) {
+      diag('update', 'install permission not granted');
+      state = {
+        ...state,
+        phase: 'failed',
+        error: 'Allow this app to install unknown apps, then try again',
+      };
+      emit();
+      return;
+    }
     if (p < 0) {
       diag('update', 'download failed');
       state = {...state, phase: 'failed', error: 'Download failed'};

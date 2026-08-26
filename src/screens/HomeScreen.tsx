@@ -136,37 +136,41 @@ export const HomeScreen = React.memo(function HomeScreen({
     : 'boot';
 
   /**
-   * Drag right anywhere on Home to pull the drawer in, with the panel following
-   * the finger the whole way — Gmail / Twitter / ChatGPT behaviour.
+   * Drag right near the left edge to pull the drawer in, with the panel
+   * following the finger the whole way — Gmail / Twitter / ChatGPT behaviour.
    *
    * Recognised NATIVELY. As a PanResponder this lost the same race TrackRow's
-   * swipe did: the JS predicate was evaluated after the native scroller had
-   * already claimed a fast flick, and its `dx > |dy| * 2` ratio failed on the
-   * large first delta a fast flick delivers. activeOffsetX/failOffsetY are
-   * evaluated on the raw touch stream, so speed stops mattering.
+   * swipe did: the JS predicate ran after the native scroller had already
+   * claimed a fast flick, and its `dx > |dy| * 2` ratio failed on the large
+   * first delta a fast flick delivers. activeOffsetX/failOffsetY are evaluated
+   * on the raw touch stream, so speed stops mattering.
    *
-   * ARMED ONLY AT THE LEFT EDGE, by being attached to a real view that only
-   * covers the edge (see styles.edge) rather than by shrinking this gesture's
-   * hitSlop.
+   * ## Why this is attached to the whole screen and not to a strip
    *
-   * The hitSlop version did not work. Two reasons, and they compounded: RNGH's
-   * {left, width} hitSlop is designed to EXPAND an activation region and its
-   * behaviour when used to shrink one is platform-specific — not something a
-   * core navigation gesture should rest on — and, more decisively, a 36dp strip
-   * overlaps the region Android reserves for its own back gesture, which is
-   * intercepted before the app's views see the touch at all. Hence the narrower
-   * strip plus reserveDrawerEdge().
+   * The previous design put the pan on a transparent 28dp `View` pinned to the
+   * left edge, with `pointerEvents="box-only"`. That view took every touch in
+   * the band and passed none of them on, so a vertical scroll starting there
+   * failed `failOffsetY` and then went nowhere — the list underneath never saw
+   * it. That is the "the page won't scroll near the left edge" report.
    *
-   * A touch anywhere else now reaches the list as if this handler did not
-   * exist, which is a stronger guarantee than any activeOffset/failOffset pair:
-   * those still have to LOSE a race that has already started, and losing it
-   * late is what cancelled a scroll already in progress.
+   * The pan now lives on the screen itself and is armed at the edge by
+   * `hitSlop`, which does the same job in the one place where it costs nothing:
+   * `{left: 0, width: DRAWER_EDGE}` makes RNGH's `isWithinBounds` treat the
+   * handler's activation area as the left DRAWER_EDGE pixels of the view and
+   * nothing else (GestureHandler.kt: `right = left + width`). Touches outside
+   * the band never reach this handler; touches INSIDE it reach the list too,
+   * because there is no longer a view in the way.
    *
-   * failOffsetY still matters inside the strip: a vertical scroll that happens
-   * to begin at the left edge has to stay a scroll.
+   * `failOffsetY` is 6, not 14. While the pan is BEGAN the scroller cannot
+   * start, so that number is literally how many pixels of every vertical drag
+   * in the band get swallowed before the list gets its touch.
    *
-   * Every move writes straight to the shared drawerX on the UI thread — JS is
-   * touched only twice per gesture, to mount the panel and to settle it.
+   * And the list's own native handler is declared simultaneous, so a scroll
+   * that has begun is not cancelled if this pan activates a moment later.
+   * Note that this is `Gesture.Native()` and not a ref to the FlatList: RNGH
+   * resolves an external gesture through `ref.current.handlerTag`, and a plain
+   * React Native list has no handlerTag — passing its ref compiles, runs, and
+   * silently does nothing.
    */
   const beginRef = useRef(onBeginDrag);
   beginRef.current = onBeginDrag;
@@ -179,11 +183,16 @@ export const HomeScreen = React.memo(function HomeScreen({
     [],
   );
 
+  /** The list's own scrolling, as a gesture this one can be composed with. */
+  const listScroll = useMemo(() => Gesture.Native(), []);
+
   const pan = useMemo(
     () =>
       Gesture.Pan()
+        .hitSlop({left: 0, width: DRAWER_EDGE})
         .activeOffsetX([-1000, DRAWER_GRAB])
-        .failOffsetY([-14, 14])
+        .failOffsetY([-6, 6])
+        .simultaneousWithExternalGesture(listScroll)
         .onBegin(() => {
           drawerX.value = -DRAWER_W; // start from closed, whatever came before
           runOnJS(begin)();
@@ -200,7 +209,7 @@ export const HomeScreen = React.memo(function HomeScreen({
             Math.abs(e.velocityX) / 1000,
           );
         }),
-    [begin, end],
+    [begin, end, listScroll],
   );
 
   const load = useCallback(async () => {
@@ -227,11 +236,12 @@ export const HomeScreen = React.memo(function HomeScreen({
     load();
   }, [load]);
 
-  // Claim the left strip back from Android's system back gesture. Once per
-  // mount; the decor view outlives every re-layout so it does not need redoing.
-  useEffect(() => {
-    reserveDrawerEdge();
-  }, []);
+  // Claiming the left strip back from Android's system back gesture happens in
+  // onLayout, below — NOT here. Home mounts while the splash is still up, and
+  // the exclusion rect is measured from the decor view's height, which at that
+  // point is routinely 0. A zero-height rect excludes nothing, so Android kept
+  // the strip and ate the swipe. The view outlives every re-layout; the
+  // MEASUREMENT taken from it does not.
 
   // Tell the app the moment there is real content (or a definite failure) —
   // the splash stays up until then, so Home is never seen mid-load.
@@ -346,8 +356,9 @@ export const HomeScreen = React.memo(function HomeScreen({
   );
 
   return (
-    <View style={styles.fill}>
-      {/*
+    <GestureDetector gesture={pan}>
+      <View style={styles.fill} onLayout={() => reserveDrawerEdge()}>
+        {/*
         A FlatList, not a ScrollView.
 
         A ScrollView renders every child immediately and keeps them all
@@ -356,31 +367,26 @@ export const HomeScreen = React.memo(function HomeScreen({
         built and held on the first frame. Virtualised, the rows below the fold
         do not mount their cards until you scroll to them.
 
-        Nothing wraps it any more: the drawer pull lives on the strip below, so
-        this list is completely uncontested.
+        It is wrapped in its own Gesture.Native so the drawer pull can be
+        declared simultaneous with it: a scroll that has already begun is not
+        cancelled if the pan activates a moment later.
       */}
-      <FlatList
-        data={rows}
-        keyExtractor={row => row.title}
-        renderItem={({item}) => <Row row={item} onPick={onPickTrack} />}
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        overScrollMode="never"
-        bounces={false}
-        ListHeaderComponent={header}
-        ListFooterComponent={<View style={styles.tail} />}
-        {...HOME_WINDOWING}
-      />
-
-      {/* The drawer-pull strip: transparent, full height, left edge only.
-          box-only so it takes the touch itself rather than passing it to a
-          child it does not have. The hamburger stays the primary route — an
-          edge swipe is a shortcut, and on a phone in a case or with a curved
-          screen the edge is genuinely awkward to hit. */}
-      <GestureDetector gesture={pan}>
-        <View style={styles.edge} pointerEvents="box-only" />
-      </GestureDetector>
-    </View>
+        <GestureDetector gesture={listScroll}>
+          <FlatList
+            data={rows}
+            keyExtractor={row => row.title}
+            renderItem={({item}) => <Row row={item} onPick={onPickTrack} />}
+            contentContainerStyle={styles.scroll}
+            showsVerticalScrollIndicator={false}
+            overScrollMode="never"
+            bounces={false}
+            ListHeaderComponent={header}
+            ListFooterComponent={<View style={styles.tail} />}
+            {...HOME_WINDOWING}
+          />
+        </GestureDetector>
+      </View>
+    </GestureDetector>
   );
 });
 
@@ -476,15 +482,6 @@ const CARD = 138;
 
 const styles = StyleSheet.create({
   fill: {flex: 1},
-  edge: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: DRAWER_EDGE,
-    // Above the list, below everything the app layers on top of Home.
-    zIndex: 5,
-  },
   scroll: {paddingBottom: 24},
   header: {
     flexDirection: 'row',

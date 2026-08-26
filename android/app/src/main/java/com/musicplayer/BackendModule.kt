@@ -1,6 +1,8 @@
 package com.musicplayer
 
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
 import android.net.Uri
@@ -46,6 +48,31 @@ class BackendModule(reactContext: ReactApplicationContext) :
                 when (requestCode) {
                     PICK_FOLDER -> {
                         val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                        if (uri != null) {
+                            // Hold on to the grant, and to the URI itself.
+                            //
+                            // The PATH is what the Python backend needs (yt-dlp
+                            // and the tagger cannot use a content:// URI), but
+                            // the URI is the only thing that can later open the
+                            // folder: a tree URI we hold a persisted grant on is
+                            // the one form DocumentsUI will actually resolve for
+                            // this caller. See openFolder.
+                            try {
+                                reactApplicationContext.contentResolver
+                                    .takePersistableUriPermission(
+                                        uri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                                    )
+                                reactApplicationContext
+                                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putString(KEY_TREE_URI, uri.toString())
+                                    .apply()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "could not persist folder grant: " + e.message)
+                            }
+                        }
                         // "" tells JS the user backed out — not an error.
                         folderPromise?.resolve(uri?.let { treeUriToPath(it) } ?: "")
                         folderPromise = null
@@ -133,30 +160,57 @@ class BackendModule(reactContext: ReactApplicationContext) :
     /**
      * Open the downloads folder in whatever file browser the device has.
      *
-     * There is no universal "show me this directory" intent on Android, so this
-     * tries the documented forms in order and falls back to launching a file
-     * manager. Resolves false when nothing on the device can handle it, so the
-     * UI can say so rather than appearing to do nothing.
+     * The version this replaces looked right and could not work. Its first
+     * candidate built a content://com.android.externalstorage.documents/... URI
+     * by hand and set FLAG_GRANT_READ_URI_PERMISSION — but that flag grants
+     * permission OUTWARD on a URI you own; it cannot give you access to another
+     * app's provider. DocumentsUI resolves that intent (so startActivity
+     * succeeds, so the loop returned true and never tried anything else) and
+     * then cannot resolve the URI for this caller, so it opens at its own
+     * default location. Which is exactly the report: the Files app opens, just
+     * not there.
+     *
+     * The tree URI from the folder picker differs in the one way that matters —
+     * we hold a persisted grant on it — so it goes first, and every candidate
+     * now checks resolveActivity BEFORE launching so the chain can fall
+     * through instead of stopping at its worst option.
      */
     @ReactMethod
     fun openFolder(path: String, promise: Promise) {
         val activity = currentActivity ?: reactApplicationContext
+        val pm = reactApplicationContext.packageManager
         val root = Environment.getExternalStorageDirectory().absolutePath
         val rel = path.removePrefix(root).trim('/')
-        val treeUri = Uri.parse(
-            "content://com.android.externalstorage.documents/document/primary%3A" +
-                Uri.encode(rel),
-        )
-        val candidates = listOf(
-            // The directory MIME type is what DocumentsUI and most third-party
-            // file managers actually register for; the generic one below is a
-            // fallback for those that don't.
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(treeUri, "vnd.android.document/directory")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-            // DocumentsUI's authority form — the one that actually lands on the
-            // right folder when the device ships a documents provider.
+
+        val candidates = mutableListOf<Intent>()
+
+        // 1. The folder the user picked, through the grant persisted with it.
+        val saved = reactApplicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_TREE_URI, null)
+        if (saved != null) {
+            try {
+                val tree = Uri.parse(saved)
+                val docUri = DocumentsContract.buildDocumentUriUsingTree(
+                    tree,
+                    DocumentsContract.getTreeDocumentId(tree),
+                )
+                candidates.add(
+                    Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(docUri, DocumentsContract.Document.MIME_TYPE_DIR)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "saved tree uri unusable: " + e.message)
+            }
+        }
+
+        // 2. The hand-built authority form. Kept, because some third-party file
+        //    managers do resolve it against their own index — but no longer
+        //    first, and no longer counted as success merely because something
+        //    answered the intent.
+        candidates.add(
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(
                     Uri.parse(
@@ -167,32 +221,45 @@ class BackendModule(reactContext: ReactApplicationContext) :
                 )
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             },
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(Uri.parse("file://$path"), "resource/folder")
-            },
-            // Last resort: open a file manager anywhere at all.
+        )
+
+        // 3. The system Downloads screen. Not the folder, but it is where a
+        //    default-path download actually lands, and it always works.
+        if (path.contains("/Download", ignoreCase = true)) {
+            candidates.add(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+        }
+
+        // 4. Last resort: a file manager, anywhere at all.
+        candidates.add(
             Intent(Intent.ACTION_VIEW).apply {
                 type = DocumentsContract.Document.MIME_TYPE_DIR
             },
         )
-        for (intent in candidates) {
+
+        for ((i, intent) in candidates.withIndex()) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Ask first. Letting startActivity throw as the test is what made
+            // the chain stop at its worst option: that one never throws.
+            //
+            // Except on the LAST candidate, where a null answer is not proof of
+            // anything: resolveActivity is filtered by package visibility, and
+            // an OEM file manager outside the <queries> allowlist is invisible
+            // to it. Trying and catching costs nothing at that point.
+            val last = i == candidates.size - 1
+            if (!last && intent.resolveActivity(pm) == null) {
+                continue
+            }
             try {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 activity.startActivity(intent)
                 promise.resolve(true)
                 return
-            } catch (_: Exception) {
-                // No app for this form — try the next.
+            } catch (e: Exception) {
+                Log.w(TAG, "openFolder candidate failed: " + e.message)
             }
         }
         promise.resolve(false)
     }
 
-    /**
-     * content:// tree URI -> real filesystem path. Same translation the WebView
-     * build shipped: the primary volume maps to the external storage root, any
-     * other volume to /storage/<volume>.
-     */
     private fun treeUriToPath(uri: Uri): String = try {
         val docId = DocumentsContract.getTreeDocumentId(uri)
         val parts = docId.split(":", limit = 2)
@@ -241,7 +308,15 @@ class BackendModule(reactContext: ReactApplicationContext) :
         activity.runOnUiThread {
             try {
                 val root = activity.window?.decorView
-                if (root != null) {
+                // height > 0, not just non-null. This is called from Home, and
+                // Home mounts while the splash is still up — at which point the
+                // decor view frequently has no height yet. Rect(0, 0, px, 0)
+                // excludes NOTHING, so Android kept the strip for its own back
+                // gesture and ate the drawer swipe, silently and permanently:
+                // the call had already "succeeded" and nothing ever retried it.
+                // JS now calls this from onLayout, and this bails until there
+                // is something real to measure.
+                if (root != null && root.height > 0) {
                     val density = reactApplicationContext.resources.displayMetrics.density
                     val px = (widthDp * density).toInt()
                     // Height comes from the decor view rather than from a
@@ -261,6 +336,12 @@ class BackendModule(reactContext: ReactApplicationContext) :
 
     companion object {
         private const val TAG = "BackendModule"
+        private const val PREFS = "mp.native.v1"
+
+        /** The picked download folder as a tree URI we hold a persisted grant
+         *  on. The PATH lives in JS settings; this is the only thing that can
+         *  open that folder afterwards. */
+        private const val KEY_TREE_URI = "downloadTreeUri"
         private const val PICK_FOLDER = 51423
         private const val PICK_IMAGE = 51424
     }

@@ -992,6 +992,110 @@ hand-written table of versions and headlines is gone. Several releases were
 published by CI with an empty body, so where there are no notes the row shows
 the APK and its size — true of every release either way.
 
+## Round 6 — the queue corruption, and three long-running gesture bugs
+
+**The five copies, the rows lifting in groups and the drop landing in the wrong
+place were all one root.** Every queue item's `id` was `title-artist`, so five
+copies of one song were five rows claiming one React key. VirtualizedList keys
+its cell registry by that, DraggableFlatList tracks the LIFTED cell by that, and
+`getIndex()` on a collapsed cell is what fed `moveQueueItem` the wrong index.
+Items now carry `_qid`, a per-INSTANCE counter, and the list keys on it. RNTP
+round-trips unknown keys untouched — `Track` has an index signature and
+`getQueue()` resolves each track's original bundle — so it survives the engine.
+
+**Why there were five copies at all: a re-entrancy guard set one await too
+late.** `topUpFromRadio` checked `radioBusy` and then claimed it AFTER reading
+the queue, and there are two callers a skip apart (the
+`PlaybackActiveTrackChanged` handler and the crossfade watcher's tick). Both
+passed the check, both fetched radio, both appended eight picks — deduped
+against the same pre-append snapshot. The flag is now claimed before the first
+await, with every early return moved inside the `try`.
+
+`__tests__/queueIdentity.test.ts` covers both, and both were confirmed to FAIL
+on the old code before being kept: 16 tracks appended instead of 8, and
+undefined row ids.
+
+The dedupe also moved from `getTrackId` to `getDownloadKey`. `getTrackId`
+includes the ISRC, and a radio pick arrives unenriched while the copy already in
+the queue came from a catalogue lookup with one — two ids for one song is a
+dedupe that passes everything through.
+
+**The drawer swipe, third design, and this time the cause was measured rather
+than reasoned about.** `reserveDrawerEdge()` ran in Home's mount effect, which
+happens while the splash is still up, and the native side builds the exclusion
+rect from `decorView.height` — routinely 0 at that moment. `Rect(0, 0, px, 0)`
+excludes nothing, so Android kept the strip for its own back gesture and ate the
+swipe, permanently and silently, because the call had already "succeeded". It
+now runs from `onLayout` and the native side bails while `root.height == 0`.
+That one fact had poisoned all three previous designs, including the hitSlop
+version that was abandoned for the wrong reason.
+
+The transparent `box-only` strip is gone with it: it took every touch in the
+band and passed none on, which is why the page would not scroll near the left
+edge. The pan is on the screen itself now, armed at the edge by
+`hitSlop({left: 0, width: DRAWER_EDGE})` — `GestureHandler.isWithinBounds`
+computes `right = left + width`, so the activation area is the left band and
+nothing else — with `failOffsetY` down from 14 to 6.
+
+One correction to the audit worth recording: `simultaneousWithExternalGesture`
+CANNOT take a ref to a plain FlatList. RNGH resolves an external gesture through
+`ref.current.handlerTag` and filters out anything that resolves to -1, so that
+line compiles, runs, and silently does nothing. The list is wrapped in a
+`Gesture.Native()` instead, which is what has a handlerTag.
+
+**Skipping fast no longer does the expensive half.** Each track change re-read
+the entire engine queue across the bridge, prefetched up to four covers and
+wrote the resume file; ten skips meant ten of each, all about tracks the user
+was passing through. `onTrackSettled` runs that block 350ms after the LAST
+change. The title, artwork URL and transport still update on the event, so the
+skip itself is unchanged. The resume payload is recomputed inside the callback
+rather than captured — by the time it runs, the active track may be several
+skips further on.
+
+Two index alignment bugs found on the way: `addToQueue` appended to the JS
+mirror while inserting into the engine mid-queue, and `moveQueueItem` did not
+mirror the move at all. `prefetchNext` reads `queueSource[idx + 1]`, so both
+left it warming whatever happened to be last.
+
+**"Open in Files" opened the Files app but not the folder**, and the reason is
+worth knowing: `FLAG_GRANT_READ_URI_PERMISSION` grants permission OUTWARD on a
+URI you own — it cannot grant you access to another app's provider. The
+hand-built `content://com.android.externalstorage.documents/...` intent resolved
+(DocumentsUI handles it), so `startActivity` succeeded, the loop returned true
+and never tried anything else, and DocumentsUI opened at its default location
+because it could not resolve that URI for this caller. The folder picker's tree
+URI is now persisted with `takePersistableUriPermission` and tried first, and
+every candidate checks `resolveActivity` before launching. That check needs a
+`<queries>` block in the manifest — package visibility filters it to null
+otherwise — and the last-resort candidate deliberately skips the check, because
+an OEM file manager outside the allowlist is invisible to it.
+
+**The updater asks before it downloads.** Without "install unknown apps" the
+download succeeded, the installer opened and Android refused, which reads as a
+failed update. `canRequestPackageInstalls()` is checked first and the setting is
+opened directly; JS shows that as its own message rather than "download failed".
+
+**Player layout.** The capsule left the timestamp row — a 36px control in a row
+of 11px timestamps made the row three times its natural height and pushed the
+timestamps half a capsule below the bar — and now sits in its own bottom row
+with the queue mark opposite it, with the pull gesture covering the whole row.
+`transport` marginTop went 34 → 24 and `controls` paddingBottom 16 → 6; the
+freed space goes to `artArea: {flex: 1}`, so the artwork grows rather than the
+gaps.
+
+**Glass, as far as it goes honestly.** The tab bar lost its hairline top border
+and the page now fades into it (`BodyFade`, last child of the body so it paints
+OVER the content), and the mini player is translucent with a brighter edge. The
+full reference effect needs content scrolling UNDER both bars, which means
+taking them out of layout flow and re-padding 22 scroll containers across 11
+screens — not something to do blind, and not something this round attempted.
+
+**Not done, deliberately:** the release keystore. Every release APK is signed
+with the debug keystore committed to this repo, so anyone can sign an APK
+Android will accept as an update to this one. Rotating it is correct and forces
+a manual reinstall for every existing user, so it belongs at a version boundary
+the user picks.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

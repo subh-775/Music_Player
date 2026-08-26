@@ -18,6 +18,7 @@ import {
 } from './src/screens/SettingsScreen';
 import {EqualizerScreen} from './src/screens/EqualizerScreen';
 import {CollectionScreen} from './src/screens/CollectionScreen';
+import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
 import {SpotifyImportScreen} from './src/screens/SpotifyImportScreen';
 import {ArtistScreen} from './src/screens/ArtistScreen';
 import {PlayerScreen} from './src/screens/PlayerScreen';
@@ -670,6 +671,12 @@ function Shell() {
             <EqualizerScreen onClose={() => setEqOpen(false)} />
           </View>
         )}
+
+        {/* The bottom of the page dissolves into the bar below it instead of
+            meeting a hairline. Last child of the body, so it paints over
+            whatever is scrolling — which is the whole point, and the reason it
+            is not part of BottomNav's own style. */}
+        <BodyFade />
       </View>
 
       {/*
@@ -763,9 +770,31 @@ export default function App(): React.JSX.Element {
   );
 }
 
+/**
+ * A short upward fade at the foot of the scrolling area.
+ *
+ * 28px, from nothing to the page colour. Long enough that a row of text
+ * dissolves rather than being clipped, short enough that it never eats a row
+ * you were trying to read.
+ */
+function BodyFade() {
+  return (
+    <Svg style={styles.bodyFade} pointerEvents="none">
+      <Defs>
+        <LinearGradient id="bodyfade" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={C.bg} stopOpacity="0" />
+          <Stop offset="1" stopColor={C.bg} stopOpacity="0.95" />
+        </LinearGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill="url(#bodyfade)" />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   body: {flex: 1},
+  bodyFade: {position: 'absolute', left: 0, right: 0, bottom: 0, height: 28},
   // Above every overlay: player 30, sheets 40, drawer 45. The splash is the
   // one thing that must cover a half-built app.
   splash: {...StyleSheet.absoluteFillObject, zIndex: 60, backgroundColor: C.bg},
