@@ -25,7 +25,12 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
 import {currentQuality, readSettings} from './store';
-import {cleanText, getTrackId, isPlayableTrack, normalizeTrack} from './tracks';
+import {
+  cleanText,
+  getDownloadKey,
+  isPlayableTrack,
+  normalizeTrack,
+} from './tracks';
 import {
   applyAudioEffects,
   beginCrossfade,
@@ -274,16 +279,30 @@ export async function setupPlayer(): Promise<boolean> {
       if (src) {
         remember(src);
       }
-      // Save the session on every track change (forced past the throttle), so a
-      // reopen lands on the right song even if the app was killed mid-track.
-      try {
-        const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
-        await refreshEngineMirror(idx);
-        saveResume(
-          {track: src, position: 0, queue: queueSource, index: idx},
-          true,
-        );
-      } catch {}
+      // Re-read the mirror, warm the covers around the new track and save the
+      // session — once the skipping stops. Everything above this line has
+      // already run, so the UI is current; this is the expensive half.
+      onTrackSettled(() => {
+        (async () => {
+          try {
+            const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+            await refreshEngineMirror(idx);
+            // Recomputed rather than captured: by the time this runs the
+            // active track may be several skips further on, and writing the
+            // one that was current when the burst started would resume to the
+            // wrong song.
+            saveResume(
+              {
+                track: sourceTrackFor(engineQueue[idx] ?? null),
+                position: 0,
+                queue: queueSource,
+                index: idx,
+              },
+              true,
+            );
+          } catch {}
+        })().catch(() => {});
+      });
       // Crossfade's other half. With a real overlap running, hand off to the
       // incoming track (seek RNTP to where the overlap reached, then cut it).
       // Otherwise bring the incoming one up from quiet, or just ensure full
@@ -405,6 +424,22 @@ function warmStream(track: Track | null | undefined, bitrate: number): void {
   getStreamInfo(track, bitrate).catch(() => {});
 }
 
+/**
+ * A counter, because the queue needs to tell two copies of one song apart.
+ *
+ * `id` is title+artist, which is the right identity for "is this the same
+ * song" and completely wrong as a list key: queue a track three times and all
+ * three rows claim the same key. DraggableFlatList tracks the lifted cell BY
+ * KEY, so all three lifted together, VirtualizedList collapsed them into one
+ * cell registry entry, and the drop index came back for the wrong row — which
+ * is how a song dropped second ended up playing much later.
+ *
+ * Never reset. It only has to be unique within a process, and RNTP round-trips
+ * unknown keys through the native queue untouched (Track has an index
+ * signature, and getQueue() resolves each track's original bundle).
+ */
+let queueSeq = 0;
+
 function toQueueItem(track: Track, bitrate: number) {
   const url = streamUrlFor(track, bitrate);
   if (!url) {
@@ -412,6 +447,8 @@ function toQueueItem(track: Track, bitrate: number) {
   }
   return {
     id: `${track.title}-${track.artist}`,
+    /** Identity of this ROW, as opposed to `id`, the identity of the song. */
+    _qid: `q${++queueSeq}`,
     url,
     title: track.title,
     artist: track.artist,
@@ -585,7 +622,13 @@ export async function addToQueue(track: Track): Promise<void> {
     await TrackPlayer.add([item]);
   }
   queuedAhead++;
-  queueSource = [...queueSource, track];
+  // Inserted at the same offset as the engine, not appended.
+  //
+  // The mirror is read BY INDEX in places — prefetchNext warms
+  // queueSource[idx + 1] — so appending a track the engine put three rows
+  // below the current song left the two lists disagreeing from that point on,
+  // and the warm went to whatever happened to be last.
+  queueSource = [...queueSource.slice(0, at), track, ...queueSource.slice(at)];
 }
 
 /**
@@ -614,6 +657,12 @@ export async function moveQueueItem(
     if (!item) {
       return false;
     }
+    // Once the queue has been reordered by hand, "the block I queued after the
+    // current song" is no longer a block — the user may have dragged a track
+    // straight out of it. Keeping the count would land the next "add to queue"
+    // one slot too far down, so it goes back to inserting directly after the
+    // current song.
+    queuedAhead = 0;
     await TrackPlayer.remove([from]);
     // `to` indexes the queue as it is AFTER the removal (length n-1), which is
     // the same convention as splice. The last slot has no element to insert
@@ -622,6 +671,20 @@ export async function moveQueueItem(
       await TrackPlayer.add([item]);
     } else {
       await TrackPlayer.add([item], to);
+    }
+    // Same move in the mirror, for the same reason as the insert above: it is
+    // indexed against the engine queue, so a reorder the engine performed and
+    // the mirror did not is a mirror that lies from then on.
+    if (from < queueSource.length) {
+      const moved = queueSource[from];
+      const rest = [
+        ...queueSource.slice(0, from),
+        ...queueSource.slice(from + 1),
+      ];
+      queueSource =
+        to >= rest.length
+          ? [...rest, moved]
+          : [...rest.slice(0, to), moved, ...rest.slice(to)];
     }
     await refreshEngineMirror();
     return true;
@@ -947,6 +1010,30 @@ export async function seekTo(seconds: number): Promise<void> {
  * background timer for playback upkeep.
  */
 let radioBusy = false;
+/**
+ * Run something once a burst of track changes has STOPPED.
+ *
+ * Mashing next fires PlaybackActiveTrackChanged per skip, and each one used to
+ * re-read the whole engine queue across the bridge, prefetch up to four cover
+ * images and write the resume file. Ten skips meant ten of each — all of it
+ * work about tracks the user was passing through, none of it cancelled when
+ * the next skip arrived, and all of it on the thread that also has to draw.
+ *
+ * The skip itself stays instant: the title, the artwork URL and the transport
+ * still update on the event. Only the WARMING waits.
+ */
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onTrackSettled(fn: () => void): void {
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+  }
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    fn();
+  }, 350);
+}
+
 /** True only for the few milliseconds playTrack spends filling the queue in
  *  behind an already-playing first track. */
 let buildingQueue = false;
@@ -961,31 +1048,44 @@ export async function topUpFromRadio(): Promise<void> {
   if (radioBusy || buildingQueue || !readSettings().autoplay) {
     return;
   }
-  const [queue, index] = await Promise.all([
-    TrackPlayer.getQueue(),
-    TrackPlayer.getActiveTrackIndex(),
-  ]);
-  // Three songs of headroom, not two. Radio is a live network call; starting it
-  // with two left meant a slow response still arrived after the queue had run
-  // out. One extra song is roughly three more minutes to answer in.
-  if (!queue.length || index == null || queue.length - index > 3) {
-    return;
-  }
-  const seed =
-    sourceTrackFor(queue[index]) ?? queueSource[queueSource.length - 1];
-  if (!seed) {
-    return;
-  }
+  // Claimed BEFORE the first await, and everything that can return early moved
+  // inside the try so the finally always releases it.
+  //
+  // The flag used to be set after the queue read, which left an await between
+  // the check and the claim — and there are two callers a skip apart: the
+  // PlaybackActiveTrackChanged handler and the crossfade watcher's tick. Both
+  // could pass the guard, both fetch radio, and both append eight picks
+  // deduped against the same pre-append snapshot. That is where the five
+  // copies of one song in a queue came from.
   radioBusy = true;
   try {
-    const seen = new Set(queueSource.map(getTrackId));
+    const [queue, index] = await Promise.all([
+      TrackPlayer.getQueue(),
+      TrackPlayer.getActiveTrackIndex(),
+    ]);
+    // Three songs of headroom, not two. Radio is a live network call; starting
+    // it with two left meant a slow response still arrived after the queue had
+    // run out. One extra song is roughly three more minutes to answer in.
+    if (!queue.length || index == null || queue.length - index > 3) {
+      return;
+    }
+    const seed =
+      sourceTrackFor(queue[index]) ?? queueSource[queueSource.length - 1];
+    if (!seed) {
+      return;
+    }
+    // getDownloadKey, not getTrackId: the ISRC is part of getTrackId, and a
+    // radio pick arrives unenriched while the same song already in the queue
+    // came from a catalogue lookup WITH one. Two ids for one song is a dedupe
+    // that passes everything through.
+    const seen = new Set(queueSource.map(getDownloadKey));
     const picks: Track[] = (
       await getRadio(cleanText(seed.title), cleanText(seed.artist))
     )
       .map(raw => normalizeTrack(raw))
       .filter(
         (t): t is Track =>
-          !!t && isPlayableTrack(t) && !seen.has(getTrackId(t)),
+          !!t && isPlayableTrack(t) && !seen.has(getDownloadKey(t)),
       )
       .slice(0, 8)
       .map(t => ({...t, _autoplay: true}));

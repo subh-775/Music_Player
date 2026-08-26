@@ -247,7 +247,14 @@ export function QueuePane({
 
       <DraggableFlatList
         data={upcoming}
-        keyExtractor={(t, i) => String(t.id ?? t.url ?? i)}
+        // _qid, not id. `id` is title+artist, so five copies of one song in the
+        // queue are five rows claiming one key — which is what made several
+        // rows lift together and sent a drop to the wrong index. The
+        // index-suffixed fallback is for tracks restored from a session saved
+        // by an earlier process, which carry no _qid.
+        keyExtractor={(t, i) =>
+          String((t as {_qid?: string})._qid ?? `${t.id ?? t.url ?? 'x'}#${i}`)
+        }
         renderItem={renderItem}
         onDragBegin={() => {
           dragging.current = true;

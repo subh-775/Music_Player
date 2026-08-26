@@ -22,6 +22,24 @@
          to sit here was redundant while the config was present, and would have
          silently re-opened cleartext everywhere the moment anyone removed the
          config attribute. -->
+    <!--
+         Package visibility (Android 11+). resolveActivity() and
+         queryIntentActivities() are FILTERED unless the intents they ask about
+         are declared here — they come back null for apps that can in fact
+         handle them. openFolder() checks resolution before launching each
+         candidate, so without this block it would skip every one of them and
+         report that nothing on the device can open a folder.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="vnd.android.document/directory" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW_DOWNLOADS" />
+        </intent>
+    </queries>
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"

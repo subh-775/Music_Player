@@ -52,6 +52,7 @@ import {
   SkipForward,
 } from 'lucide-react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Svg, {Rect} from 'react-native-svg';
 import Animated, {
   Easing,
   runOnJS,
@@ -889,22 +890,15 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             </View>
           </View>
 
-          {/* The pane switch rides in the MIDDLE of the timestamp row, which
-              was empty. A binary choice, where a labelled tab strip used to
-              spend a whole row of the screen on it. */}
+          {/* The capsule used to ride in the middle of the timestamp row. It
+              was the wrong home: a ~36px control in a row of 11px timestamps
+              made the row three times taller than it needs to be, and
+              alignItems:'center' then pushed the timestamps half a capsule
+              below the bar. It now has its own row at the bottom. */}
           <ProgressArea
             ref={progressApi}
             live={visible}
             onSample={onProgressSample}
-            center={
-              <View style={styles.centerSlot}>
-                <PaneSwitch
-                  pane={pane}
-                  onPick={setPane}
-                  lyricsDead={!lyricsState.available}
-                />
-              </View>
-            }
           />
 
           {/* Transport */}
@@ -958,14 +952,27 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             </TouchableOpacity>
           </View>
 
-          {/* The queue, as an affordance rather than a tab: swipe up, or tap.
-              No count — it changes constantly and means nothing to the reader,
-              and the hook that produced it kept a queue subscription alive for
-              the life of the app to maintain a number nobody used. */}
+          {/* Bottom row: the pane switch under shuffle, the queue under
+              repeat. The pull gesture covers the WHOLE row rather than a grip
+              in the middle of it, so a swipe up anywhere along the bottom of
+              the screen still opens the sheet — which is where a thumb reaches
+              for it anyway. */}
           <GestureDetector gesture={queuePull}>
-            <Animated.View style={[styles.queueHandle, gripStyle]}>
-              <View style={styles.queueGrip} />
-              <Text style={styles.queueLabel}>Your queue</Text>
+            <Animated.View style={[styles.bottomRow, gripStyle]}>
+              <PaneSwitch
+                pane={pane}
+                onPick={setPane}
+                lyricsDead={!lyricsState.available}
+              />
+              <TouchableOpacity
+                onPress={() => setQueueOpen(true)}
+                hitSlop={14}
+                activeOpacity={1}
+                accessibilityRole="button"
+                accessibilityLabel="Open the queue"
+                style={styles.queueBtn}>
+                <QueueGlyph size={22} color={C.text} />
+              </TouchableOpacity>
             </Animated.View>
           </GestureDetector>
         </View>
@@ -1007,6 +1014,22 @@ export const PlayerScreen = React.memo(function PlayerScreen({
  * thing the eye reads as "selected", where two differently-lit icons read as
  * two icons.
  */
+/**
+ * The queue mark: the pill is what is playing, the two rules are what is
+ * waiting behind it. Drawn rather than imported because lucide has no icon
+ * that says "queue" without also saying "list" or "menu" — and this screen
+ * already has a menu.
+ */
+function QueueGlyph({size = 22, color}: {size?: number; color: string}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Rect x="7" y="4" width="10" height="4" rx="2" fill={color} />
+      <Rect x="3" y="12" width="18" height="2.2" rx="1.1" fill={color} />
+      <Rect x="3" y="18" width="18" height="2.2" rx="1.1" fill={color} />
+    </Svg>
+  );
+}
+
 function PaneSwitch({
   pane,
   onPick,
@@ -1190,10 +1213,8 @@ const ProgressArea = React.memo(
       /** False when the player is parked off-screen — see PARKED_POLL. */
       live: boolean;
       onSample: (p: number, d: number) => void;
-      /** Passed straight through to the Seekbar's timestamp row. */
-      center?: React.ReactNode;
     }
-  >(function ProgressArea({live, onSample, center}, ref) {
+  >(function ProgressArea({live, onSample}, ref) {
     const {position: enginePosition, duration} = useProgress(
       live ? 250 : PARKED_POLL,
     );
@@ -1231,12 +1252,7 @@ const ProgressArea = React.memo(
     useImperativeHandle(ref, () => ({seek: seekAndShow}), [seekAndShow]);
 
     return (
-      <Seekbar
-        position={position}
-        duration={duration}
-        onSeek={seekAndShow}
-        center={center}
-      />
+      <Seekbar position={position} duration={duration} onSeek={seekAndShow} />
     );
   }),
 );
@@ -1378,7 +1394,6 @@ const styles = StyleSheet.create({
   pane: {flex: 1, minHeight: 0},
   /** The pane switch, in the middle of the timestamp row. flex:1 between two
    *  fixed-width timestamps is what keeps it optically centred. */
-  centerSlot: {flex: 1, alignItems: 'center'},
   capsule: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.07)',
@@ -1404,21 +1419,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: C.text,
   },
-  // Lower, with more air above it — see the note on `controls`.
-  queueHandle: {alignItems: 'center', paddingTop: 26, paddingBottom: 18},
-  queueGrip: {
-    width: 44,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    marginBottom: 8,
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 24,
+    paddingBottom: 14,
   },
-  queueLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: C.text,
-    letterSpacing: 0.2,
-  },
+  // No ring, no fill, no press state: the capsule at the other end of this row
+  // is the only lit thing down here, and two lit things is a competition.
+  queueBtn: {padding: 6},
   /**
    * A DEFINITE height, not a maxHeight — and this is what makes the queue
    * scroll.
@@ -1465,7 +1475,7 @@ const styles = StyleSheet.create({
    * three things that are actually looked at is what makes the screen read as
    * composed rather than top-weighted.
    */
-  controls: {paddingHorizontal: 24, paddingTop: 18, paddingBottom: 16},
+  controls: {paddingHorizontal: 24, paddingTop: 14, paddingBottom: 6},
   metaRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
   // Clips the outgoing/incoming title pair to the row's own footprint, so a
   // long name sliding through never spills into the action buttons beside it.
@@ -1500,10 +1510,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // Up, and with the queue grip taking the space below it. The labelled pane
-    // strip that used to sit between the seekbar and this is gone.
-    marginTop: 34,
-    marginBottom: 4,
+    // 24, not 34. The old number was set when the timestamp row was three
+    // times its natural height and the block below it was 44px of grip and
+    // label; with both of those gone it left a visible hole under the seekbar.
+    // Every gap between the artwork and the bottom of the screen is now 14 or
+    // 24, and the space that frees goes to artArea's flex:1 — so the artwork
+    // grows into it instead of the gaps.
+    marginTop: 24,
+    marginBottom: 0,
   },
   // 10px padding takes the 24px shuffle/repeat icons to a 44px touch target.
   tBtn: {padding: 10},

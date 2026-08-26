@@ -2,6 +2,8 @@ package com.musicplayer
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Arguments
@@ -90,7 +92,46 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
             emit("mp.update.progress", -1)
             return
         }
+        // Ask BEFORE downloading twenty megabytes.
+        //
+        // Without "Install unknown apps" for this app, the download succeeds,
+        // the installer opens and Android refuses — which looks to the user
+        // like the update failed for no reason. Sending them to the setting is
+        // the only thing that can fix it, and it is one tap from here.
+        if (!canInstall()) {
+            emit("mp.update.progress", -2)
+            openInstallPermission()
+            return
+        }
         Thread { downloadAndInstall(rel) }.start()
+    }
+
+    /** API 26+ gates sideloaded installs per-app; below that the old global
+     *  "unknown sources" toggle applies and there is nothing to ask for. */
+    private fun canInstall(): Boolean =
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            true
+        } else {
+            try {
+                ctx.packageManager.canRequestPackageInstalls()
+            } catch (e: Exception) {
+                // If the question itself fails, assume yes: a refused install
+                // is recoverable, a permanently blocked updater is not.
+                true
+            }
+        }
+
+    private fun openInstallPermission() {
+        try {
+            ctx.startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${ctx.packageName}"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "cannot open install-permission settings: ${e.message}")
+        }
     }
 
     /** Why the last check found nothing, when the reason wasn't "up to date". */

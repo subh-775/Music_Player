@@ -282,10 +282,13 @@ const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 8,
-    marginBottom: 6,
+    marginHorizontal: 10,
+    marginBottom: 8,
     borderRadius: BAR_R,
-    backgroundColor: C.surfaceHi,
+    // Translucent, not opaque. Against the fade at the foot of the page this
+    // is what makes the bar read as sitting ABOVE the content rather than
+    // being punched into it, and it costs nothing — no blur pass, no library.
+    backgroundColor: 'rgba(38,38,38,0.9)',
     overflow: 'hidden',
     // Elevation is what makes it float. Without it the bar is a coloured
     // rectangle lying flat on the page.
@@ -297,7 +300,7 @@ const styles = StyleSheet.create({
     // Catches light along the top edge, which is what separates the bar from
     // whatever is scrolling behind it.
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   slider: {flex: 1, minWidth: 0, flexDirection: 'row'},
   main: {
