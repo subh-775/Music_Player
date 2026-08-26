@@ -98,7 +98,9 @@ export function isDownloaded(track: Track | null | undefined): boolean {
   if (!track) {
     return false;
   }
-  return !!track.file_path || downloadedIds.get().includes(getDownloadKey(track));
+  return (
+    !!track.file_path || downloadedIds.get().includes(getDownloadKey(track))
+  );
 }
 
 /**
@@ -235,6 +237,29 @@ function ensurePolling() {
  * download finishes — that is the whole point.
  */
 const onDownloadComplete = new Set<() => void>();
+
+/**
+ * A download is gone: drop it from the registry and tell everyone.
+ *
+ * Deleting only removed the FILE. The id stayed in `downloadedIds`, so
+ * `isDownloaded` kept saying yes, every row kept its downloaded tick, and
+ * nothing re-scanned — the Library tab only rescans when it becomes visible or
+ * when a download COMPLETES. That is the whole of "I deleted it and it is
+ * still there, then I came back and the list was empty but the count said 1":
+ * two different stale sources, neither of them the disk.
+ *
+ * The same listener set as a completed download, because it is the same
+ * question: what is on disk changed.
+ */
+export function forgetDownloads(tracks: Track[]): void {
+  const gone = new Set(tracks.map(getDownloadKey));
+  const prev = downloadedIds.get();
+  const next = prev.filter(id => !gone.has(id));
+  if (next.length !== prev.length) {
+    downloadedIds.set(next);
+  }
+  onDownloadComplete.forEach(fn => fn());
+}
 
 export function onDownloadsChanged(fn: () => void): () => void {
   onDownloadComplete.add(fn);

@@ -459,12 +459,12 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    */
   const queuePull = useMemo(
     () =>
+      // A DRAG, and only a drag. There used to be a Tap raced against this,
+      // from when the gesture lived on a small grip in the middle of the
+      // screen; on a row that spans the whole width it made every tap down
+      // there — including the one that switches between song and lyrics — open
+      // the queue. The tap affordance is the button at the end of the row.
       Gesture.Race(
-        Gesture.Tap().onEnd((_e, success) => {
-          if (success) {
-            runOnJS(setQueueOpen)(true);
-          }
-        }),
         Gesture.Pan()
           .activeOffsetY([-12, 1000])
           .failOffsetX([-24, 24])
@@ -709,7 +709,14 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       <Animated.View
         style={[
           styles.wrap,
-          !!tint && {backgroundColor: toward(tint, 0.72)},
+          // 0.86 toward black, not 0.72.
+          //
+          // A bright cover left the sheet sitting at a lightness where the eye
+          // reads it as a translucent panel rather than a surface — it looks
+          // like the page behind is showing through, because a surface that
+          // colour usually means exactly that. Nothing was ever transparent;
+          // the tint just needed to be a background rather than a wash.
+          !!tint && {backgroundColor: toward(tint, 0.86)},
           sheetStyle,
         ]}>
         {/* Header — close on the left, what you're inside of in the middle.

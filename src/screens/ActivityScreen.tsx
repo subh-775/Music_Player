@@ -24,6 +24,7 @@ import {TrackRow, listWindowing} from '../components/TrackRow';
 import {useStats, useWeek, type WeekStat} from '../stats';
 import type {Track} from '../backend';
 import {getTrackId} from '../tracks';
+import {BOTTOM_INSET} from '../layout';
 
 export type ActivityMode = 'recents' | 'stats';
 
@@ -284,7 +285,9 @@ const styles = StyleSheet.create({
   },
   back: {padding: 4},
   barTitle: {...T.screenTitle, color: C.text, fontSize: 19},
-  list: {paddingBottom: 24},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  list: {paddingBottom: BOTTOM_INSET},
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   emptyText: {color: C.faint, fontSize: 13.5, textAlign: 'center'},
   tally: {paddingHorizontal: S.gutter, paddingTop: 18, paddingBottom: 4},
@@ -309,7 +312,11 @@ const styles = StyleSheet.create({
   weekSub: {color: C.faint, fontSize: 12, marginTop: 10},
   bars: {flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 34},
   barSlot: {justifyContent: 'flex-end', height: 34},
-  dayBar: {width: 7, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.20)'},
+  dayBar: {
+    width: 7,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.20)',
+  },
   dayToday: {backgroundColor: C.accent},
   sources: {marginTop: 14, gap: 7},
   sourceRow: {flexDirection: 'row', alignItems: 'center', gap: 9},

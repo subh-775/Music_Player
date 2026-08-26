@@ -53,12 +53,11 @@ export function BottomNav({
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
-    backgroundColor: C.bg,
-    // No top border. A hairline drawn all the way across the screen is a hard
-    // edge that says "the page stops here", and the page does not stop here —
-    // it carries on behind the bar. The fade that replaces it lives at the
-    // bottom of the body (BodyFade in App.tsx), where it can actually sit over
-    // the content rather than under it.
+    backgroundColor: 'rgba(10,10,10,0.82)',
+    // Translucent, and no top border. A hairline across the screen is a hard
+    // edge that says "the page stops here", and it does not — it carries on
+    // behind the bar, which is now something you can faintly see. The fade
+    // above (BodyFade in App.tsx) is what stops that reading as clutter.
     paddingBottom: 4,
   },
   tab: {flex: 1, alignItems: 'center', gap: 4, paddingVertical: 9},

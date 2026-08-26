@@ -24,6 +24,7 @@ import {startImport, useSpotifyImport} from '../spotifyImport';
 import {addTracksToPlaylist, createPlaylist} from '../playlists';
 import {TrackRow} from '../components/TrackRow';
 import {toast} from '../toast';
+import {BOTTOM_INSET} from '../layout';
 
 export function SpotifyImportScreen({
   url,
@@ -186,7 +187,11 @@ const styles = StyleSheet.create({
   wrap: {flex: 1, backgroundColor: C.bg},
   bar: {flexDirection: 'row', paddingTop: 12, paddingHorizontal: 8},
   barBtn: {padding: 4},
-  header: {alignItems: 'center', paddingHorizontal: S.gutter, paddingBottom: 18},
+  header: {
+    alignItems: 'center',
+    paddingHorizontal: S.gutter,
+    paddingBottom: 18,
+  },
   cover: {width: 144, height: 144, borderRadius: 6, backgroundColor: C.surface},
   name: {
     ...T.screenTitle,
@@ -196,7 +201,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sub: {...T.sub, color: C.sub, marginTop: 5},
-  center: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40},
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
   barTrack: {
     width: '100%',
     maxWidth: 260,
@@ -247,7 +257,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  list: {paddingBottom: 20},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  list: {paddingBottom: BOTTOM_INSET},
   missing: {paddingHorizontal: S.gutter, paddingTop: 18},
   missingTitle: {
     fontSize: 11,

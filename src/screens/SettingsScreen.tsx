@@ -60,6 +60,7 @@ import {
   startSleepTimer,
   useSleepTimer,
 } from '../sleepTimer';
+import {BOTTOM_INSET} from '../layout';
 
 function formatBytes(n: number): string {
   if (n < 1024) {
@@ -1094,7 +1095,9 @@ const styles = StyleSheet.create({
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   // Enough tail room that the last row clears the mini player + bottom nav —
   // the reset button was getting clipped by a small amount.
-  scroll: {paddingBottom: 90},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  scroll: {paddingBottom: BOTTOM_INSET},
   section: {paddingTop: 22},
   sectionHead: {
     flexDirection: 'row',

@@ -51,6 +51,7 @@ import {usePlaybackOrigin} from '../player';
 import {toast} from '../toast';
 import {Sheet} from '../components/Sheet';
 import {listWindowing} from '../components/TrackRow';
+import {BOTTOM_INSET} from '../layout';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
 
@@ -337,7 +338,13 @@ export const LibraryScreen = React.memo(function LibraryScreen({
                   {item.name}
                 </Text>
                 <View style={styles.metaLine}>
-                  {isPinned(idOf(item)) && (
+                  {/* Liked Songs and Downloads carry the pin too. They are
+                      pinned — permanently, by construction, above everything
+                      the pin list can reorder — and a row that sits at the top
+                      of the list with no mark on it reads as an accident. */}
+                  {(isPinned(idOf(item)) ||
+                    item.kind === 'liked' ||
+                    item.kind === 'downloads') && (
                     <Pin
                       size={12}
                       color={DOWNLOAD_TINT}
@@ -543,7 +550,9 @@ const styles = StyleSheet.create({
   chipText: {...T.sub, color: C.text, fontSize: 13},
   chipTextOn: {color: C.bg, fontWeight: '700'},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  list: {paddingBottom: 12},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  list: {paddingBottom: BOTTOM_INSET},
   row: {
     flexDirection: 'row',
     alignItems: 'center',

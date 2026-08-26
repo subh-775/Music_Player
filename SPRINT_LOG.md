@@ -1096,6 +1096,48 @@ Android will accept as an update to this one. Rotating it is correct and forces
 a manual reinstall for every existing user, so it belongs at a version boundary
 the user picks.
 
+## Round 7 — the small list after the first on-device run of round 6
+
+**The queue opened on any tap along the bottom.** `queuePull` raced a
+`Gesture.Tap` against the pan, which was right when it was attached to a small
+grip in the middle of the screen and wrong the moment the gesture moved to a row
+spanning the full width — every tap down there, including the one that switches
+song/lyrics, opened the sheet. The tap is gone; the queue opens from its button
+or a deliberate upward drag.
+
+**The player was not transparent — the tint was too light.** The background is
+`toward(tint, 0.72)` of the artwork's palette colour, and on a bright cover that
+lands at a lightness the eye reads as a translucent panel, because a surface
+that colour usually is one. 0.86 now. Worth recording because the first
+diagnosis (an opacity bug) would have added a backdrop layer that fixed nothing.
+
+**The bars now float over the page.** They were the last rows of the layout, so
+there was never anything behind them: the strip either side of the mini player
+was solid black and the tab bar had nothing to be translucent over. They are one
+absolutely-positioned stack now — a three-stop fade, the mini player, the tab
+bar — with the page running full height behind them. The fade does its darkening
+in the last third so the artwork either side of the mini player stays visible,
+which is the whole point of the floating shape.
+
+The cost is real and worth naming: every scrolling surface has to end
+`BOTTOM_INSET` (136px, measured from the two bars) above the bottom, or its last
+row sits behind them forever. Nine screens patched, one constant in
+`src/layout.ts`.
+
+**Deleting a download told nobody.** `deleteDownload` removed the file and
+nothing else: the id stayed in `downloadedIds`, so `isDownloaded` kept saying
+yes and every row kept its tick, and no listener fired, so Library — which
+rescans on becoming visible or on a download COMPLETING — never rescanned. Both
+halves of the report follow: the rows still there afterwards, and the count
+disagreeing with the list on the way back. `forgetDownloads()` drops the ids and
+fires the same listeners a completed download does, called from both delete
+paths, and the open Downloads collection now re-reads the folder in place rather
+than being closed out from under the user.
+
+**Downloaded → Downloads**, and the two fixtures show the pin they always had in
+spirit: they sit above everything the pin list can reorder, and a row pinned to
+the top with no mark on it reads as an accident.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

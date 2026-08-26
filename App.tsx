@@ -323,6 +323,17 @@ function Shell() {
 
   /** Home's quick-access tiles. Home only knows WHAT was tapped; the
    *  tracklists live here, next to everything else that opens a Collection. */
+  /** Re-read the download folder and swap the open collection for what is
+   *  actually on disk now. */
+  const refreshDownloadsCollection = useCallback(async () => {
+    try {
+      const {tracks} = await getLocalLibrary();
+      setCollection(downloadsCollection(overlayDownloadArtwork(tracks)));
+    } catch {
+      setCollection(null);
+    }
+  }, []);
+
   const openQuick = useCallback(
     async (dest: QuickDest) => {
       if (dest.kind === 'liked') {
@@ -604,7 +615,17 @@ function Shell() {
               onPlay={(t, ctx) => play(t, ctx, collection.id)}
               onMenu={openSheet}
               onChanged={() => {
-                setCollection(null);
+                // Downloads stays OPEN and re-reads the folder. Closing it was
+                // right for a playlist that was just deleted — there is nothing
+                // to go back to — but deleting three songs out of forty is not
+                // leaving the screen, and being thrown out of it (onto a list
+                // that had not rescanned either) is what made the delete look
+                // like it had not worked.
+                if (collection.kind === 'downloads') {
+                  refreshDownloadsCollection();
+                } else {
+                  setCollection(null);
+                }
                 setLibraryNonce(n => n + 1);
               }}
             />
@@ -671,12 +692,6 @@ function Shell() {
             <EqualizerScreen onClose={() => setEqOpen(false)} />
           </View>
         )}
-
-        {/* The bottom of the page dissolves into the bar below it instead of
-            meeting a hairline. Last child of the body, so it paints over
-            whatever is scrolling — which is the whole point, and the reason it
-            is not part of BottomNav's own style. */}
-        <BodyFade />
       </View>
 
       {/*
@@ -693,9 +708,27 @@ function Shell() {
       */}
       <Toaster bottom={playerOpen ? 118 : engine ? 132 : 78} />
 
-      {engine && <PlayerBar onExpand={expandPlayer} />}
+      {/*
+        The bars FLOAT over the page rather than sitting under it.
 
-      <BottomNav active={tab} onChange={switchTab} />
+        In flow they were the bottom of the layout, which meant nothing was ever
+        behind them: the strip either side of the mini player was solid black
+        and the tab bar could not be translucent over anything. Out of flow, the
+        page runs the full height of the window and passes behind both — which
+        is what the translucency and the fade are for, and the only way the
+        floating bar reads as floating.
+
+        box-none so a touch that lands in the fade, beside the mini player,
+        still reaches the list underneath.
+
+        The cost is that every scrolling surface has to end BOTTOM_INSET above
+        the bottom; see src/layout.ts.
+      */}
+      <View style={styles.bottomStack} pointerEvents="box-none">
+        <BodyFade />
+        {engine && <PlayerBar onExpand={expandPlayer} />}
+        <BottomNav active={tab} onChange={switchTab} />
+      </View>
 
       <TrackActionSheet
         track={sheetTrack}
@@ -771,19 +804,26 @@ export default function App(): React.JSX.Element {
 }
 
 /**
- * A short upward fade at the foot of the scrolling area.
+ * The page dissolving into the bars, instead of meeting a hard edge.
  *
- * 28px, from nothing to the page colour. Long enough that a row of text
- * dissolves rather than being clipped, short enough that it never eats a row
- * you were trying to read.
+ * It starts ABOVE the mini player and reaches full page colour behind the tab
+ * bar, so a row scrolling out of sight fades rather than being cut off by a
+ * hairline. Absolutely positioned inside the floating stack and non-interactive,
+ * so it costs the content underneath nothing.
  */
 function BodyFade() {
   return (
     <Svg style={styles.bodyFade} pointerEvents="none">
       <Defs>
         <LinearGradient id="bodyfade" x1="0" y1="0" x2="0" y2="1">
+          {/* Three stops, not two. A straight ramp put the fade at half
+              strength exactly where the mini player is, which greys out the
+              artwork either side of it — the part that is meant to show
+              through. It stays light past the bar and does its darkening in
+              the last third, behind the tabs. */}
           <Stop offset="0" stopColor={C.bg} stopOpacity="0" />
-          <Stop offset="1" stopColor={C.bg} stopOpacity="0.95" />
+          <Stop offset="0.6" stopColor={C.bg} stopOpacity="0.22" />
+          <Stop offset="1" stopColor={C.bg} stopOpacity="0.92" />
         </LinearGradient>
       </Defs>
       <Rect width="100%" height="100%" fill="url(#bodyfade)" />
@@ -794,7 +834,10 @@ function BodyFade() {
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   body: {flex: 1},
-  bodyFade: {position: 'absolute', left: 0, right: 0, bottom: 0, height: 28},
+  bottomStack: {position: 'absolute', left: 0, right: 0, bottom: 0},
+  // Taller than the bars it sits behind, so the fade begins in open page and
+  // is already at full strength by the time it reaches them.
+  bodyFade: {position: 'absolute', left: 0, right: 0, bottom: 0, top: -36},
   // Above every overlay: player 30, sheets 40, drawer 45. The splash is the
   // one thing that must cover a half-built app.
   splash: {...StyleSheet.absoluteFillObject, zIndex: 60, backgroundColor: C.bg},

@@ -31,7 +31,7 @@ import {
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {deleteDownload, type Track} from '../backend';
-import {enqueueDownload} from '../downloads';
+import {enqueueDownload, forgetDownloads} from '../downloads';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {isLiked, toggleLike} from '../store';
 import {removeTrackFromPlaylist} from '../playlists';
@@ -106,6 +106,9 @@ export function TrackActionSheet({
       return;
     }
     const ok = await deleteDownload(track.file_path);
+    // Either way the file is not there any more, so the registry must not go on
+    // claiming it is: "already gone" is still gone.
+    forgetDownloads([track]);
     toast(
       ok ? 'Removed from downloads' : 'Removed (the file was already gone)',
     );

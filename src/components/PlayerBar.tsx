@@ -182,8 +182,11 @@ export const PlayerBar = React.memo(function PlayerBar({
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
               <Defs>
                 <LinearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={toward(tint, 0.34)} />
-                  <Stop offset="1" stopColor={toward(tint, 0.58)} />
+                  {/* Darker than it was: the bar is translucent now and sits
+                      over live content, so the tint has to hold its own
+                      surface rather than glow. */}
+                  <Stop offset="0" stopColor={toward(tint, 0.52)} />
+                  <Stop offset="1" stopColor={toward(tint, 0.7)} />
                 </LinearGradient>
               </Defs>
               <Rect width="100%" height="100%" fill="url(#barFill)" />
