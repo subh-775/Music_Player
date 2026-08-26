@@ -127,3 +127,9 @@ jobs:
           name: "Music_Player ${{ github.ref_name }}"
           files: ${{ steps.stage.outputs.apk }}
           fail_on_unmatched_files: true
+          # Every release so far has shipped with an EMPTY body, because
+          # nothing was ever passed here. The in-app updater shows that body in
+          # its popup and the docs site lists it, so both were saying nothing.
+          # GitHub writes it from the commits since the last tag, which is at
+          # least true and specific; a hand-written body still overrides it.
+          generate_release_notes: true
