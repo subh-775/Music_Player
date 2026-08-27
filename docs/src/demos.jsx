@@ -37,10 +37,19 @@ export function AppMark() {
 /**
  * Version, downloads and stars, read from GitHub when the page is viewed.
  *
- * Read rather than written down, so the latest version is whatever is actually
- * published — there is no number in this repository that can fall behind the
- * releases. Each is a label and a value, the shape a repository badge has had
- * for a decade, which means it needs no explaining.
+ * Read rather than written down, so the version here is whatever is actually
+ * published and no number in this repository can fall behind the releases.
+ *
+ * Downloads is the total across EVERY release, which is what the README badge
+ * shows and what a project's download count is normally taken to mean. It used
+ * to be the latest release's count alone, and the two then disagreed in
+ * public - 6 here against 54 on the repository page. Both were true, neither
+ * said which it was counting, and that is worse than either number on its own.
+ *
+ * One list request rather than a call for the latest release and another for
+ * the list: the newest published entry is the first that is neither a draft nor
+ * a pre-release, so the same response answers both questions and spends half as
+ * much of an unauthenticated rate limit.
  */
 export function ReleaseBadges() {
   const [data, setData] = useState(null);
@@ -48,21 +57,31 @@ export function ReleaseBadges() {
   useEffect(() => {
     let alive = true;
     Promise.all([
-      fetch(`${SITE.api}/releases/latest`).then(r => (r.ok ? r.json() : null)),
+      fetch(`${SITE.api}/releases?per_page=100`).then(r =>
+        r.ok ? r.json() : null,
+      ),
       fetch(SITE.api).then(r => (r.ok ? r.json() : null)),
     ])
-      .then(([release, repo]) => {
+      .then(([releases, repo]) => {
         if (!alive) {
           return;
         }
+        const published = Array.isArray(releases)
+          ? releases.filter(r => !r.draft && !r.prerelease)
+          : null;
         setData({
-          tag: release?.tag_name ?? null,
+          tag: published?.[0]?.tag_name ?? null,
           // null, not 0, when the request did not come back. A rate-limited
-          // read that reports "0 downloads" is not a graceful fallback, it is
-          // a wrong number stated confidently.
-          downloads: release
-            ? (release.assets || []).reduce(
-                (n, a) => n + (a.download_count || 0),
+          // read that reports "0 downloads" is not a graceful fallback, it is a
+          // wrong number stated confidently.
+          downloads: published
+            ? published.reduce(
+                (n, r) =>
+                  n +
+                  (r.assets || []).reduce(
+                    (m, a) => m + (a.download_count || 0),
+                    0,
+                  ),
                 0,
               )
             : null,
@@ -94,8 +113,6 @@ export function ReleaseBadges() {
     </div>
   );
 }
-
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 function HBar({value, max, steps, onChange, label}) {
   const track = useRef(null);
