@@ -317,7 +317,12 @@ button {
      bar puts the mark within a few pixels of the window and it reads as
      clipped even when it is not. */
   padding-inline: max(var(--s-5), calc((100% - 1440px) / 2));
-  padding-right: max(var(--s-5), calc((100% - 1440px) / 2 + var(--s-2)));
+  /* The right side gets a full step more than the left. A classic (non-overlay)
+     scrollbar is 15-17px wide and sits ON TOP of a fixed bar's right edge, and
+     a headless browser has no scrollbar at all — so the clearance that measures
+     as ample in a test is the clearance that gets eaten in a real window. This
+     leaves room for the widest of them and still has some to spare. */
+  padding-right: max(var(--s-6), calc((100% - 1440px) / 2 + var(--s-6)));
   background: color-mix(in oklab, var(--bg) 82%, transparent);
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
