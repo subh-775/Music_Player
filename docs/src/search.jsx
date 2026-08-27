@@ -18,7 +18,7 @@
  */
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {FLAT} from './nav.js';
-import {Search as SearchIcon} from './icons.jsx';
+import {Close, Search as SearchIcon} from './icons.jsx';
 
 /** Markdown and JSX out, readable prose in. */
 function plain(md) {
@@ -212,7 +212,19 @@ export function SearchPalette({open, onClose, onNavigate}) {
             placeholder="Search the documentation"
             aria-label="Search the documentation"
           />
-          <kbd>Esc</kbd>
+          {/* Two affordances for one action, and only one of them is ever
+              true. A keyboard has an Esc key and the chip names it; a phone has
+              neither, so the chip there is a label for a key that does not
+              exist AND it is not tappable. Which one shows is decided in CSS,
+              at the same width the header swaps its search box for an icon. */}
+          <kbd className="pal-esc">Esc</kbd>
+          <button
+            type="button"
+            className="pal-close"
+            onClick={onClose}
+            aria-label="Close search">
+            <Close size={20} />
+          </button>
         </div>
 
         <div className="pal-list">

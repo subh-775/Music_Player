@@ -5,28 +5,55 @@
  *
  * ## Colour
  *
- * OKLCH throughout, because it is perceptually uniform: two tokens one step
- * apart in lightness actually look one step apart, which HSL cannot promise —
- * hsl(150 60% 50%) and hsl(240 60% 50%) are wildly different brightnesses.
- * That matters here because the whole palette is built by walking lightness.
+ * The ground, the surfaces, the rules and the accent are hex, because they are
+ * measured values from the reference design and rewriting a measurement in
+ * another notation only invites it to drift. The three status colours are
+ * still OKLCH: those ARE built by walking lightness, and OKLCH is the only
+ * notation where two tokens one step apart actually look one step apart.
  *
- * Neutrals carry 0.004–0.012 chroma at the brand's hue (150). Pure grey next to
- * a saturated green reads as dead, and the tint is far below the threshold
- * where anyone would call the page "green".
+ * Neutrals are the reference design's own: a near-black ground (#030710), a
+ * deep blue-grey surface (#161f34) and a mid-blue rule (#2f4b68). They are not
+ * neutral in the strict sense and are not meant to be — every one of them sits
+ * on the accent's hue, which is what makes the page read as one material
+ * rather than as blue text on grey card stock.
  *
- * Neither end is pure. The app itself is #000 because it targets AMOLED panels
- * where black is pixels switched off; a documentation page is a wall of body
- * text, and text on pure black haloes. The dark ground here is a charcoal --
- * 20% lightness, #141715 -- and the light one is a warm paper, not white.
+ * Neither end is pure. Text on pure black haloes, and text on pure white
+ * glares; the ground is #030710 and the light one is a pale sky, not paper.
  */
 :root {
   /* ── Brand ─────────────────────────────────────────────────────────────── */
-  --brand-500: oklch(68% 0.176 150); /* #1db954, the app's accent */
-  --brand-400: oklch(76% 0.185 150); /* #1ed760, its bright variant */
-  --brand-600: oklch(58% 0.155 150);
-  --brand-700: oklch(46% 0.125 150);
+  /*
+   * Sky blue, measured from the reference design: #7fc8ff is the accent, and
+   * the ramp walks lightness away from it in both directions so a link on the
+   * dark ground and a link on the light one are the same colour at different
+   * brightnesses rather than two different blues.
+   *
+   * This turned out to need no reconciling with the product at all: the
+   * Android launcher icon is a #7fc8ff disc on a #161f34 tile, which is the
+   * reference design's accent on the reference design's surface. The site and
+   * the icon it opens with are the same two colours.
+   */
+  --brand-300: #a8daff;
+  --brand-400: #7fc8ff; /* the design's accent, as measured */
+  /* Measured, not guessed: #1c6fae landed at exactly 4.50:1 on the light
+     ground, which is AA by a rounding error rather than by design. This step
+     has real headroom and is still recognisably the same blue. */
+  --brand-600: #145d94;
+  --brand-700: #14547f;
 
-  /* ── Type scale — 1.25, from a 16px base ───────────────────────────────── */
+  /*
+   * ── Type ────────────────────────────────────────────────────────────────
+   *
+   * The reference sets its display at 80px / weight 300 / -2.4px of tracking,
+   * which is -0.03em. That combination is the whole voice of it: at 300 a
+   * headline is a statement rather than a shout, and the negative tracking is
+   * what stops a light weight at large size from falling apart into separate
+   * letters. Montserrat is a variable font here, so 300 costs nothing extra.
+   *
+   * Body stays at 16px rather than the reference's 14px. Fourteen is right for
+   * chrome on a marketing page; a documentation site is a wall of prose and
+   * has to be comfortable at arm's length.
+   */
   --fs-xs: 0.8rem; /* 12.8 */
   --fs-ui: 0.875rem; /* 14 — chrome only, deliberately off-scale */
   --fs-base: 1rem; /* 16 */
@@ -35,14 +62,18 @@
   --fs-xl: 1.953rem; /* 31 */
   --fs-2xl: 2.441rem; /* 39 */
   --fs-3xl: 3.052rem; /* 49 */
+  --fs-display: 5rem; /* 80, the reference's display size */
 
   /*
-   * Weights are a three-step ladder, not a switch: 400 body, 500 for chrome
-   * and table headers, 600 for headings and anything emphatic, 700 for h1, h2
-   * and numeric values only. Almost everything used to be 700, and when
-   * everything emphatic is the same weight, weight stops carrying information
-   * and size has to do all the work — which is what read as flat.
+   * One weight per role, so a heading is never chosen by eye. Almost
+   * everything on this site used to be 700, and when everything emphatic is
+   * the same weight, weight stops carrying information and size has to do all
+   * of the work — which is exactly what read as flat.
    */
+  --w-display: 300; /* h1, h2, the hero */
+  --w-heading: 300;
+  --w-strong: 500; /* buttons, nav, table headers, uppercase labels */
+  --w-label: 500;
 
   /* ── Space — 4pt grid, named for meaning not for value ─────────────────── */
   --s-1: 4px;
@@ -55,17 +86,22 @@
   --s-8: 64px;
   --s-9: 96px;
 
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-full: 999px;
+  /* Measured from the reference: a hairline 2px, 8px for controls, 19px for
+     panels, and a full pill for anything that is pressed. */
+  --r-sm: 2px;
+  --r-md: 8px;
+  --r-lg: 19px;
+  --r-full: 50px;
 
   /* ── Motion ────────────────────────────────────────────────────────────── */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
-  --t-fast: 120ms;
-  --t-mid: 200ms;
-  --t-slow: 320ms;
+  /* The reference moves on plain `ease` at 200-300ms and nothing faster. An
+     expo curve is a good default for a product; a documentation site is read,
+     not operated, and it should not appear to snap at the reader. */
+  --ease-out: ease;
+  --ease-in: ease;
+  --t-fast: 200ms;
+  --t-mid: 300ms;
+  --t-slow: 300ms;
 
   /* ── Layout ────────────────────────────────────────────────────────────── */
   --header-h: 60px;
@@ -83,117 +119,132 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  /* 20%, not 14%. The old value resolved to #070a08 - three percent off pure
-     black, which the eye reads as "off" rather than as a dark grey, and which
-     leaves nowhere to put a surface above it. */
-  --bg: oklch(20% 0.007 155); /* #141715 */
-  --bg-soft: oklch(23% 0.007 155);
-  --surface: oklch(25% 0.008 155);
-  --surface-2: oklch(29% 0.009 155);
-  --surface-hover: oklch(32% 0.01 155);
+  --bg: #030710;
+  --bg-soft: #0a101f;
+  --surface: #161f34; /* the design's surface, unaltered */
+  --surface-2: #1e2a44;
+  --surface-hover: #263553;
 
-  --text: oklch(96% 0.004 155); /* 16.1:1 */
-  --text-2: oklch(75% 0.008 155); /*  8.2:1 */
-  /* 60% measured 4.4:1 against the lifted ground and stopped clearing AA. */
-  --text-3: oklch(63% 0.009 155); /*  5.2:1 */
+  --text: #cce9ff;
+  --text-2: #9cbdda;
+  --text-3: #7e9cba;
 
-  --line: oklch(34% 0.009 155);
-  --line-soft: oklch(28% 0.008 155);
+  --line: #2f4b68;
+  --line-soft: #1e3149;
 
-  /* Desaturated a touch and lifted, per the rule for accents on dark: the same
-     chroma that reads as confident on white reads as neon on near-black. */
   --brand: var(--brand-400);
-  --brand-dim: oklch(64% 0.13 150);
-  --brand-ink: oklch(17% 0.04 150);
-  --brand-wash: oklch(76% 0.185 150 / 0.11);
-  --brand-edge: oklch(76% 0.185 150 / 0.28);
+  --brand-dim: #4f9ad4;
+  /* Text ON the accent. The design pairs its light blue with the near-black
+     ground rather than with white, and it is right to: white on #7fc8ff is
+     1.8:1 and unreadable. */
+  --brand-ink: #030710;
+  --brand-hover: var(--brand-300);
+  --brand-wash: rgba(127, 200, 255, 0.1);
+  --brand-edge: rgba(127, 200, 255, 0.3);
 
-  --warn: oklch(80% 0.14 85);
-  --warn-wash: oklch(80% 0.14 85 / 0.1);
-  --warn-edge: oklch(80% 0.14 85 / 0.26);
-  --danger: oklch(72% 0.16 25);
-  --danger-wash: oklch(72% 0.16 25 / 0.1);
-  --danger-edge: oklch(72% 0.16 25 / 0.28);
-  --info: oklch(76% 0.1 235);
-  --info-wash: oklch(76% 0.1 235 / 0.1);
-  --info-edge: oklch(76% 0.1 235 / 0.26);
+  --warn: oklch(84% 0.13 85);
+  --warn-wash: oklch(84% 0.13 85 / 0.1);
+  --warn-edge: oklch(84% 0.13 85 / 0.26);
+  --danger: oklch(76% 0.15 22);
+  --danger-wash: oklch(76% 0.15 22 / 0.1);
+  --danger-edge: oklch(76% 0.15 22 / 0.28);
+  /* Info sits closest to the accent, so it is pulled toward cyan to stay
+     distinguishable from an ordinary link. */
+  --info: oklch(84% 0.09 210);
+  --info-wash: oklch(84% 0.09 210 / 0.1);
+  --info-edge: oklch(84% 0.09 210 / 0.26);
 
-  /* Two layers: a tight contact shadow that anchors the edge, and a wide soft
-     one that carries the height. One box-shadow can do either, never both. */
-  /* Pulled back with the ground. These were tuned against a page that was
-     already almost black, where most of the shadow did nothing at all; on a
-     charcoal every layer reads, and at the old strength the cards looked like
-     they were floating a foot off the page. */
-  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.28), 0 2px 6px oklch(0% 0 0 / 0.16);
-  --shadow-2: 0 2px 4px oklch(0% 0 0 / 0.28), 0 10px 28px oklch(0% 0 0 / 0.22);
-  --shadow-3: 0 4px 10px oklch(0% 0 0 / 0.3), 0 24px 60px oklch(0% 0 0 / 0.34);
+  /* The design carries one shadow, and it is a big soft one: 32px down, 68px
+     of blur, 30% black. Everything raised here is a variation on it rather
+     than a separate idea. */
+  --shadow-1: 0 4px 10px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 12px 26px rgba(0, 0, 0, 0.26);
+  --shadow-3: 0 32px 68px rgba(0, 0, 0, 0.3);
 }
 
 /* ── Light ───────────────────────────────────────────────────────────────── */
 /*
- * A warm paper, not white: #e8e2d4 is oklch(91.4% 0.020 88).
+ * The reference design's light side is its accent used as a ground: a real sky
+ * blue behind near-black text. Taken literally at full strength it is a page
+ * you cannot read for ten minutes, so the ground is that blue held back to a
+ * pale tint and the text is the design's own #030710 — which is where the
+ * contrast comes from, and it is enormous.
  *
- * Two things about it are easy to get wrong. Beige is DARKER than white by
- * more than it looks, so every accent has to come down with it - the old
- * --brand-600 measures 3.1:1 on this ground and fails AA for body text, where
- * on the near-white it passed, which is why nobody had noticed. And --surface
- * has to be LIGHTER than --bg: on a white page a card is the same white and
- * the border does the work, but on paper a card at the same value is invisible
- * and a card below it reads as a hole.
- *
- * Every neutral carries the same hue 88, so the page reads as one paper stock
- * rather than as beige with grey cards on it.
+ * As on the dark side, --surface is LIGHTER than --bg. A card at the same
+ * value as the page is invisible; a card below it reads as a hole.
  */
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: oklch(91.4% 0.02 88); /* #e8e2d4 */
-  --bg-soft: oklch(89.5% 0.022 88);
-  --surface: oklch(94.6% 0.014 88); /* lighter than --bg: cards lift */
-  --surface-2: oklch(88.2% 0.024 88);
-  --surface-hover: oklch(86% 0.026 88);
+  --bg: #dceeff;
+  --bg-soft: #cfe6fb;
+  --surface: #eef7ff;
+  --surface-2: #c8e1f8;
+  --surface-hover: #b9d8f4;
 
-  --text: oklch(24% 0.016 88); /* 12.8:1 */
-  --text-2: oklch(45% 0.016 88); /*  5.8:1 */
-  --text-3: oklch(49% 0.016 88); /*  4.9:1 - clears AA at body size */
+  --text: #030710;
+  --text-2: #2b3d52;
+  --text-3: #46586d;
 
-  --line: oklch(83% 0.026 88);
-  --line-soft: oklch(87% 0.024 88);
+  --line: #a8c6e0;
+  --line-soft: #c3daee;
 
-  /* 700, not 600: 5.2:1 here, and still unmistakably the app's green. */
-  --brand: var(--brand-700);
-  --brand-dim: oklch(38% 0.105 150);
-  --brand-ink: oklch(97% 0.01 88);
-  --brand-wash: oklch(46% 0.125 150 / 0.1);
-  --brand-edge: oklch(46% 0.125 150 / 0.28);
+  /* The accent has to come a long way down to be a link on a light ground:
+     #7fc8ff on #dceeff is 1.3:1. The 600 step is a legible blue and reads as
+     the same colour at a different brightness. */
+  --brand: var(--brand-600);
+  --brand-dim: var(--brand-700);
+  --brand-ink: #f4fbff;
+  --brand-hover: var(--brand-700);
+  --brand-wash: rgba(28, 111, 174, 0.1);
+  --brand-edge: rgba(28, 111, 174, 0.3);
 
-  /* Re-derived against 91.4%, not against the 98.6% these were tuned on. Each
-     is a step darker than it was, for the same reason the brand is. */
-  --warn: oklch(46% 0.115 75);
-  --warn-wash: oklch(46% 0.115 75 / 0.1);
-  --warn-edge: oklch(46% 0.115 75 / 0.26);
-  --danger: oklch(47% 0.175 25);
-  --danger-wash: oklch(47% 0.175 25 / 0.09);
-  --danger-edge: oklch(47% 0.175 25 / 0.26);
-  --info: oklch(45% 0.13 245);
-  --info-wash: oklch(45% 0.13 245 / 0.09);
-  --info-edge: oklch(45% 0.13 245 / 0.26);
+  --warn: oklch(45% 0.115 75);
+  --warn-wash: oklch(45% 0.115 75 / 0.1);
+  --warn-edge: oklch(45% 0.115 75 / 0.26);
+  --danger: oklch(46% 0.175 25);
+  --danger-wash: oklch(46% 0.175 25 / 0.09);
+  --danger-edge: oklch(46% 0.175 25 / 0.26);
+  --info: oklch(44% 0.13 245);
+  --info-wash: oklch(44% 0.13 245 / 0.09);
+  --info-edge: oklch(44% 0.13 245 / 0.26);
 
-  --shadow-1: 0 1px 2px oklch(30% 0.03 88 / 0.1),
-    0 2px 6px oklch(30% 0.03 88 / 0.07);
-  --shadow-2: 0 2px 4px oklch(30% 0.03 88 / 0.1),
-    0 10px 28px oklch(30% 0.03 88 / 0.12);
-  --shadow-3: 0 4px 10px oklch(30% 0.03 88 / 0.14),
-    0 24px 60px oklch(30% 0.03 88 / 0.18);
+  --shadow-1: 0 4px 10px rgba(3, 7, 16, 0.08);
+  --shadow-2: 0 12px 26px rgba(3, 7, 16, 0.1);
+  --shadow-3: 0 32px 68px rgba(3, 7, 16, 0.14);
 }
 
 /*
- * There is no prefers-color-scheme block any more. There was one, and it
- * restated all twenty-odd tokens above verbatim - two copies of a palette is
- * exactly how one gets updated and the other does not. The inline script in
- * index.html stamps data-theme on <html> before first paint, from storage or
- * from the system preference, so one palette serves both.
+ * There is no prefers-color-scheme block. There was one, and it restated all
+ * twenty-odd tokens above verbatim - two copies of a palette is exactly how
+ * one gets updated and the other does not. The inline script in index.html
+ * stamps data-theme on <html> before first paint, from storage or from the
+ * system preference, so one palette serves both.
  */
+
+/*
+ * Crossing between the two palettes.
+ *
+ * Only the body used to transition, so the page ground faded while every
+ * surface, rule, heading and icon on top of it cut across in one frame - which
+ * reads worse than no transition at all, because the eye follows the parts
+ * that jumped.
+ *
+ * A permanent transition on every colour is not the answer either: it would
+ * put a third of a second of lag behind every hover and every focus ring. So
+ * the class is added for the length of the swap and taken away again (see
+ * useTheme in App.jsx), and while it is there EVERY element crosses over
+ * together. !important because it has to beat the component-level transitions
+ * that are already on buttons, cards and links.
+ */
+.theming,
+.theming *,
+.theming *::before,
+.theming *::after {
+  transition: background-color 320ms ease, color 320ms ease,
+    border-color 320ms ease, fill 320ms ease, box-shadow 320ms ease,
+    opacity 320ms ease !important;
+}
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
 
@@ -221,8 +272,6 @@ body {
   letter-spacing: -0.006em;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
-  transition: background-color var(--t-mid) var(--ease-out),
-    color var(--t-mid) var(--ease-out);
 }
 
 a {
@@ -261,8 +310,19 @@ button {
   gap: var(--s-3);
   /* The bar spans the window; its CONTENTS line up with the shell's 1440px
      cap. Otherwise the logo and the nav sit at the window edges while the page
-     under them is centred, which looks worse than either extreme. */
+     under them is centred, which looks worse than either extreme.
+
+     The right side gets its own padding on top of that: the last control is a
+     40px icon button whose visible glyph sits inside it, so an edge-aligned
+     bar puts the mark within a few pixels of the window and it reads as
+     clipped even when it is not. */
   padding-inline: max(var(--s-5), calc((100% - 1440px) / 2));
+  /* The right side gets a full step more than the left. A classic (non-overlay)
+     scrollbar is 15-17px wide and sits ON TOP of a fixed bar's right edge, and
+     a headless browser has no scrollbar at all — so the clearance that measures
+     as ample in a test is the clearance that gets eaten in a real window. This
+     leaves room for the widest of them and still has some to spare. */
+  padding-right: max(var(--s-6), calc((100% - 1440px) / 2 + var(--s-6)));
   background: color-mix(in oklab, var(--bg) 82%, transparent);
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
@@ -304,6 +364,7 @@ button {
 }
 
 .hdr-links {
+  flex: none;
   display: none;
   align-items: center;
   gap: var(--s-1);
@@ -554,10 +615,10 @@ kbd {
 
 .prose h1 {
   margin: 0 0 var(--s-4);
-  font-size: var(--fs-2xl);
+  font-size: clamp(2.25rem, 5.5vw, var(--fs-2xl));
   line-height: 1.1;
-  font-weight: 700;
-  letter-spacing: -0.035em;
+  font-weight: var(--w-display);
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 
@@ -565,9 +626,9 @@ kbd {
   margin: var(--s-8) 0 var(--s-3);
   padding-top: var(--s-5);
   border-top: 1px solid var(--line-soft);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
   line-height: 1.25;
-  font-weight: 700;
+  font-weight: var(--w-heading);
   letter-spacing: -0.025em;
   scroll-margin-top: calc(var(--header-h) + var(--s-4));
   text-wrap: balance;
@@ -575,9 +636,9 @@ kbd {
 
 .prose h3 {
   margin: var(--s-6) 0 var(--s-2);
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
   line-height: 1.35;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.02em;
   scroll-margin-top: calc(var(--header-h) + var(--s-4));
 }
@@ -888,62 +949,60 @@ kbd {
 }
 
 .pager {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: var(--s-3);
-  grid-template-columns: 1fr;
-  margin-top: var(--s-5);
+  margin-top: var(--s-6);
 }
 
 /*
- * The card answers a hover with MOTION in the direction you are about to go,
- * not with a colour change. A gradient wash says "something happened"; a card
- * that leans the way it will take you says what.
+ * Two small controls, not two cards.
+ *
+ * These were full-width panels with a card's padding and a card's shadow,
+ * which gave the least important thing on the page the most weight on it. They
+ * are a pair of buttons now, sized to their own text: the page name is the
+ * label and the direction is a mark beside it.
+ *
+ * The hover still answers with motion in the direction it will take you rather
+ * than with a colour change. A colour says "something happened"; a control
+ * that leans the way it is going says what.
  */
 .pager a {
-  display: block;
-  padding: var(--s-4) var(--s-5);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 8px 16px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-full);
   background: var(--surface);
-  transition: border-color var(--t-mid) var(--ease-out),
-    transform var(--t-mid) var(--ease-out),
-    box-shadow var(--t-mid) var(--ease-out);
+  color: var(--text);
+  font-size: var(--fs-ui);
+  font-weight: var(--w-label);
+  transition: border-color var(--t-fast) var(--ease-out),
+    transform var(--t-fast) var(--ease-out),
+    background-color var(--t-fast) var(--ease-out);
 }
 .pager a:hover {
   border-color: var(--brand-edge);
-  box-shadow: var(--shadow-1);
+  background: var(--surface-2);
   text-decoration: none;
 }
 .pager a.prev:hover {
-  transform: translateX(-3px);
+  transform: translateX(-2px);
 }
 .pager a.next:hover {
-  transform: translateX(3px);
+  transform: translateX(2px);
 }
 .pager .dir {
-  display: block;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--text-3);
-  margin-bottom: 2px;
-  transition: transform var(--t-mid) var(--ease-out);
-}
-.pager a.prev:hover .dir {
-  transform: translateX(-3px);
-}
-.pager a.next:hover .dir {
-  transform: translateX(3px);
+  font-size: 0.95em;
 }
 .pager .name {
-  display: block;
-  color: var(--brand);
-  font-weight: 600;
-  font-size: 0.95rem;
+  color: var(--text);
 }
-.pager a.next {
-  text-align: right;
+.pager a:hover .name {
+  color: var(--brand);
 }
 
 .foot {
@@ -1006,6 +1065,44 @@ kbd {
 .pal-field input::placeholder {
   color: var(--text-3);
 }
+
+/* The chip is the default because most of the time there is a keyboard to
+   press. Below 700px it swaps for a real button - see the note in search.jsx. */
+.pal-close {
+  display: none;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  margin: -8px -8px -8px 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.pal-close:active {
+  background: var(--surface-2);
+}
+
+/*
+ * Esc chip, or a cross.
+ *
+ * Width is the wrong question: a phone in landscape is 844px wide and still
+ * has no Esc key. The condition is whether there is a keyboard to press, which
+ * `pointer: coarse` answers directly, and a short viewport catches the rest.
+ * Only one of the two is ever shown.
+ */
+@media (pointer: coarse), (max-width: 699px), (max-height: 560px) {
+  .pal-esc {
+    display: none;
+  }
+  .pal-close {
+    display: flex;
+  }
+}
+
 
 .pal-list {
   overflow-y: auto;
@@ -1087,10 +1184,17 @@ kbd {
 
 /* ── Home ────────────────────────────────────────────────────────────────── */
 
+/* The same 1440 cap as .shell, deliberately: at 1120 the front page was
+   narrower than every page it links to, so moving from home into the guide
+   made the content jump wider for no reason the reader can see. */
 .home {
-  max-width: 1120px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: var(--s-7) var(--s-5) var(--s-9);
+  /* The header is FIXED, and this page is not inside .shell — which is where
+     the offset for it lives. Without clearing it here the first thing on the
+     page sits under the bar, and on a phone, where the padding is smaller
+     still, the eyebrow was cut in half by it. */
+  padding: calc(var(--header-h) + var(--s-6)) var(--s-5) var(--s-9);
 }
 
 .hero {
@@ -1103,32 +1207,24 @@ kbd {
 .hero-eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: 5px 12px 5px 8px;
+  padding: 5px 14px;
   border: 1px solid var(--brand-edge);
   border-radius: var(--r-full);
   background: var(--brand-wash);
   color: var(--brand);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: var(--w-label);
   letter-spacing: 0.02em;
-}
-.hero-eyebrow b {
-  padding: 2px 7px;
-  border-radius: var(--r-full);
-  background: var(--brand);
-  color: var(--brand-ink);
-  font-size: 10.5px;
-  font-weight: 600;
 }
 
 .hero h1 {
   margin: var(--s-4) 0 0;
-  font-size: clamp(2rem, 7vw, var(--fs-3xl));
-  line-height: 1.03;
-  font-weight: 700;
-  /* -0.04em started closing the counters on a and e at 49px. */
-  letter-spacing: -0.025em;
+  /* Up to the reference's 80px, and it needs the whole clamp: at 300 weight a
+     headline only reads as a headline once it is genuinely large. */
+  font-size: clamp(2.25rem, 7.5vw, var(--fs-display));
+  line-height: 1.05;
+  font-weight: var(--w-display);
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 /* Solid. The gradient that used to be here was decoration standing in for
@@ -1140,9 +1236,13 @@ kbd {
 
 .hero-lede {
   margin: var(--s-5) 0 0;
-  max-width: 56ch;
+  /* 68 characters, not 54. The measure has to be capped or the line becomes
+     hard to track back from, but 54 left a third of the column empty beside a
+     paragraph that was wrapping every seven words. */
+  max-width: 68ch;
   font-size: var(--fs-md);
-  line-height: 1.6;
+  font-weight: 400;
+  line-height: 1.55;
   color: var(--text-2);
   text-wrap: pretty;
 }
@@ -1158,11 +1258,11 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  padding: 11px 20px;
+  padding: 12px 26px;
   border-radius: var(--r-full);
   border: 1px solid transparent;
   font-size: 0.9375rem;
-  font-weight: 600;
+  font-weight: var(--w-label);
   letter-spacing: -0.01em;
   cursor: pointer;
   transition: transform var(--t-fast) var(--ease-out),
@@ -1174,7 +1274,7 @@ kbd {
   color: var(--brand-ink);
 }
 .btn-primary:hover {
-  background: var(--brand-400);
+  background: var(--brand-hover);
   text-decoration: none;
   transform: translateY(-1px);
 }
@@ -1192,8 +1292,111 @@ kbd {
   transform: translateY(0) scale(0.98);
 }
 
+/* On a phone the mark comes FIRST — the hero stacks, and a column of text with
+   a logo below it reads as a page that has not finished loading. From 700px up
+   the two sit side by side and the order goes back to what the markup says:
+   words on the left, where reading starts, and the mark on the right. */
 .hero-art {
-  display: none;
+  display: grid;
+  place-items: center;
+  order: -1;
+}
+
+/* ── The product mark ────────────────────────────────────────────────────── */
+
+.appmark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: var(--s-7) 0;
+}
+.appmark img {
+  position: relative;
+  width: min(260px, 58vw);
+  height: auto;
+  border-radius: var(--r-lg);
+}
+/* A glow in the mark's own colour, which is the accent: the product's launcher
+   icon is a light-blue disc on navy, so the palette this site now wears and the
+   icon it opens with are the same two colours. Nothing needed reconciling.
+
+   This is the one radial fill on the site and it is not decoration standing in
+   for hierarchy — it is the halo the icon has when it is lit, and without it a
+   navy tile on a near-black page has no edge at all. */
+.appmark-halo {
+  position: absolute;
+  width: min(340px, 76vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(127, 200, 255, 0.22) 0%,
+    rgba(127, 200, 255, 0.07) 48%,
+    transparent 70%
+  );
+}
+
+/* ── Outbound links ──────────────────────────────────────────────────────── */
+
+/* The arrow says the link leaves the site before it is followed, which is the
+   only honest place to say it. */
+.ext {
+  margin-left: 0.4em;
+  font-size: 0.85em;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.link-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: var(--s-5) 0 var(--s-6);
+}
+.link-list a {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  color: var(--brand);
+  font-weight: var(--w-label);
+}
+
+/* ── Release badges ──────────────────────────────────────────────────────── */
+
+/* Label and value, split, in the shape a repository badge has had for a
+   decade — which is why it needs no caption. The values are read from GitHub
+   when the page loads, so the version here cannot fall behind what is
+   actually published. */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin: var(--s-5) 0;
+}
+.badge {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  font-weight: var(--w-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.badge-label {
+  padding: 6px 12px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.badge-value {
+  padding: 6px 12px;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+.badges-wait .badge-value {
+  opacity: 0.55;
 }
 
 /*
@@ -1266,36 +1469,6 @@ kbd {
   padding: var(--s-5);
 }
 
-.stat-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--s-3);
-  margin-top: var(--s-6);
-}
-.stat {
-  padding: var(--s-4) var(--s-5);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-md);
-  background: var(--bg-soft);
-}
-.stat b {
-  display: block;
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-}
-.stat span {
-  display: block;
-  margin-top: 2px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--text-3);
-  /* Two-word labels break where they like otherwise, and four cards each
-     breaking differently reads as four different components. */
-  text-wrap: balance;
-}
-
 /* ── Live demos (shared with the guide pages) ────────────────────────────── */
 
 .demo {
@@ -1330,96 +1503,6 @@ kbd {
   font-size: 0.8125rem;
   color: var(--text-3);
   max-width: none;
-}
-
-.bands {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s-1);
-}
-.band {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: ns-resize;
-}
-.band-db {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-  margin-bottom: var(--s-2);
-}
-.band-col {
-  position: relative;
-  width: 26px;
-  height: 144px;
-  touch-action: none;
-}
-.band-track {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  margin-left: -1.5px;
-  border-radius: 2px;
-  background: var(--surface-2);
-}
-.band-fill {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 4px;
-  margin-left: -2px;
-  border-radius: 2px;
-  background: var(--brand);
-}
-.band-knob {
-  position: absolute;
-  left: 50%;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
-  margin-bottom: -7px;
-  border-radius: 50%;
-  background: var(--brand);
-  box-shadow: var(--shadow-1);
-}
-.band-hz {
-  margin-top: var(--s-2);
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--text-3);
-}
-
-.presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2);
-  margin-top: var(--s-5);
-}
-.preset {
-  padding: 6px 13px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color var(--t-fast) var(--ease-out),
-    color var(--t-fast) var(--ease-out);
-}
-.preset:hover {
-  border-color: var(--brand-edge);
-  color: var(--text);
-}
-.preset.on {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: var(--brand-ink);
 }
 
 .hbar {
@@ -1478,81 +1561,7 @@ kbd {
   color: var(--text-3);
 }
 
-/* ── Latest release ──────────────────────────────────────────────────────── */
 
-/* Four cells, equal weight, one border. Not a card and not a shadow: it is a
-   strip of facts, and dressing it as a card implies it is something to act on
-   rather than something to read. */
-.rel-badge {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1px;
-  margin: var(--s-5) 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--line);
-  overflow: hidden;
-  color: inherit;
-  text-decoration: none;
-  transition: border-color var(--t-fast) var(--ease-out);
-}
-.rel-badge:hover {
-  border-color: var(--brand-edge);
-  text-decoration: none;
-}
-.rel-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--s-3) var(--s-4);
-  background: var(--surface);
-}
-.rel-cell b {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-.rel-cell span {
-  font-size: var(--fs-md);
-  font-weight: 700;
-  /* A download count that ticks over must not shift the row it sits in. */
-  font-variant-numeric: tabular-nums;
-}
-
-/* A grey block while the request is out, at the height the badge will be, so
-   the page does not jump when it arrives. */
-.rel-badge-skel {
-  min-height: 148px;
-  border-color: var(--line);
-  background: var(--surface);
-  animation: skel 1.4s var(--ease-out) infinite;
-}
-@keyframes skel {
-  50% {
-    opacity: 0.45;
-  }
-}
-
-@media (min-width: 700px) {
-  .rel-badge {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  .rel-badge-skel {
-    min-height: 74px;
-  }
-}
-
-.rel-fallback {
-  margin: var(--s-5) 0;
-  padding: var(--s-4) var(--s-5);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--bg-soft);
-  color: var(--text-2);
-  font-size: var(--fs-ui);
-}
 
 /* ── Gesture cards ───────────────────────────────────────────────────────── */
 
@@ -1921,33 +1930,40 @@ kbd {
 
 /* ── Reveal ──────────────────────────────────────────────────────────────── */
 
-.reveal {
-  opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.5s var(--ease-out), transform 0.5s var(--ease-out);
-}
-.reveal.in {
-  opacity: 1;
-  transform: none;
-}
+
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
 /*
- * Under 700px the search field stops being a field.
+ * Under 1000px the search field stops being a field.
  *
- * A 420px box reading "Search  Ctrl K" has nothing to offer a phone: the
+ * Not under 700. From 700 up the nav links appear, and between there and 1000
+ * the header was being asked to hold a brand, a 420px search box, three links,
+ * a Download link and three controls. There is not room, and flex does not
+ * fail politely: the box and the links drew straight through each other, so
+ * the bar read "SearcGuide" with "Ctrl K" stamped on top of it.
+ *
+ * A 420px box reading "Search  Ctrl K" has nothing to offer a phone either: the
  * keyboard hint is meaningless without a keyboard, and the box collides with
  * the brand at exactly the width where every pixel is already spoken for. It
  * collapses to the same 40px icon slot as every other control in the header,
  * and the palette it opens is unchanged — the real field lives in there.
  */
-@media (max-width: 699px) {
+@media (max-width: 999px) {
+  /* The bar still carries a burger down here, so everything else gives up a
+     little room: at exactly 700px, where the links first appear, the row was
+     three pixels wider than the bar holding it. */
   .hdr {
-    gap: var(--s-1);
-    padding: 0 var(--s-3);
+    gap: var(--s-2);
+    padding-inline: var(--s-4);
   }
+  .hdr-links {
+    margin-right: 0;
+  }
+  /* Right-aligned rather than centred: a lone icon in the middle of the bar
+     with the links to its right looks like something that failed to load. */
   .hdr-mid {
+    flex: none;
     justify-content: flex-end;
   }
   .search-btn {
@@ -1969,6 +1985,13 @@ kbd {
   .search-btn kbd {
     display: none;
   }
+}
+
+@media (max-width: 699px) {
+  .hdr {
+    gap: var(--s-1);
+    padding: 0 var(--s-3);
+  }
   .brand {
     font-size: 1rem;
   }
@@ -1983,13 +2006,42 @@ kbd {
     padding: var(--s-5) var(--s-4) var(--s-8);
   }
   .home {
-    padding: var(--s-6) var(--s-4) var(--s-8);
+    padding: calc(var(--header-h) + var(--s-4)) var(--s-4) var(--s-8);
   }
+  /* Smaller, and with less room around it. At the desktop size the mark took
+     half a phone screen before a word of the page had been read, which puts
+     the thing you came for below the fold to make room for a logo. */
+  .appmark {
+    padding: var(--s-3) 0 var(--s-5);
+  }
+  .appmark img {
+    width: 132px;
+  }
+  .appmark-halo {
+    width: 190px;
+  }
+  /* A panel from the top of the screen rather than a dialog floating in the
+     middle of one: on a phone there is no room for a scrim wide enough to read
+     as "behind", so the palette takes the width and the rows get a finger's
+     worth of height. */
   .pal-scrim {
-    padding: var(--s-4) var(--s-3);
+    padding: var(--s-3);
   }
   .pal {
-    max-height: 78vh;
+    width: 100%;
+    max-height: calc(100dvh - 2 * var(--s-3));
+  }
+  .pal-field {
+    padding: var(--s-3) var(--s-4);
+  }
+  .pal-field input {
+    font-size: var(--fs-base);
+  }
+  .pal-hit {
+    padding: var(--s-3) var(--s-4);
+  }
+  .pal-snip {
+    -webkit-line-clamp: 2;
   }
   .pal-foot {
     display: none;
@@ -2011,9 +2063,6 @@ kbd {
   }
   .pager {
     grid-template-columns: 1fr 1fr;
-  }
-  .stat-row {
-    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -2037,13 +2086,17 @@ kbd {
     padding: var(--s-6) var(--s-7) var(--s-9);
   }
   .home {
-    padding: var(--s-8) var(--s-6) var(--s-9);
+    padding: calc(var(--header-h) + var(--s-7)) var(--s-6) var(--s-9);
   }
   .hero {
-    grid-template-columns: 1.15fr 0.85fr;
+    /* The text column takes the larger share, and the gap is wide enough that
+       the two columns read as two things rather than as one crowded one. */
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+    gap: var(--s-7);
   }
   .hero-art {
-    display: block;
+    display: grid;
+    order: 0;
   }
   .bento {
     grid-template-columns: repeat(3, 1fr);
@@ -2091,15 +2144,19 @@ kbd {
   html {
     scroll-behavior: auto;
   }
+  /* A crossfade is still motion. Someone who has asked for less of it gets the
+     new palette at once. */
+  .theming,
+  .theming *,
+  .theming *::before,
+  .theming *::after {
+    transition: none !important;
+  }
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-  .reveal {
-    opacity: 1;
-    transform: none;
   }
 }

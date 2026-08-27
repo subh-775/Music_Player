@@ -10,8 +10,7 @@
  * lives in one place — see the note on `.callout` in styles.css for why they
  * are a tinted field and not the usual coloured rail down the left edge.
  */
-import {CrossfadeDemo, EqDemo, GestureGrid, SeekDemo} from './demos.jsx';
-import {LatestRelease} from './releases.jsx';
+import {AppMark, GestureGrid, ReleaseBadges, SeekDemo} from './demos.jsx';
 import {External, Link as LinkIcon} from './icons.jsx';
 
 function heading(Tag) {
@@ -77,9 +76,8 @@ export const mdxComponents = {
   Note,
   Warn,
   Danger,
-  EqDemo,
+  AppMark,
   SeekDemo,
-  CrossfadeDemo,
   GestureGrid,
-  LatestRelease,
+  ReleaseBadges,
 };

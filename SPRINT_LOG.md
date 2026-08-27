@@ -1376,6 +1376,65 @@ for someone who is reading rather than building, and `fair-use.mdx` links to it
 instead of saying "published for education and for personal use" — which is not
 a licence and did not match the LICENSE file at the root.
 
+## Round 11 — the documentation site is rebuilt on a measured design system
+
+Not a repaint. The tokens are read from `langchain-com-DESIGN.md`: ground
+`#030710`, surface `#161f34`, rule `#2f4b68`, accent `#7fc8ff`, radii 2/8/19/50,
+one shadow (`0 32px 68px` at 30% black), plain `ease` at 200-300ms, and a
+display face at 80px / weight 300 / -0.03em.
+
+**The green question answered itself.** I had assumed a clash was coming — the
+app's in-app accent is Spotify green, and two accent colours make a site look
+like two sites. Then I opened the launcher icon: `ic_launcher.png` is a
+`#7fc8ff` disc on a `#161f34` tile. The product's own mark is already the
+reference design's accent on the reference design's surface. Nothing needed
+reconciling, and the home page opens with that icon rather than with a working
+equalizer — a reader arriving at the front page is deciding whether this is the
+product they want, not adjusting 6 kHz.
+
+**Weight 300 is the whole voice of it.** A headline at 300 is a statement rather
+than a shout, and the negative tracking is what stops a light weight at 80px
+from falling apart into separate letters. Body stays at 16px, not the
+reference's 14: fourteen is right for chrome on a marketing page and wrong for a
+wall of prose.
+
+**Two measurements that changed a decision.** `#1c6fae` — the obvious accent for
+the light ground — lands at exactly 4.50:1, which is AA by a rounding error
+rather than by design; `#145d94` has real headroom at 5.86:1 and is
+recognisably the same blue. And the scroll fix: overriding `scroll-behavior` on
+`<html>` before calling `scrollTo(0, 0)` does NOT work, because the inline write
+does not force a style flush and the call still reads `smooth`. Measured in a
+browser, three ways. `behavior: 'instant'` on the call is the only form that
+lands — which is why following Next from the foot of a long page used to animate
+all the way up through content that had already been replaced, the new page
+appearing to scroll in from its bottom.
+
+**`.home` never cleared the fixed header.** It is not inside `.shell`, which is
+where the offset lives, so the first element on the front page sat under the
+bar — on a phone the eyebrow was cut in half by it, and it had been that way for
+as long as the page has existed.
+
+**Removed, all of it asked for:** the statistics row (four numbers, none of which
+answered a question), the equalizer and crossfade panels, the mock queue
+listing, the every-release list and its notes section, both gradients that were
+standing in for hierarchy, and the affiliation disclaimer from the footer —
+which is stated once on Fair Use with its reasoning, where repeating it under
+twenty reference pages was noise on all of them to make a point on one.
+
+**Register.** "APK" is gone in favour of the product, the build and the
+installer. So are the claims a reader cannot check. Buttons say Get started and
+Download, the latter with an outbound mark, and the release badges are read from
+GitHub at view time so the version cannot fall behind what is actually
+published — with a dash rather than a zero when the read is rate limited, since
+a wrong number stated confidently is not a graceful fallback.
+
+Verified in Chromium before anything was pushed: 21 routes across six viewports
+(360, 390, 844 landscape, 820, 1366, 1920) in both themes — no page-level
+overflow, nothing clipped outside a scroll container, no console errors. The
+palette measured open in portrait and landscape with no row collision. Every
+text pair clears AA: dark 16.0 / 10.3 / 7.1 with the accent at 11.1; light
+17.0 / 9.4 / 6.2 with the accent at 5.9.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs

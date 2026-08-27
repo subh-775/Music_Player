@@ -72,9 +72,20 @@ function useRouter() {
       const el = hash && document.getElementById(hash);
       if (el) {
         el.scrollIntoView();
-      } else {
-        window.scrollTo(0, 0);
+        return;
       }
+      // behavior: 'instant', and it has to be spelled out. `html` carries
+      // scroll-behavior: smooth so that in-page anchors glide, and a plain
+      // scrollTo(0, 0) inherits it: following Next from the foot of a long
+      // page ANIMATED all the way back up through content that had already
+      // been replaced, which is the new page appearing to scroll in from its
+      // bottom. A different page is not somewhere you travelled to.
+      //
+      // Overriding the style on <html> first does NOT work - measured. The
+      // inline write does not force a style flush, so scrollTo still reads
+      // the smooth value and animates anyway. The option on the call is read
+      // directly and is the only form that lands.
+      window.scrollTo({top: 0, left: 0, behavior: 'instant'});
     });
   }, []);
 
@@ -118,6 +129,10 @@ function useRouter() {
 
 /* ── Theme ───────────────────────────────────────────────────────────────── */
 
+/** How long the palette takes to cross over. Matches styles.css. */
+const THEME_FADE = 320;
+let themingTimer = 0;
+
 function useTheme() {
   // The inline script in index.html always stamps data-theme before first
   // paint, from storage or from the system preference, so this reads one
@@ -129,7 +144,18 @@ function useTheme() {
   const toggle = useCallback(() => {
     setTheme(prev => {
       const next = prev === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next;
+      const root = document.documentElement;
+      // Only WHILE swapping. A permanent transition on every colour would make
+      // every hover and every focus ring drag behind the pointer; this arms
+      // one for the length of the change and then takes it away again, so the
+      // page fades between the two palettes and nothing else is affected.
+      root.classList.add('theming');
+      window.clearTimeout(themingTimer);
+      themingTimer = window.setTimeout(
+        () => root.classList.remove('theming'),
+        THEME_FADE + 40,
+      );
+      root.dataset.theme = next;
       try {
         localStorage.setItem('fm-theme', next);
       } catch {
@@ -234,17 +260,17 @@ function Pager({path}) {
   return (
     <nav className="pager" aria-label="Nearby pages">
       {prev ? (
-        <a className="prev" href={prev.link}>
-          <span className="dir">← Previous</span>
+        <a className="prev" href={prev.link} aria-label={`Previous: ${prev.text}`}>
+          <span className="dir" aria-hidden="true">←</span>
           <span className="name">{prev.text}</span>
         </a>
       ) : (
         <span />
       )}
       {next && (
-        <a className="next" href={next.link}>
-          <span className="dir">Next →</span>
+        <a className="next" href={next.link} aria-label={`Next: ${next.text}`}>
           <span className="name">{next.text}</span>
+          <span className="dir" aria-hidden="true">→</span>
         </a>
       )}
     </nav>
@@ -350,6 +376,9 @@ export default function App() {
             ))}
             <a href={SITE.releases} target="_blank" rel="noreferrer">
               Download
+              <span className="ext" aria-hidden="true">
+                ↗
+              </span>
             </a>
           </div>
 
@@ -466,12 +495,14 @@ export default function App() {
             Report a problem
           </a>{' '}
           ·{' '}
-          <a href="/fair-use">Fair use</a>
+          <a href="/fair-use">Fair use</a>{' '}
+          ·{' '}
+          <a href="/licence">Licence</a>
         </p>
-        <p>
-          For personal use. Not affiliated with Spotify, JioSaavn, SoundCloud or
-          YouTube.
-        </p>
+        {/* The affiliation disclaimer belongs on Fair Use, where it is stated
+            once with the reasoning around it. Repeating it under every page of
+            a reference site is noise on 20 pages to make a point on one. */}
+        <p>For educational and personal use.</p>
       </footer>
 
       <SearchPalette

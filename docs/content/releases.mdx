@@ -1,36 +1,36 @@
 # Releases
 
-Every build is published on GitHub, and the app updates itself from the same place.
+Every build, with its notes, is published on GitHub.
 
-<LatestRelease />
+<ReleaseBadges />
 
-<div className="hero-actions">
-  <a className="btn btn-primary" href="https://github.com/subh-775/Music_Player/releases/latest">Download the latest APK</a>
-  <a className="btn btn-ghost" href="https://github.com/subh-775/Music_Player/releases">All releases and notes</a>
+<div className="link-list">
+  <a href="https://github.com/subh-775/Music_Player/releases/latest">Download the latest release<span className="ext" aria-hidden="true">↗</span></a>
+  <a href="https://github.com/subh-775/Music_Player/releases">Browse all releases and their notes<span className="ext" aria-hidden="true">↗</span></a>
 </div>
 
 ## How to update
 
-Install the new APK **over** the old app. The in-app updater does exactly this — **Settings → Updates → Check for updates**, then Install — and it is the path to prefer.
+Install the new build **over** the existing app. The in-app updater does exactly this — **Settings → Updates → Check for updates**, then Install — and it is the method to prefer.
 
 <Danger title="Never uninstall first">
-  Uninstalling deletes your playlists, liked songs and listening history. Android wipes app data on uninstall and there is no way to get it back.
+  Uninstalling deletes your playlists, liked tracks and listening history. Android removes application data on uninstall and it cannot be recovered.
 
-  Your **downloads** survive either way; they live in your own music folder, outside app storage.
+  Your **downloads** survive either way; they are written to your own music folder, outside application storage.
 </Danger>
 
-See **[Updates](/reference/updates)** for how the check, the download and the install actually work.
+See **[Updates](/reference/updates)** for how the check, the download and the installation work.
 
 ## Version numbering
 
-The version is derived from the git tag by CI — nobody types it into a file — so the number under **Settings → App version** is always the tag the build came from and cannot drift from it. Tags are `vMAJOR.MINOR.PATCH`, and the app compares them numerically rather than as text, so `v1.0.10` is correctly newer than `v1.0.9`.
+The version is derived from the git tag by the build pipeline rather than written into a file, so the number shown under **Settings → App version** is always the tag the build came from. Tags take the form `vMAJOR.MINOR.PATCH`, and the app compares them numerically rather than as text, so `v1.0.10` is correctly newer than `v1.0.9`.
 
 ## Reporting a problem
 
 **[Open an issue](https://github.com/subh-775/Music_Player/issues)** with:
 
 - What you did, and what happened instead.
-- Your Android version and phone model.
-- The output of **Settings → Diagnostics** if it is anything to do with playback or sound.
+- Your Android version and device model.
+- The contents of **Settings → Diagnostics** if the problem concerns playback or sound.
 
-That last one answers most questions on its own.
+The last of those answers most questions on its own.
