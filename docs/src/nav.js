@@ -32,7 +32,7 @@ export const NAV = [
 
 export const SIDEBAR = [
   {
-    text: 'Getting Started',
+    text: 'Getting started',
     items: [
       {text: 'Introduction', link: '/guide/introduction'},
       {text: 'Installation', link: '/guide/installation'},
@@ -40,7 +40,7 @@ export const SIDEBAR = [
     ],
   },
   {
-    text: 'Core Features',
+    text: 'Core features',
     items: [
       {text: 'Finding Music', link: '/guide/finding-music'},
       {text: 'The Player', link: '/guide/player'},
