@@ -53,6 +53,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import {Toggle} from '../components/Toggle';
+import {BOTTOM_INSET} from '../layout';
 
 /** Renders a preset's glyph by name — the preset list owns which icon it uses,
  *  so adding a preset never means editing this screen too. */
@@ -397,7 +398,9 @@ const styles = StyleSheet.create({
   },
   barBtn: {padding: 4},
   barTitle: {...T.screenTitle, color: C.text, fontSize: 22},
-  body: {paddingBottom: 32},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  body: {paddingBottom: BOTTOM_INSET},
   row: {
     flexDirection: 'row',
     alignItems: 'center',

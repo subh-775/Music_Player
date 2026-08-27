@@ -8,6 +8,7 @@
  * it and silently 403.
  */
 import {NativeModules} from 'react-native';
+import {toast} from './toast';
 
 const {port, token, version} = (NativeModules.Backend ?? {}) as {
   port?: number;
@@ -29,9 +30,45 @@ export function apiUrl(path: string): string {
   )}`;
 }
 
+/**
+ * Has the embedded backend stopped answering?
+ *
+ * Xiaomi, Oppo/Realme, Vivo and Samsung all kill background work harder than
+ * stock Android, and the Python server has none of the protection the playback
+ * service has. When it goes, every call fails at once and the app says things
+ * like "couldn't load your library" — which sends people looking at their
+ * network, at the source, at anything but the actual cause.
+ *
+ * One probe, rate limited, and it only ever says so: restarting Flask from
+ * underneath a running app is not something to attempt blind.
+ */
+let lastEngineWarning = 0;
+
+async function warnIfEngineStopped(): Promise<void> {
+  if (Date.now() - lastEngineWarning < 60_000) {
+    return;
+  }
+  try {
+    const res = await fetch(`${BASE}/health`);
+    if (res.ok) {
+      return; // the backend is fine — that call failed for its own reasons
+    }
+  } catch {
+    // fall through: no answer at all
+  }
+  lastEngineWarning = Date.now();
+  toast('The music engine stopped. Close the app and open it again.');
+}
+
 /** GET an /api endpoint as JSON. Throws on a non-2xx or a network error. */
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(apiUrl(path));
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path));
+  } catch (e) {
+    warnIfEngineStopped().catch(() => {});
+    throw e;
+  }
   if (!res.ok) {
     throw new Error(`${path} -> HTTP ${res.status}`);
   }

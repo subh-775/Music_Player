@@ -1096,7 +1096,292 @@ Android will accept as an update to this one. Rotating it is correct and forces
 a manual reinstall for every existing user, so it belongs at a version boundary
 the user picks.
 
+## Round 7 — the small list after the first on-device run of round 6
+
+**The queue opened on any tap along the bottom.** `queuePull` raced a
+`Gesture.Tap` against the pan, which was right when it was attached to a small
+grip in the middle of the screen and wrong the moment the gesture moved to a row
+spanning the full width — every tap down there, including the one that switches
+song/lyrics, opened the sheet. The tap is gone; the queue opens from its button
+or a deliberate upward drag.
+
+**The player was not transparent — the tint was too light.** The background is
+`toward(tint, 0.72)` of the artwork's palette colour, and on a bright cover that
+lands at a lightness the eye reads as a translucent panel, because a surface
+that colour usually is one. 0.86 now. Worth recording because the first
+diagnosis (an opacity bug) would have added a backdrop layer that fixed nothing.
+
+**The bars now float over the page.** They were the last rows of the layout, so
+there was never anything behind them: the strip either side of the mini player
+was solid black and the tab bar had nothing to be translucent over. They are one
+absolutely-positioned stack now — a three-stop fade, the mini player, the tab
+bar — with the page running full height behind them. The fade does its darkening
+in the last third so the artwork either side of the mini player stays visible,
+which is the whole point of the floating shape.
+
+The cost is real and worth naming: every scrolling surface has to end
+`BOTTOM_INSET` (136px, measured from the two bars) above the bottom, or its last
+row sits behind them forever. Nine screens patched, one constant in
+`src/layout.ts`.
+
+**Deleting a download told nobody.** `deleteDownload` removed the file and
+nothing else: the id stayed in `downloadedIds`, so `isDownloaded` kept saying
+yes and every row kept its tick, and no listener fired, so Library — which
+rescans on becoming visible or on a download COMPLETING — never rescanned. Both
+halves of the report follow: the rows still there afterwards, and the count
+disagreeing with the list on the way back. `forgetDownloads()` drops the ids and
+fires the same listeners a completed download does, called from both delete
+paths, and the open Downloads collection now re-reads the folder in place rather
+than being closed out from under the user.
+
+**Downloaded → Downloads**, and the two fixtures show the pin they always had in
+spirit: they sit above everything the pin list can reorder, and a row pinned to
+the top with no mark on it reads as an accident.
+
+## Round 9 — the sheets learn about their own lists, and crossfade gets its lead back
+
+**Crossfade did nothing at all, and the reason was arithmetic.** Round 8 split
+prepare from start, which killed the dip, and then gated the start on the
+buffer having arrived — correctly. What it got wrong was the lead: prepare
+fired at `span + 4`, and the watcher is a 1s tick, so at the 12s setting the
+overlap had between one and three seconds to open a proxied network stream. It
+usually had not, `startCrossfade` checked `cfReady` once, resolved false, and
+the deliberate "no fade when there is no overlap" rule turned every boundary
+into a plain cut. The setting looked switched off.
+
+Two changes, and they have to be read together. Prepare now runs at
+`max(span + 8, 20)` seconds out — preparing is silent and free to abandon, so
+there was never a reason to be thrifty with it. And `startCrossfade` waits
+instead of checking: up to 1.2s in 100ms steps, then gives up. A stream that
+arrives 400ms late still crossfades; one that never arrives still cuts cleanly.
+The ramp runs over what is LEFT of the duration rather than the nominal span,
+because a late start that still rose over the full twelve seconds would be
+climbing while the outgoing track ended.
+
+And it says which happened. `diag('crossfade', 'overlap 12000ms' | 'not ready')`
+— without that line a crossfade skipped for a slow stream is indistinguishable
+from one that is switched off, which makes "is it even working?" a question
+nobody can answer. The Settings hint says so too: "Skipped when the next song
+can't buffer in time." An occasional plain cut should read as designed.
+
+**Both sheets fought their own lists, in opposite directions.** The pan wrapped
+the whole sheet with `activeOffsetY([-1000, 12])`, so any 12px downward drag
+anywhere claimed the gesture. "Add to playlist" uses a plain FlatList, which has
+no RNGH gesture to arbitrate with, so the sheet won every time and scrolling up
+through playlists dragged the sheet instead. The queue uses DraggableFlatList,
+which is RNGH-native and won every time, so the sheet could only be dragged from
+its header. Same cause, opposite symptom — which is what said it was one fix.
+
+`Sheet` takes an optional `scrollY` now and switches to `manualActivation` when
+it gets one. Whether a downward drag belongs to the sheet or the list depends on
+where the list IS, not on the direction of the first twelve pixels — and an
+activeOffset can only express the second. The sheet activates when the list has
+nothing left to give (`scrollY <= 0`) and the finger is still pulling down, or
+when the drag started on the handle, which is an unambiguous statement about the
+sheet whatever the list is doing. `engagedAt` records the translation at the
+moment of handover so the sheet moves one-to-one from there rather than jumping
+by however far the list had already scrolled. Sheets with no scrollable — the
+five others — keep exactly the recognition they had.
+
+The queue feeds it from `onScrollOffsetChange`, which DraggableFlatList already
+exposes for this. The playlist sheet's list became an `Animated.FlatList` with
+`useAnimatedScrollHandler`, so the offset reaches the gesture on the UI thread;
+a JS `onScroll` would be a frame or two stale at exactly the moment it decides
+who owns the finger.
+
+**The drop jitter was round 7's own fix.** Deferring the optimistic `setQueue`
+by a frame was meant to let ScaleDecorator finish; what it actually did was
+paint the OLD order for one frame after the finger lifted, so the row snapped
+back to where it came from and then jumped to the drop point. DraggableFlatList
+expects the data updated synchronously in `onDragEnd` — its release animation is
+built around it. Synchronous again, and `activeScale` is 1: the lift is carried
+by the shadow, and a 3% scale is invisible going up and the only thing still
+animating on the way down.
+
+**The pin comes off the fixtures.** Asked for twice, argued back twice, and the
+argument was wrong: a pin is a control's STATE, and Liked Songs and Downloads
+have no such control — `canPin` excludes them and long-press returns early. A
+marker for an action you cannot take says nothing. (No stored ids to clean up:
+those two rows were never pinnable, so nothing was ever written for them.)
+
+**And the last `Alert.alert` in the app is gone** — deleting a playlist now uses
+`ConfirmModal` like every other destructive action, instead of the OS's grey
+window.
+
+**Still open, deliberately:** the release keystore, for the same reason as last
+round.
+
+## Round 8 — audit round 7, and three of its diagnoses corrected
+
+**Sheets could not cover the bars, and no zIndex was ever going to fix it.**
+`zIndex` orders siblings inside one parent; a sheet owned by LibraryScreen lives
+inside the tabs container, and the bars are siblings of that container painted
+after it. Hoisting each screen's sheet state up to App would work and would move
+a lot of ownership for a layering problem, so `Sheet` moves the ELEMENTS
+instead: it publishes its rendered tree to a registry and renders nothing in
+place, and `<SheetHost />` at the app root draws whatever is published, above
+everything. Owners keep their state and their props exactly as they were. Hooks
+still run in the owning component — only the output moves.
+
+**`addToQueue` was the one mutation that did not end at `refreshEngineMirror`,
+and two separate reports came out of that.** The queue sheet never repainted
+after "add to queue" (queueListeners fire only from there), and pressing next
+published the wrong song: `publishStep` reads `engineQueue[activeIndex + 1]` to
+show the next title immediately, so it announced whatever was next BEFORE the
+insert and then snapped to the real one when the engine's event landed.
+
+**The audit's fix for the drop flicker would not have worked, twice over.** It
+proposed backfilling `_qid` inside `refreshEngineMirror` and dropping the
+keyExtractor fallback. But QueueScreen reads `TrackPlayer.getQueue()` itself, so
+the mirror's ids never reach it; and `getQueue()` returns fresh objects each
+call, so a backfilled id would be NEW on every refresh — key churn on every
+repaint, worse than what it replaced. Dropping the fallback would then leave
+adopted queues with undefined keys. What shipped instead numbers the
+OCCURRENCES of each song: a track that appears once keeps `id#0` wherever it is
+dragged, and two copies of one song swap numbers when reordered — swapping the
+keys of two identical rows is invisible by definition. The optimistic `setQueue`
+also moved behind a `requestAnimationFrame`, because it was landing while
+ScaleDecorator was still animating the lifted row back to 1.
+
+**Crossfade: the dip and the doubling were the same missing distinction.**
+`startCrossfade` opened the stream AND started it, and resolved when
+`prepareAsync()` was *called*, not when it finished. JS took that `true` as
+"the overlap is playing" and faded the outgoing track down against silence —
+that is the dip. When preparation finally landed after the boundary, the overlap
+started at 0:00 on a track RNTP had already advanced to — that is the doubling.
+It is two calls now: `prepareCrossfade(url)` while the outgoing track still has
+`span + 4` seconds, and `startCrossfade(durationMs)` at the boundary, which
+returns FALSE if nothing is ready. On false, nothing fades at all: a clean cut
+sounds like a decision, a dip sounds broken.
+
+Two more things went with it. The overlap prefers the next track's LOCAL file
+when there is one — instant to open, no network, and it stops the same song
+being pulled through the single-process proxy twice. And the start is a one-shot
+timer at the exact boundary rather than the 1s watcher tick: on a nine-second
+fade a tick-aligned start is up to a second late, an 11% error that lands
+differently every track, which is most of why it felt inconsistent even when it
+worked.
+
+**Sleep timer moved to the player** — a now-action taken with the phone
+face-down belongs next to the music, not two gestures away in the drawer — and
+it is tinted while armed, which is the only way to know it is running without
+opening the sheet. Help gets `ArrowUpRight`, because a chevron promises another
+page inside the app and it opens the documentation site.
+
+**Smaller, all from the audit:** the bottom row stopped fading during an artwork
+swipe (right for a passive grip, wrong for two live controls); the capsule is
+one target that flips rather than two segments, half of which are always a
+no-op; timestamps sit 2px under the bar in `C.text` at 700 with the opacity
+knocked back; the mini player's progress line runs edge to edge along the very
+bottom instead of level with the artwork's lower edge; controls are 42px with
+bigger glyphs; select-all is an icon with an accessibility label carrying what
+the words used to.
+
+**Kept against the audit's advice:** the pin stays on Liked Songs and Downloads.
+The audit is right that it says nothing about ordering — they are forced to the
+top regardless — but it was asked for, and "these two are pinned" is true. The
+glyph is now an upright pushpin drawn here rather than lucide's 45° `Pin`, which
+at 12px filled reads as a paper plane.
+
+**Cross-device, decided rather than drifted into:** arm64-v8a only, and the
+Installation page now says so — 32-bit handsets, x86 Chromebooks and most
+emulators cannot install this APK, and a second ABI would roughly double the
+download for everyone because of the embedded CPython. `POST_NOTIFICATIONS` is
+requested at boot on Android 13+; without it the media notification never
+appears, which costs the lock-screen transport and makes the app look killable.
+`Sheet` reads the live window instead of a module-load snapshot, so a fold or a
+rotation cannot leave it parked halfway up the screen. And a failed API call now
+probes `/health` and says "the music engine stopped" rather than blaming the
+network — reporting only, because restarting Flask under a running app is not
+something to attempt blind.
+
+**Still open, deliberately:** the release keystore. Rotating it forces every
+existing user to uninstall and reinstall, so it stays a decision made at a
+moment of the user's choosing.
+
+## Round 10 — the documentation catches up with the app
+
+**Five pages described a control that had not existed for two releases.** The
+queue grip became a timer glyph and a queue glyph in round 6; `player.mdx`,
+`queue.mdx`, `quick-start.mdx`, `introduction.mdx` and the gesture cards all
+still told people to pull it. The sleep timer moved into the player in round 7
+and two pages still put it in the drawer. Both are now written to what ships,
+along with the things that had never been documented at all: the capsule flips
+from anywhere on it, the queue sheet lets its list scroll to the top before it
+starts to follow your finger, and crossfade skips cleanly rather than dipping
+when the next track cannot buffer in time. That last one needed saying, because
+an occasional plain cut reads as a bug unless the page says it is a decision.
+
+The rule that would have caught all of it is now the first standing constraint
+above.
+
+**The marketing register is out, and the privacy claims with it.** "No account,
+no telemetry, no server" is a promise, and a reader has no way to check a
+promise. "Playlists, liked songs and history are written to the app's own
+storage on the device; downloads go to a folder you pick, outside app storage"
+describes how the thing is built, and anyone can go and verify it. The second
+is stronger AND it is the kind of statement a project should be making. The
+`0 — accounts, ever` statistic went for the same reason: a number with no
+information in it, sitting in a row beside three real ones.
+
+The headline led with `No account.` It leads with what actually distinguishes
+the app now — one search, three catalogues, one list, and a song that exists in
+more than one place appearing once with the others held as fallbacks.
+
+**`How It Works` was an implementation document.** It named the embedded
+runtime and the framework, gave the loopback address, and drew the request path
+out to the three services. It is now **Data & storage**, and it answers the
+question a reader actually has — where does my stuff go — in a table that was
+already the best thing on the page. Everything runs on the phone; that is all
+the shape anyone needs.
+
+**The releases page listed every version and said nothing nine times over.** CI
+generates the release bodies, so the "first real sentence" the list pulled out
+was a `…compare/v1.0.15...v1.0.16` URL. One badge now: tag, date, APK size,
+download count, linked to the release itself.
+
+**Colour.** Light mode is a warm paper (`#e8e2d4`) rather than near-white, and
+that is not a background swap: beige is darker than white by more than it looks,
+so `--brand-600` measured 3.1:1 on it and failed AA for body text. Every accent
+came down a step, `--surface` went LIGHTER than `--bg` so cards lift instead of
+reading as holes, and every neutral carries the paper's own hue so the page is
+one stock rather than beige with grey cards on it. Dark mode was `#070a08` —
+three percent off pure black, whatever the comment above it claimed — and is now
+a `#141715` charcoal with the shadow opacities pulled back, because a black
+shadow that did nothing on near-black reads heavily on a charcoal.
+
+The duplicated `prefers-color-scheme` block is gone. It restated all twenty-odd
+light tokens verbatim, which is how one copy gets updated and the other does
+not; the inline script now always stamps `data-theme`, so there is one palette.
+
+**Layout.** `.doc-inner` had `margin: 0` above 1280px, so the prose pinned to
+the left of its column with a band of nothing between it and the table of
+contents — the "disbalanced" look, and it was one word. The header's contents
+line up with the shell's cap now instead of sitting at the window edges. And the
+command palette is constrained by HEIGHT, not width: a phone in landscape is
+900px wide, so the mobile rule never applied and the palette overflowed.
+
+**Both gradients are gone** — the hero's, whose only argument was that it marked
+a claim that no longer exists, and the fake album art in the gesture card.
+
+**Weight was doing no work.** Thirty-two of forty-five declarations were 700.
+When everything emphatic is the same weight, weight stops carrying information
+and size has to do all of it. Three steps now: 500 for chrome and table headers,
+600 for headings and anything emphatic, 700 for h1, h2 and numeric values only.
+Uppercase micro-labels dropped to 600 — caps plus tracking plus bold is three
+emphasis signals on the same three words.
+
+**And the licence is stated.** GPL-3.0, named, with what it means in practice
+for someone who is reading rather than building, and `fair-use.mdx` links to it
+instead of saying "published for education and for personal use" — which is not
+a licence and did not match the LICENSE file at the root.
+
 ### Standing constraints
+- **Any control renamed, moved or removed: grep `docs/content` for its old name
+  before merging.** The queue "grip" became two glyphs in round 6 and the docs
+  went on describing the grip in five places for two releases — a page that
+  confidently names a control the reader cannot find is worse than no page,
+  because it makes them doubt themselves rather than the documentation.
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the
   in-app updater's signature chain holds. Swapping to a real keystore forces a

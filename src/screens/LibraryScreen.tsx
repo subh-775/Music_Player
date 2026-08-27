@@ -11,7 +11,6 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   NativeModules,
@@ -21,8 +20,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ImagePlus, Pencil, Pin, Plus, Trash2} from 'lucide-react-native';
+import {ImagePlus, Pencil, Plus, Trash2} from 'lucide-react-native';
 import {C, S, T} from '../theme';
+import {PinGlyph} from '../components/PinGlyph';
 import {getLocalLibrary, type Track} from '../backend';
 import {useLikes} from '../store';
 import {useFollowedArtists} from '../artists';
@@ -50,7 +50,9 @@ import {
 import {usePlaybackOrigin} from '../player';
 import {toast} from '../toast';
 import {Sheet} from '../components/Sheet';
+import {ConfirmModal} from '../components/ConfirmModal';
 import {listWindowing} from '../components/TrackRow';
+import {BOTTOM_INSET} from '../layout';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
 
@@ -97,6 +99,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
   const [newName, setNewName] = useState('');
   /** The row a long-press opened options for. */
   const [menuFor, setMenuFor] = useState<Collection | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Collection | null>(null);
   const [renaming, setRenaming] = useState<Collection | null>(null);
   const [renameText, setRenameText] = useState('');
 
@@ -241,21 +244,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
 
   const doDelete = useCallback((c: Collection) => {
     setMenuFor(null);
-    Alert.alert(
-      `Delete "${c.name}"?`,
-      'The songs themselves are not touched.',
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deletePlaylist(playlistIdOf(c));
-            toast(`Deleted ${c.name}`);
-          },
-        },
-      ],
-    );
+    setConfirmDelete(c);
   }, []);
 
   const submitRename = useCallback(() => {
@@ -337,13 +326,13 @@ export const LibraryScreen = React.memo(function LibraryScreen({
                   {item.name}
                 </Text>
                 <View style={styles.metaLine}>
+                  {/* Only rows that can actually be pinned. The fixtures sit
+                      at the top by construction, and marking them with the
+                      state of a control they do not have says nothing. */}
                   {isPinned(idOf(item)) && (
-                    <Pin
-                      size={12}
-                      color={DOWNLOAD_TINT}
-                      fill={DOWNLOAD_TINT}
-                      style={styles.pin}
-                    />
+                    <View style={styles.pin}>
+                      <PinGlyph size={12} color={DOWNLOAD_TINT} />
+                    </View>
                   )}
                   <Text style={styles.rowSub} numberOfLines={1}>
                     {collectionSubtitle(item)}
@@ -372,7 +361,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
                 style={styles.sheetRow}
                 activeOpacity={0.7}
                 onPress={() => doPin(menuFor)}>
-                <Pin size={20} color={C.sub} />
+                <PinGlyph size={19} color={C.sub} />
                 <Text style={styles.sheetLabel}>
                   {isPinned(idOf(menuFor)) ? 'Unpin' : 'Pin'}
                 </Text>
@@ -412,6 +401,22 @@ export const LibraryScreen = React.memo(function LibraryScreen({
           </View>
         )}
       </Sheet>
+
+      <ConfirmModal
+        visible={!!confirmDelete}
+        title={confirmDelete ? `Delete "${confirmDelete.name}"?` : ''}
+        message="The songs themselves are not touched."
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => {
+          if (confirmDelete) {
+            deletePlaylist(playlistIdOf(confirmDelete));
+            toast(`Deleted ${confirmDelete.name}`);
+          }
+          setConfirmDelete(null);
+        }}
+      />
 
       {/* Rename dialog — same shape as "New playlist". These two stay <Modal>
           on purpose: a dialog with a TextInput wants a real window so the soft
@@ -543,7 +548,9 @@ const styles = StyleSheet.create({
   chipText: {...T.sub, color: C.text, fontSize: 13},
   chipTextOn: {color: C.bg, fontWeight: '700'},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  list: {paddingBottom: 12},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  list: {paddingBottom: BOTTOM_INSET},
   row: {
     flexDirection: 'row',
     alignItems: 'center',

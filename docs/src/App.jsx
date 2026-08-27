@@ -119,34 +119,28 @@ function useRouter() {
 /* ── Theme ───────────────────────────────────────────────────────────────── */
 
 function useTheme() {
+  // The inline script in index.html always stamps data-theme before first
+  // paint, from storage or from the system preference, so this reads one
+  // attribute rather than re-deriving the same answer a second way.
   const [theme, setTheme] = useState(
-    () => document.documentElement.dataset.theme || '',
+    () => document.documentElement.dataset.theme || 'dark',
   );
 
   const toggle = useCallback(() => {
-    const isDark =
-      (document.documentElement.dataset.theme ||
-        (window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'light'
-          : 'dark')) === 'dark';
-    const next = isDark ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem('fm-theme', next);
-    } catch {
-      // Private windows and blocked site data both throw here. The toggle
-      // still works for this visit; it just will not be remembered.
-    }
-    setTheme(next);
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try {
+        localStorage.setItem('fm-theme', next);
+      } catch {
+        // Private windows and blocked site data both throw here. The toggle
+        // still works for this visit; it just will not be remembered.
+      }
+      return next;
+    });
   }, []);
 
-  const dark =
-    (theme ||
-      (window.matchMedia?.('(prefers-color-scheme: light)').matches
-        ? 'light'
-        : 'dark')) === 'dark';
-
-  return [dark, toggle];
+  return [theme === 'dark', toggle];
 }
 
 /* ── On this page ────────────────────────────────────────────────────────── */

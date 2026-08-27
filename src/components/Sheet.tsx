@@ -17,12 +17,18 @@
  * a translate on views React has already made, and closing is the same in
  * reverse with nothing to tear down.
  */
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   BackHandler,
-  Dimensions,
   Pressable,
   StyleSheet,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
   type ViewStyle,
@@ -34,22 +40,88 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import {C, S} from '../theme';
 
 /**
- * How far down "gone" is. The LONGEST edge, not the height.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Every sheet in the app renders HERE, not where it is written.
  *
- * Read once at module load, which is fine only because max(w, h) is the same
- * number in both orientations — a plain `height` read is not. The activity
- * handles rotation itself (configChanges lists `orientation`), so a portrait
- * height captured in landscape used to leave the sheet's closed position
- * halfway up a portrait screen, with the sheet still visible.
+ * `zIndex` in React Native only orders siblings inside one parent. A sheet
+ * belonging to LibraryScreen lives inside the tabs container; the mini player
+ * and the tab bar are siblings of that container which paint after it. No
+ * zIndex on the sheet can cross that boundary — so the library's long-press
+ * menu was structurally incapable of covering the mini player, and the same
+ * went for the collection menu and every panel inside Settings.
+ *
+ * Hoisting the state for each of those sheets up to App would work and would be
+ * a large, error-prone move of ownership. This does the same job by moving the
+ * ELEMENTS instead: a Sheet publishes its rendered tree to this registry and
+ * renders nothing in place, and <SheetHost /> — mounted once at the app root,
+ * above everything — renders whatever is published. Owners keep their state,
+ * their props and their callbacks exactly as they are.
+ *
+ * Hooks still run in the owning component (they are called there); only the
+ * output moves. That matters for the gesture and the shared values, which stay
+ * bound to the sheet that created them.
  */
-const HIDE_Y = (({width, height}) => Math.max(width, height))(
-  Dimensions.get('window'),
-);
+type Entry = {id: number; node: React.ReactNode};
+
+let entries: Entry[] = [];
+const hostSubs = new Set<() => void>();
+
+function notifyHost(): void {
+  hostSubs.forEach(fn => fn());
+}
+
+function publish(id: number, node: React.ReactNode): void {
+  const at = entries.findIndex(e => e.id === id);
+  entries =
+    at >= 0
+      ? [...entries.slice(0, at), {id, node}, ...entries.slice(at + 1)]
+      : [...entries, {id, node}];
+  notifyHost();
+}
+
+function unpublish(id: number): void {
+  const next = entries.filter(e => e.id !== id);
+  if (next.length !== entries.length) {
+    entries = next;
+    notifyHost();
+  }
+}
+
+function subscribeHost(fn: () => void): () => void {
+  hostSubs.add(fn);
+  return () => {
+    hostSubs.delete(fn);
+  };
+}
+
+let sheetSeq = 0;
+
+/**
+ * Mount ONCE, at the app root, after everything a sheet must cover.
+ *
+ * Its zIndex is above the player (30) and the drawer (45) deliberately: a sheet
+ * is always the most recent thing the user asked for.
+ */
+export function SheetHost() {
+  const list = useSyncExternalStore(
+    subscribeHost,
+    () => entries,
+    () => entries,
+  );
+  return (
+    <View style={styles.portal} pointerEvents="box-none">
+      {list.map(e => (
+        <React.Fragment key={e.id}>{e.node}</React.Fragment>
+      ))}
+    </View>
+  );
+}
 
 /**
  * Decelerate in, accelerate out — never the default.
@@ -63,6 +135,9 @@ const HIDE_Y = (({width, height}) => Math.max(width, height))(
 const IN = {duration: 220, easing: Easing.out(Easing.cubic)};
 const OUT = {duration: 160, easing: Easing.in(Easing.cubic)};
 
+/** The strip at the top of a sheet where a drag is always a sheet drag. */
+const HANDLE_GRAB = 44;
+
 /** How far down you have to drag (or how fast you have to flick) to dismiss. */
 const DISMISS_DISTANCE = 90;
 const DISMISS_VELOCITY = 800;
@@ -73,6 +148,7 @@ export function Sheet({
   children,
   style,
   dragEnabled = true,
+  scrollY,
 }: {
   open: boolean;
   onClose: () => void;
@@ -88,7 +164,32 @@ export function Sheet({
    * the sheet has no business winning. Whoever holds the row says so.
    */
   dragEnabled?: boolean;
+  /**
+   * The scroll offset of the sheet's own list, if it has one. 0 means "already
+   * at the top".
+   *
+   * Handing it over is what makes this a scroll-aware sheet instead of a sheet
+   * that fights its own content. Without it the pan claimed any 12px downward
+   * drag anywhere on the sheet, and the two lists failed in opposite
+   * directions: a plain FlatList has no RNGH gesture to arbitrate with, so the
+   * sheet always won and scrolling up moved the sheet; DraggableFlatList is
+   * RNGH-native and always won, so the sheet could only be dragged by its
+   * header. With it, the list scrolls until it reaches its top, and only then
+   * does further downward travel move the sheet.
+   */
+  scrollY?: SharedValue<number>;
 }) {
+  // The live window, not a module-load snapshot: a fold opening or a rotation
+  // changes it, and a stale "gone" position leaves the sheet parked halfway up
+  // the screen.
+  const {width, height} = useWindowDimensions();
+  const HIDE_Y = Math.max(width, height);
+
+  const id = useRef(0);
+  if (!id.current) {
+    id.current = ++sheetSeq;
+  }
+
   const y = useSharedValue(HIDE_Y);
   /**
    * Mounted from the first open, and never unmounted again.
@@ -115,7 +216,7 @@ export function Sheet({
       return;
     }
     y.value = withTiming(open ? 0 : HIDE_Y, open ? IN : OUT);
-  }, [open, present, y]);
+  }, [open, present, y, HIDE_Y]);
 
   /**
    * The sheet's own height, so the scrim can fade over the distance the sheet
@@ -130,6 +231,14 @@ export function Sheet({
     },
     [sheetH],
   );
+
+  // Gesture bookkeeping. startX/startY are the touch's origin (manual
+  // activation gets touches, not translations); onHandle remembers whether this
+  // drag began on the handle; engagedAt is -1 until the sheet takes over.
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const onHandle = useSharedValue(false);
+  const engagedAt = useSharedValue(-1);
 
   // Hardware back dismisses the sheet before anything behind it sees the press.
   useEffect(() => {
@@ -150,13 +259,54 @@ export function Sheet({
   // and downward.
   const drag = Gesture.Pan()
     .enabled(dragEnabled)
+    // Manual only when there is a list to defer to. Whether a downward drag
+    // belongs to the sheet or to the list depends on where the list IS, not on
+    // the direction of the first twelve pixels — which is the one thing an
+    // activeOffset can express. Sheets with no scrollable keep the plain
+    // recognition they have always had.
+    .manualActivation(!!scrollY)
     .activeOffsetY([-1000, 12])
     .failOffsetX([-20, 20])
+    .onTouchesDown(e => {
+      const t = e.allTouches[0];
+      if (!t) {
+        return;
+      }
+      startX.value = t.absoluteX;
+      startY.value = t.absoluteY;
+      // The handle always drags, wherever the list happens to be scrolled to.
+      // Grabbing the handle is an unambiguous statement about the sheet.
+      onHandle.value = t.absoluteY < height - sheetH.value + HANDLE_GRAB;
+    })
+    .onTouchesMove((e, state) => {
+      if (!scrollY) {
+        return; // not manual — RNGH recognises this one itself
+      }
+      const t = e.allTouches[0];
+      if (!t) {
+        return;
+      }
+      const dx = t.absoluteX - startX.value;
+      const dy = t.absoluteY - startY.value;
+      if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
+        state.fail();
+      } else if (dy > 12 && (onHandle.value || scrollY.value <= 0)) {
+        state.activate();
+      }
+    })
     .onUpdate(e => {
-      y.value = Math.max(0, e.translationY);
+      // Where in this gesture the sheet took over, so it moves one-to-one with
+      // the finger from THERE. Without it the sheet would jump down by however
+      // far the list had already scrolled at the moment it handed over.
+      if (engagedAt.value < 0) {
+        engagedAt.value = e.translationY;
+      }
+      y.value = Math.max(0, e.translationY - engagedAt.value);
     })
     .onEnd(e => {
-      if (e.translationY > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
+      const travelled = e.translationY - Math.max(0, engagedAt.value);
+      engagedAt.value = -1;
+      if (travelled > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
         y.value = withTiming(HIDE_Y, OUT, finished => {
           if (finished) {
             runOnJS(close)();
@@ -165,6 +315,9 @@ export function Sheet({
       } else {
         y.value = withTiming(0, IN);
       }
+    })
+    .onFinalize(() => {
+      engagedAt.value = -1;
     });
 
   const sheetStyle = useAnimatedStyle(() => ({
@@ -177,11 +330,7 @@ export function Sheet({
     opacity: interpolate(y.value, [0, sheetH.value], [1, 0], 'clamp'),
   }));
 
-  if (!present) {
-    return null;
-  }
-
-  return (
+  const tree = !present ? null : (
     // 'none' while closed, because the host is no longer unmounted between
     // opens — a parked sheet must not sit in front of the app eating touches.
     <View style={styles.host} pointerEvents={open ? 'box-none' : 'none'}>
@@ -199,6 +348,22 @@ export function Sheet({
       </GestureDetector>
     </View>
   );
+
+  // Published on EVERY render — the tree contains this sheet's own children,
+  // which change whenever the owner re-renders. No dependency array, on
+  // purpose.
+  useEffect(() => {
+    publish(id.current, tree);
+  });
+
+  // And withdrawn when the owner goes away, so a screen that unmounts with its
+  // menu open cannot leave the menu behind.
+  useEffect(() => {
+    const mine = id.current;
+    return () => unpublish(mine);
+  }, []);
+
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -210,6 +375,9 @@ const styles = StyleSheet.create({
   // fix with zIndex at all, because the player was a Dialog window in a
   // different hierarchy — see the note at the top of PlayerScreen's render.
   host: {...StyleSheet.absoluteFillObject, zIndex: 40},
+  // The layer every sheet is actually drawn in. Above the player (30), the
+  // drawer (45) and the floating bars (which have none), below the toaster.
+  portal: {...StyleSheet.absoluteFillObject, zIndex: 50},
   scrim: {...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)'},
   sheet: {
     position: 'absolute',

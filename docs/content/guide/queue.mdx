@@ -1,6 +1,6 @@
 # The Queue
 
-Pull the grip at the bottom of the player, or tap it.
+Tap the queue glyph at the bottom right of the player, or pull up anywhere along that bottom row.
 
 What you see is the playback engine's **real** queue, not a copy kept alongside it in the interface. It cannot drift from what will actually play.
 
@@ -30,6 +30,8 @@ Hold rather than grab-on-touch, because the list also has to be scrollable — g
 <Note title="Why the playing song has no handle">
   Removing the track that is currently playing tears down playback — the engine's remove maps onto ExoPlayer's `removeMediaItem`, and removing the active item stops the music. So the playing row is not draggable and nothing can be dropped above it. The alternative is a queue where a mis-drag kills the audio.
 </Note>
+
+The sheet is scroll-aware: pull down and the **list** scrolls to its top first, and only then does the sheet start to follow your finger. You never have to aim for the handle.
 
 A drop is applied optimistically: the list shows the new order immediately and the engine is brought into line behind it. If the engine refuses the move, the list snaps back to the truth rather than showing you a lie.
 

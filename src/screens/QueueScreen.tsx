@@ -29,6 +29,7 @@
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {type SharedValue} from 'react-native-reanimated';
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
@@ -64,6 +65,7 @@ let lastActive: number | null = null;
 export function QueuePane({
   onDragBegin,
   onDragEnd: onRowDragEnd,
+  scrollY,
 }: {
   /**
    * A row has been lifted. Surfaced so the sheet this now lives in can stand
@@ -75,6 +77,8 @@ export function QueuePane({
    */
   onDragBegin?: () => void;
   onDragEnd?: () => void;
+  /** The sheet's scroll-awareness. See <Sheet scrollY>. */
+  scrollY?: SharedValue<number>;
 } = {}) {
   const [queue, setQueue] = useState<RNTPTrack[]>(lastQueue);
   const [active, setActive] = useState<number | null>(lastActive);
@@ -144,6 +148,36 @@ export function QueuePane({
   );
   const nowPlaying = active == null ? null : queue[active];
 
+  /**
+   * A key per row, and it has to hold still across a reorder.
+   *
+   * `_qid` (player.ts) is the real answer: one id per queue INSTANCE, so five
+   * copies of a song are five distinct rows. But a queue adopted from a service
+   * that outlived the JS context carries none, and the fallback then decides
+   * how those rows behave. An index-based one is the worst possible choice —
+   * every row that moves gets a new key, so React unmounts and remounts it, and
+   * the new <Image> and fresh layout show up as a pop exactly as the drop
+   * settles.
+   *
+   * This numbers the OCCURRENCES of each song instead. A track that appears
+   * once keeps `id#0` wherever it is dragged to; two copies of one song swap
+   * their numbers when reordered, and swapping the keys of two identical rows
+   * is invisible by definition.
+   */
+  const rowKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return upcoming.map(t => {
+      const qid = (t as {_qid?: string})._qid;
+      if (qid) {
+        return qid;
+      }
+      const base = String(t.id ?? t.url ?? 'x');
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      return `${base}#${n}`;
+    });
+  }, [upcoming]);
+
   const firstRecommended = useMemo(
     () => upcoming.findIndex(t => sourceTrackFor(t)?._autoplay),
     [upcoming],
@@ -161,7 +195,10 @@ export function QueuePane({
         return;
       }
       settleUntil.current = Date.now() + 2000;
-      // Optimistic: keep the played tracks, splice in the reordered tail.
+      // Optimistic, and SYNCHRONOUS. DraggableFlatList's release animation
+      // assumes the list already shows the new order the instant the finger
+      // lifts; deferring this by a frame painted the OLD order once, so the row
+      // snapped back to where it came from and then jumped to the drop point.
       setQueue(prev => [...prev.slice(0, activeIdx + 1), ...data]);
       const ok = await moveQueueItem(activeIdx + 1 + from, activeIdx + 1 + to);
       if (!ok) {
@@ -176,7 +213,10 @@ export function QueuePane({
     ({item, getIndex, drag, isActive}: RenderItemParams<RNTPTrack>) => {
       const j = getIndex() ?? 0;
       return (
-        <ScaleDecorator activeScale={1.03}>
+        // activeScale 1: the lift is carried by the shadow. A 3% scale is
+        // barely visible going up and is the only thing still animating on the
+        // way down, where it reads as the row settling twice.
+        <ScaleDecorator activeScale={1}>
           <Row
             track={item}
             onPress={() => jump(activeIdx + 1 + j)}
@@ -247,14 +287,7 @@ export function QueuePane({
 
       <DraggableFlatList
         data={upcoming}
-        // _qid, not id. `id` is title+artist, so five copies of one song in the
-        // queue are five rows claiming one key — which is what made several
-        // rows lift together and sent a drop to the wrong index. The
-        // index-suffixed fallback is for tracks restored from a session saved
-        // by an earlier process, which carry no _qid.
-        keyExtractor={(t, i) =>
-          String((t as {_qid?: string})._qid ?? `${t.id ?? t.url ?? 'x'}#${i}`)
-        }
+        keyExtractor={(_t, i) => rowKeys[i] ?? String(i)}
         renderItem={renderItem}
         onDragBegin={() => {
           dragging.current = true;
@@ -268,6 +301,13 @@ export function QueuePane({
           offset: ROW_H * i,
           index: i,
         })}
+        // Tells the sheet above where this list is, so it only starts to
+        // follow the finger once there is nothing left to scroll.
+        onScrollOffsetChange={off => {
+          if (scrollY) {
+            scrollY.value = off;
+          }
+        }}
         activationDistance={12}
         autoscrollThreshold={72}
         containerStyle={styles.listBox}

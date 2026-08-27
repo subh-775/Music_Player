@@ -254,10 +254,15 @@ const styles = StyleSheet.create({
   // With the centre slot gone the row is two timestamps, so it can be a plain
   // space-between — and it is 5px under the bar rather than half a capsule
   // below it, which is what the tall centre child used to force.
-  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 5},
+  times: {flexDirection: 'row', justifyContent: 'space-between', marginTop: 2},
   time: {
-    color: C.sub,
-    fontSize: 11,
+    // C.text at 700 with the opacity knocked back, rather than C.sub at 400:
+    // the numbers read as part of the bar instead of a caption under it, and
+    // the knock-back is what stops them competing with the title above.
+    color: C.text,
+    opacity: 0.72,
+    fontSize: 11.5,
+    fontWeight: '700',
     width: 46,
     fontVariant: ['tabular-nums'],
   },

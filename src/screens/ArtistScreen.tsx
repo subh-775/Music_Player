@@ -22,12 +22,8 @@ import {getArtist, type ArtistProfile, type Track} from '../backend';
 import {normalizeTracks} from '../tracks';
 import {TrackRow} from '../components/TrackRow';
 import {useFollowedArtists} from '../artists';
-import {
-  State,
-  togglePlay,
-  useActiveTrack,
-  usePlaybackState,
-} from '../player';
+import {State, togglePlay, useActiveTrack, usePlaybackState} from '../player';
+import {BOTTOM_INSET} from '../layout';
 
 /** Profiles the session has already opened — going back to an artist you just
  *  visited must not spin a loader again. */
@@ -109,7 +105,9 @@ export function ArtistScreen({
     const at = String(activeEngine.title ?? '').toLowerCase();
     const aa = String(activeEngine.artist ?? '').toLowerCase();
     return songs.some(
-      t => (t.title || '').toLowerCase() === at && (t.artist || '').toLowerCase() === aa,
+      t =>
+        (t.title || '').toLowerCase() === at &&
+        (t.artist || '').toLowerCase() === aa,
     );
   })();
   const isPlaying =
@@ -130,7 +128,9 @@ export function ArtistScreen({
           <ActivityIndicator color={C.accent} />
         </View>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.body}>
           <View style={styles.head}>
             {profile?.image ? (
               <Image source={{uri: profile.image}} style={styles.pfp} />
@@ -149,28 +149,38 @@ export function ArtistScreen({
             )}
 
             <View style={styles.headActions}>
-            <TouchableOpacity
-              onPress={() => onToggleFollow(profile?.name || name, profile?.image)}
-              activeOpacity={0.7}
-              style={[styles.follow, following && styles.followOn]}>
-              <Text style={[styles.followText, following && styles.followTextOn]}>
-                {following ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-            {songs.length > 0 && (
               <TouchableOpacity
-                style={styles.playBtn}
-                activeOpacity={0.85}
                 onPress={() =>
-                  playingHere ? togglePlay().catch(() => {}) : onPlay(songs[0], songs)
-                }>
-                {playingHere && isPlaying ? (
-                  <Pause size={26} color={C.bg} fill={C.bg} />
-                ) : (
-                  <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
-                )}
+                  onToggleFollow(profile?.name || name, profile?.image)
+                }
+                activeOpacity={0.7}
+                style={[styles.follow, following && styles.followOn]}>
+                <Text
+                  style={[styles.followText, following && styles.followTextOn]}>
+                  {following ? 'Following' : 'Follow'}
+                </Text>
               </TouchableOpacity>
-            )}
+              {songs.length > 0 && (
+                <TouchableOpacity
+                  style={styles.playBtn}
+                  activeOpacity={0.85}
+                  onPress={() =>
+                    playingHere
+                      ? togglePlay().catch(() => {})
+                      : onPlay(songs[0], songs)
+                  }>
+                  {playingHere && isPlaying ? (
+                    <Pause size={26} color={C.bg} fill={C.bg} />
+                  ) : (
+                    <Play
+                      size={26}
+                      color={C.bg}
+                      fill={C.bg}
+                      style={styles.playNudge}
+                    />
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -201,9 +211,14 @@ export function ArtistScreen({
                   <TouchableOpacity
                     style={styles.album}
                     activeOpacity={0.75}
-                    onPress={() => onOpenAlbum(item.name, profile?.name || name)}>
+                    onPress={() =>
+                      onOpenAlbum(item.name, profile?.name || name)
+                    }>
                     {item.image ? (
-                      <Image source={{uri: item.image}} style={styles.albumArt} />
+                      <Image
+                        source={{uri: item.image}}
+                        style={styles.albumArt}
+                      />
                     ) : (
                       <View style={[styles.albumArt, styles.pfpEmpty]} />
                     )}
@@ -242,7 +257,9 @@ const styles = StyleSheet.create({
   bar: {flexDirection: 'row', paddingTop: 12, paddingHorizontal: 8},
   barBtn: {padding: 4},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
-  body: {paddingBottom: 28},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  body: {paddingBottom: BOTTOM_INSET},
   head: {alignItems: 'center', paddingBottom: 8},
   pfp: {width: 150, height: 150, borderRadius: 75, backgroundColor: C.surface},
   pfpEmpty: {

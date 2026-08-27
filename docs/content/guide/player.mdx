@@ -13,8 +13,8 @@ This is where the app stops feeling like a search box. Tap the mini player to op
 | **Badges** | Which source is streaming and at what bitrate. Both can be switched off under Settings → Appearance |
 | **⊕ ♥ ⭳** | Add to a playlist, like, download. The download glyph becomes a green tick once the file is on the phone |
 | **Output** | Under the buttons, in green, when something other than the phone speaker is connected |
-| **Capsule** | Song or lyrics, in the middle of the timestamp row. It goes dim when the track genuinely has no lyrics |
-| **Grip** | “Your queue”, at the bottom. Pull it up, or tap it |
+| **Capsule** | Song or lyrics, in the middle of the timestamp row. Tapping it anywhere flips to the other one. It goes dim when the track genuinely has no lyrics |
+| **Bottom row** | A **timer** on the left and the **queue** on the right. The timer turns green while a sleep timer is running |
 
 ## The seek bar
 
@@ -37,17 +37,19 @@ Two things are true of it that are not obvious:
 
 ## Song and lyrics
 
-The capsule in the middle of the timestamp row switches the artwork for the lyrics.
+The capsule in the middle of the timestamp row switches the artwork for the lyrics. **Tapping anywhere on it flips to the other one** — it is a two-state switch, so there is only ever one thing a tap can mean, and half of it is never a dead target.
 
 It goes **dim** when this song genuinely has none, which is common for SoundCloud and YouTube uploads. That is not a failed fetch — the app checked and there is nothing there. Tapping it says so rather than opening a pane that only ever reads "nothing here". See [Lyrics](/guide/lyrics).
 
-## The queue grip
+## The bottom row
 
-At the bottom. **Pull it up or tap it.**
+Two glyphs sit under the transport controls: a **timer** on the left, the **queue** on the right.
 
-The pull opens the sheet as the drag is recognised, not when you let go, so it is already on its way up under your finger. Push back down before releasing and it goes away again.
+**Tap the queue glyph, or pull up anywhere along the row.** The pull opens the sheet as the drag is recognised rather than when you let go, so it is already on its way up under your finger; push back down before releasing and it goes away again. Tapping only counts on the glyph itself — the rest of the row is for the pull, so a tap meant for the pane switch cannot open the queue by accident.
 
 The pull is upward-only on purpose: a downward drag there has to keep falling through to the dismiss, or the strip where your thumb naturally rests becomes a dead zone for minimising the player.
+
+**The timer** arms a sleep timer — 15, 30, 45 or 60 minutes, or the end of this track. It goes green while one is running, which is the only way to know without opening it. See [Settings](/reference/settings#sleep-timer).
 
 ## Notification and lock screen
 

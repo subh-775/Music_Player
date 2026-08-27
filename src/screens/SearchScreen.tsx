@@ -39,6 +39,7 @@ import {useStats} from '../stats';
 import {getTrackId, normalizeTracks} from '../tracks';
 import {TrackRow, listWindowing} from '../components/TrackRow';
 import {forgetSearch, rememberSearch, useSearchHistory} from '../searchHistory';
+import {BOTTOM_INSET} from '../layout';
 
 /** A public Spotify playlist/album link (or spotify: URI). */
 export function isSpotifyUrl(text: string): boolean {
@@ -557,7 +558,9 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     fontSize: 13,
   },
-  list: {paddingTop: 8, paddingBottom: 16},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  list: {paddingTop: 8, paddingBottom: BOTTOM_INSET},
   section: {
     ...T.rowTitle,
     color: C.text,

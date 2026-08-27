@@ -34,10 +34,10 @@ import Animated, {
   useAnimatedStyle,
 } from 'react-native-reanimated';
 import {
+  ArrowUpRight,
   BookOpen,
   ChevronRight,
   Clock,
-  Moon,
   Settings as SettingsIcon,
   SlidersHorizontal,
   Sparkles,
@@ -45,12 +45,11 @@ import {
 import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
 import {useUpdateAvailable} from '../update';
-import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {DRAWER_W, drawerX, settleDrawer} from '../drawer';
 
 const ICON = require('../assets/app-icon.png');
 
-export type SidebarDest = 'settings' | 'help' | 'stats' | 'sleep' | 'equalizer';
+export type SidebarDest = 'settings' | 'help' | 'stats' | 'equalizer';
 
 // No per-item hint text any more — "Everything you have listened to" under
 // "Recents" was explaining a label that already explains itself, and it made
@@ -71,8 +70,10 @@ export type SidebarDest = 'settings' | 'help' | 'stats' | 'sleep' | 'equalizer';
 // already installed. Help opens the documentation instead — the same content,
 // kept next to the code that implements it, and reachable before you install
 // anything. That is also why "About" left Settings: one door, not two.
+// Sleep timer is NOT here any more. It is a now-action taken with the phone
+// already face-down, and the drawer is two gestures away from the music; it
+// lives beside the queue in the player, where the thing it acts on is.
 const ITEMS: {id: SidebarDest; label: string; Icon: typeof Clock}[] = [
-  {id: 'sleep', label: 'Sleep timer', Icon: Moon},
   {id: 'equalizer', label: 'Equalizer', Icon: SlidersHorizontal},
   {id: 'stats', label: 'Your sound', Icon: Sparkles},
   {id: 'help', label: 'Help', Icon: BookOpen},
@@ -228,13 +229,18 @@ export const Sidebar = React.memo(function Sidebar({
                 <View style={styles.itemText}>
                   <Text style={styles.itemLabel}>{item.label}</Text>
                 </View>
-                {item.id === 'sleep' && <SleepValue />}
                 {/* The update lives inside Settings, so the dot follows it here —
                   the one on the hamburger only says "look inside". */}
                 {item.id === 'settings' && updateWaiting && (
                   <View style={styles.dot} />
                 )}
-                <ChevronRight size={17} color={C.faint} />
+                {/* Help leaves the app for the documentation site, and a
+                    chevron promises the opposite — another page in here. */}
+                {item.id === 'help' ? (
+                  <ArrowUpRight size={17} color={C.faint} />
+                ) : (
+                  <ChevronRight size={17} color={C.faint} />
+                )}
               </TouchableOpacity>
             ))}
           </View>
@@ -245,19 +251,6 @@ export const Sidebar = React.memo(function Sidebar({
       </GestureDetector>
     </View>
   );
-});
-
-/**
- * The armed sleep timer's remaining time, as its own leaf.
- *
- * Subscribing to the timer in Sidebar itself would have re-rendered a
- * permanently-mounted six-row panel once a SECOND for as long as a timer was
- * running — including the whole time the drawer is shut. The countdown ticks
- * here and nowhere else.
- */
-const SleepValue = React.memo(function SleepValue() {
-  const label = sleepLabel(useSleepTimer());
-  return label ? <Text style={styles.itemValue}>{label}</Text> : null;
 });
 
 const styles = StyleSheet.create({

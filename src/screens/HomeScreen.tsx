@@ -45,6 +45,7 @@ import {
   reserveDrawerEdge,
   shouldOpen,
 } from '../drawer';
+import {BOTTOM_INSET} from '../layout';
 
 /**
  * Last Home rows, persisted. Showing these instantly on the next launch is
@@ -482,7 +483,9 @@ const CARD = 138;
 
 const styles = StyleSheet.create({
   fill: {flex: 1},
-  scroll: {paddingBottom: 24},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  scroll: {paddingBottom: BOTTOM_INSET},
   header: {
     flexDirection: 'row',
     alignItems: 'center',

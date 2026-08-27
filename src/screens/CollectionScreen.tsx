@@ -24,6 +24,7 @@ import {
 import {
   ArrowDownToLine,
   CheckSquare,
+  CheckSquare2,
   ChevronLeft,
   Heart,
   ImagePlus,
@@ -33,6 +34,7 @@ import {
   Play,
   Shuffle,
   Square,
+  SquareX,
   Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -49,6 +51,7 @@ import {TrackRow, listWindowing} from '../components/TrackRow';
 import {toast} from '../toast';
 import {
   enqueueDownload,
+  forgetDownloads,
   overlayDownloadArtwork,
   useDownloadJobs,
 } from '../downloads';
@@ -71,6 +74,7 @@ import {
 import {getLocalLibrary} from '../backend';
 import {ConfirmModal} from '../components/ConfirmModal';
 import {Sheet} from '../components/Sheet';
+import {BOTTOM_INSET} from '../layout';
 
 export function CollectionScreen({
   collection,
@@ -85,7 +89,10 @@ export function CollectionScreen({
   loading?: boolean;
   onClose: () => void;
   onPlay: (track: Track, context: Track[]) => void;
-  onMenu?: (track: Track, from?: {playlistId?: string; playlistName?: string}) => void;
+  onMenu?: (
+    track: Track,
+    from?: {playlistId?: string; playlistName?: string},
+  ) => void;
   /** Downloads were deleted — the owner should rescan disk. */
   onChanged?: () => void;
 }) {
@@ -175,7 +182,9 @@ export function CollectionScreen({
     const at = String(activeEngine.title ?? '').toLowerCase();
     const aa = String(activeEngine.artist ?? '').toLowerCase();
     return tracks.some(
-      t => (t.title || '').toLowerCase() === at && (t.artist || '').toLowerCase() === aa,
+      t =>
+        (t.title || '').toLowerCase() === at &&
+        (t.artist || '').toLowerCase() === aa,
     );
   }, [activeEngine, tracks]);
   const isPlaying =
@@ -212,7 +221,10 @@ export function CollectionScreen({
   // Only a playlist of the user's can offer "remove from this playlist".
   const playlistFrom =
     collection.kind === 'userPlaylist'
-      ? {playlistId: collection.id.replace(/^pl:/, ''), playlistName: collection.name}
+      ? {
+          playlistId: collection.id.replace(/^pl:/, ''),
+          playlistName: collection.name,
+        }
       : undefined;
 
   const toggleOne = useCallback((t: Track) => {
@@ -244,10 +256,18 @@ export function CollectionScreen({
     // folder, and two of those racing on the same folder is how you get a
     // spurious failure on a delete that actually worked.
     let removed = 0;
+    const forget: Track[] = [];
     for (const t of targets) {
       if (t.file_path && (await deleteDownload(t.file_path))) {
         removed += 1;
+        forget.push(t);
       }
+    }
+    // Tell the registry and every screen listening, before the toast —
+    // otherwise the rows just deleted keep their downloaded tick until
+    // something else happens to rescan.
+    if (forget.length) {
+      forgetDownloads(forget);
     }
     setBusy(false);
     setSelected(null);
@@ -259,10 +279,7 @@ export function CollectionScreen({
     onChanged?.();
   }, [selected, tracks, onChanged]);
 
-  const play = useCallback(
-    (t: Track) => onPlay(t, tracks),
-    [onPlay, tracks],
-  );
+  const play = useCallback((t: Track) => onPlay(t, tracks), [onPlay, tracks]);
 
   /** Queue every track for download. Sequential so the backend isn't handed
    *  fifty simultaneous fetches. */
@@ -367,10 +384,24 @@ export function CollectionScreen({
         {selecting ? (
           <>
             <Text style={styles.barTitle}>{selected.size} selected</Text>
-            <TouchableOpacity onPress={toggleAll} style={styles.selectAll}>
-              <Text style={styles.selectAllText}>
-                {allSelected ? 'Clear' : 'Select all'}
-              </Text>
+            {/* An icon, not a word — the header beside it already says
+                "n selected", so this only has to say what tapping does. The
+                accessibility label carries the meaning that the text used to,
+                because an unlabelled glyph is invisible to a screen reader in a
+                way the words never were. */}
+            <TouchableOpacity
+              onPress={toggleAll}
+              hitSlop={10}
+              style={styles.selectAll}
+              accessibilityRole="button"
+              accessibilityLabel={
+                allSelected ? 'Clear the selection' : 'Select all songs'
+              }>
+              {allSelected ? (
+                <SquareX size={22} color={C.accent} />
+              ) : (
+                <CheckSquare2 size={22} color={C.accent} />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               onPress={deleteSelected}
@@ -451,7 +482,11 @@ export function CollectionScreen({
                       onPress={() => {
                         const now = toggleSaved(collection);
                         setSaved(now);
-                        toast(now ? `Saved ${collection.name}` : `Removed ${collection.name}`);
+                        toast(
+                          now
+                            ? `Saved ${collection.name}`
+                            : `Removed ${collection.name}`,
+                        );
                       }}>
                       <Heart
                         size={24}
@@ -500,7 +535,12 @@ export function CollectionScreen({
                   {playingHere && isPlaying ? (
                     <Pause size={26} color={C.bg} fill={C.bg} />
                   ) : (
-                    <Play size={26} color={C.bg} fill={C.bg} style={styles.playNudge} />
+                    <Play
+                      size={26}
+                      color={C.bg}
+                      fill={C.bg}
+                      style={styles.playNudge}
+                    />
                   )}
                 </TouchableOpacity>
               </View>
@@ -543,9 +583,7 @@ export function CollectionScreen({
               <View style={styles.rowFill}>
                 <TrackRow
                   track={item}
-                  onPress={() =>
-                    selecting ? toggleOne(item) : play(item)
-                  }
+                  onPress={() => (selecting ? toggleOne(item) : play(item))}
                   onLongPress={
                     canSelect && !selecting
                       ? () => setSelected(new Set([id]))
@@ -679,9 +717,10 @@ const styles = StyleSheet.create({
   },
   barBtn: {padding: 4},
   barTitle: {...T.rowTitle, color: C.text, flex: 1, fontSize: 17},
-  selectAll: {paddingHorizontal: 10, paddingVertical: 6},
-  selectAllText: {...T.sub, color: C.accent, fontWeight: '700'},
-  list: {paddingBottom: 20},
+  selectAll: {paddingHorizontal: 8, paddingVertical: 6},
+  // The bars at the foot of the app float OVER the page now, so a list has to
+  // end above them or its last row is permanently behind one. See src/layout.ts.
+  list: {paddingBottom: BOTTOM_INSET},
   header: {alignItems: 'center', paddingTop: 10, paddingBottom: 6},
   name: {
     ...T.screenTitle,

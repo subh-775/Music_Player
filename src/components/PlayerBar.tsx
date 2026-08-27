@@ -182,8 +182,11 @@ export const PlayerBar = React.memo(function PlayerBar({
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
               <Defs>
                 <LinearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={toward(tint, 0.34)} />
-                  <Stop offset="1" stopColor={toward(tint, 0.58)} />
+                  {/* Darker than it was: the bar is translucent now and sits
+                      over live content, so the tint has to hold its own
+                      surface rather than glow. */}
+                  <Stop offset="0" stopColor={toward(tint, 0.52)} />
+                  <Stop offset="1" stopColor={toward(tint, 0.7)} />
                 </LinearGradient>
               </Defs>
               <Rect width="100%" height="100%" fill="url(#barFill)" />
@@ -243,7 +246,7 @@ export const PlayerBar = React.memo(function PlayerBar({
           <View style={styles.controls}>
             {!!output && (
               <View style={styles.ctl}>
-                <Headphones size={21} color={C.accent} strokeWidth={2} />
+                <Headphones size={24} color={C.accent} strokeWidth={2} />
               </View>
             )}
 
@@ -262,9 +265,9 @@ export const PlayerBar = React.memo(function PlayerBar({
               hitSlop={8}
               style={styles.playBtn}>
               {playing ? (
-                <Pause size={22} color={C.text} fill={C.text} />
+                <Pause size={26} color={C.text} fill={C.text} />
               ) : (
-                <Play size={22} color={C.text} fill={C.text} />
+                <Play size={26} color={C.text} fill={C.text} />
               )}
             </TouchableOpacity>
           </View>
@@ -283,7 +286,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 10,
-    marginBottom: 8,
+    marginBottom: 4,
     borderRadius: BAR_R,
     // Translucent, not opaque. Against the fade at the foot of the page this
     // is what makes the bar read as sitting ABOVE the content rather than
@@ -308,7 +311,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    padding: PAD,
+    paddingTop: PAD,
+    paddingHorizontal: PAD,
+    // Three more at the bottom than the top: the progress line lives down
+    // there now, and the artwork needs to clear it.
+    paddingBottom: PAD + 3,
     minWidth: 0,
   },
   art: {
@@ -339,32 +346,34 @@ const styles = StyleSheet.create({
     paddingRight: S.gutter - 8,
   },
   ctl: {
-    width: 38,
-    height: 38,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // The same 38x38 slot as the other two. No disc: `playNudge` went with it,
+  // The same 42x42 slot as the other two. No disc: `playNudge` went with it,
   // since it existed only to optically centre a triangle inside a circle.
   playBtn: {
-    width: 38,
-    height: 38,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },
   progressTrack: {
     position: 'absolute',
-    // Inset, so it stops clipping against the bar's rounded corners.
-    left: 12,
-    right: 12,
-    bottom: 4,
+    // Edge to edge along the very bottom. It used to be inset by 12 to keep
+    // clear of the rounded corners, which put it level with the bottom edge of
+    // the 54px artwork — the two read as one smudged line. `overflow: hidden`
+    // on the wrap already clips it to the radius, so the inset was buying
+    // nothing and costing the clash.
+    left: 0,
+    right: 0,
+    bottom: 0,
     height: 2.5,
-    borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.16)',
   },
   progressFill: {
     height: '100%',
-    borderRadius: 2,
     // Not pure white: at the very bottom edge of a coloured bar, C.text read as
     // a second, brighter border rather than as progress.
     backgroundColor: 'rgba(255,255,255,0.85)',

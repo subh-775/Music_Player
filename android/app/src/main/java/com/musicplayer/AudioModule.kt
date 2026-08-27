@@ -472,8 +472,25 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     private var cfRamp: Runnable? = null
     private val cfHandler = Handler(Looper.getMainLooper())
 
+    /** Set by onPrepared. Until it is true the overlap has NOTHING to play. */
+    @Volatile private var cfReady = false
+
+    /**
+     * Open the incoming stream and buffer it. Does not make a sound.
+     *
+     * This used to be one call that prepared AND started, and it resolved the
+     * moment prepareAsync() was *called* — not when it finished. The URL is a
+     * live network stream through the local proxy, so preparing it takes
+     * anywhere from a couple of hundred milliseconds to several seconds, and JS
+     * took that immediate `true` as "the overlap is playing" and began fading
+     * the outgoing track down against silence. That is the dip; and when
+     * preparation finally landed after the track boundary, the overlap started
+     * from 0:00 on a song RNTP had already advanced to, which is the doubling.
+     *
+     * Prepared early and started at the boundary, neither can happen.
+     */
     @ReactMethod
-    fun startCrossfade(url: String, durationMs: Int, promise: Promise) {
+    fun prepareCrossfade(url: String, promise: Promise) {
         cfHandler.post {
             try {
                 stopCfInternal()
@@ -486,12 +503,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     )
                     setDataSource(url)
                     setVolume(0f, 0f)
-                    setOnPreparedListener { p ->
-                        try {
-                            p.start()
-                            rampUp(p, durationMs)
-                        } catch (_: Exception) {}
-                    }
+                    setOnPreparedListener { cfReady = true }
                     // A dead stream must not crash — just abandon the overlap;
                     // the outgoing track still ends and RNTP advances normally.
                     setOnErrorListener { _, _, _ ->
@@ -501,6 +513,61 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     prepareAsync()
                 }
                 cfPlayer = mp
+                promise.resolve(true)
+            } catch (e: Exception) {
+                Log.w(TAG, "prepareCrossfade failed: ${e.message}")
+                stopCfInternal()
+                promise.resolve(false)
+            }
+        }
+    }
+
+    /**
+     * Start the prepared overlap, rising over `durationMs`.
+     *
+     * Resolves FALSE when there is nothing prepared or the buffer never
+     * arrived. That answer matters: the caller then lets the tracks change
+     * plainly instead of fading into a silence it cannot fill. A clean cut is
+     * a far better sound than a dip.
+     */
+    @ReactMethod
+    fun startCrossfade(durationMs: Int, promise: Promise) {
+        startWhenReady(durationMs, promise, 0)
+    }
+
+    /**
+     * Wait a beat for the buffer rather than checking once.
+     *
+     * A single check threw away every overlap whose stream arrived a few
+     * hundred milliseconds late — which, on a mobile connection, is most of
+     * them. Beyond about a second the fade would be visibly shorter than the
+     * one that was asked for, and a clean cut is the better answer.
+     */
+    private fun startWhenReady(durationMs: Int, promise: Promise, waitedMs: Int) {
+        cfHandler.post {
+            val mp = cfPlayer
+            if (mp == null) {
+                promise.resolve(false)
+                return@post
+            }
+            if (!cfReady) {
+                if (waitedMs >= 1200) {
+                    Log.w(TAG, "crossfade: buffer never arrived")
+                    promise.resolve(false)
+                } else {
+                    cfHandler.postDelayed(
+                        { startWhenReady(durationMs, promise, waitedMs + 100) },
+                        100,
+                    )
+                }
+                return@post
+            }
+            try {
+                mp.start()
+                // Ramp over what is LEFT, not the nominal span: a late start
+                // that still rose over the full duration would still be
+                // climbing when the outgoing track ended.
+                rampUp(mp, (durationMs - waitedMs).coerceAtLeast(200))
                 promise.resolve(true)
             } catch (e: Exception) {
                 Log.w(TAG, "startCrossfade failed: ${e.message}")
@@ -556,6 +623,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     }
 
     private fun stopCfInternal() {
+        cfReady = false
         cfRamp?.let { cfHandler.removeCallbacks(it) }
         cfRamp = null
         try { cfPlayer?.stop() } catch (_: Exception) {}

@@ -15,7 +15,8 @@ type AudioNative = {
   getCapabilities?: () => Promise<EqCapabilities>;
   setEqualizer?: (enabled: boolean, gainsDb: number[]) => Promise<boolean>;
   setNormalize?: (enabled: boolean) => Promise<boolean>;
-  startCrossfade?: (url: string, durationMs: number) => Promise<boolean>;
+  prepareCrossfade?: (url: string) => Promise<boolean>;
+  startCrossfade?: (durationMs: number) => Promise<boolean>;
   crossfadePosition?: () => Promise<number>;
   stopCrossfade?: () => Promise<boolean>;
   fadeOutPlayer?: (durationMs: number) => Promise<boolean>;
@@ -61,16 +62,31 @@ const native = (NativeModules.Audio ?? {}) as AudioNative;
 export const eqSupported = typeof native.setEqualizer === 'function';
 
 /** True only on a build that shipped the overlap player (the crossfade half). */
-export const crossfadeSupported = typeof native.startCrossfade === 'function';
+export const crossfadeSupported =
+  typeof native.prepareCrossfade === 'function' &&
+  typeof native.startCrossfade === 'function';
 
-/** Start the second stream: the INCOMING track, fading up over `durationMs`,
- *  played alongside RNTP's outgoing track for a real overlap. */
-export async function beginCrossfade(
-  url: string,
-  durationMs: number,
-): Promise<boolean> {
+/**
+ * Open the incoming track's stream and buffer it. Silent, and no commitment —
+ * call it seconds before the boundary and decide later whether to use it.
+ */
+export async function prepareCrossfade(url: string): Promise<boolean> {
   try {
-    return (await native.startCrossfade?.(url, durationMs)) ?? false;
+    return (await native.prepareCrossfade?.(url)) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Start the prepared overlap, rising over `durationMs`.
+ *
+ * FALSE means nothing was ready — nothing has been started, and the caller must
+ * NOT fade the outgoing track, because there is nothing to fade into.
+ */
+export async function beginCrossfade(durationMs: number): Promise<boolean> {
+  try {
+    return (await native.startCrossfade?.(durationMs)) ?? false;
   } catch {
     return false;
   }

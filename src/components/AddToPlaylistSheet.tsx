@@ -6,7 +6,6 @@
  */
 import React, {useCallback, useEffect, useState} from 'react';
 import {
-  FlatList,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +20,10 @@ import {addTrackToPlaylist, createPlaylist, usePlaylists} from '../playlists';
 import {CollectionArt} from './CollectionArt';
 import {playlistToCollection} from '../collections';
 import {toast} from '../toast';
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from 'react-native-reanimated';
 import {Sheet} from './Sheet';
 
 export function AddToPlaylistSheet({
@@ -75,8 +78,19 @@ export function AddToPlaylistSheet({
     }
   }, [name, add]);
 
+  // 0 means the list is at its top, which is when a downward pull stops
+  // belonging to the list and starts belonging to the sheet.
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler(e => {
+    scrollY.value = e.contentOffset.y;
+  });
+
   return (
-    <Sheet open={!!track} onClose={onClose} style={styles.sheet}>
+    <Sheet
+      open={!!track}
+      onClose={onClose}
+      scrollY={scrollY}
+      style={styles.sheet}>
       <Text style={styles.title} numberOfLines={1}>
         Add "{cleanText(shown?.title)}" to
       </Text>
@@ -112,8 +126,13 @@ export function AddToPlaylistSheet({
         </TouchableOpacity>
       )}
 
-      <FlatList
+      {/* Animated, so the offset reaches the sheet's gesture on the UI thread.
+          A JS onScroll would be a frame or two stale exactly when it matters —
+          at the top of a fling, deciding who owns the finger. */}
+      <Animated.FlatList
         data={playlists}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         keyExtractor={p => p.id}
         style={styles.list}
         keyboardShouldPersistTaps="handled"

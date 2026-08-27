@@ -71,10 +71,12 @@ const saved = createStore<Collection[]>('mp.savedCollections.v1', [], raw =>
 export const hydrateSavedCollections = saved.hydrate;
 
 /** Stable identity for something saved from a source. */
-export function savedId(c: {source?: string; name?: string; artist?: string}): string {
-  return String(
-    c.source || `${c.name || ''}|${c.artist || ''}`,
-  ).toLowerCase();
+export function savedId(c: {
+  source?: string;
+  name?: string;
+  artist?: string;
+}): string {
+  return String(c.source || `${c.name || ''}|${c.artist || ''}`).toLowerCase();
 }
 
 export function isSaved(c: Collection): boolean {
@@ -149,12 +151,12 @@ export function likedCollection(tracks: Track[]): Collection {
 }
 
 export function downloadsCollection(tracks: Track[]): Collection {
-  return {id: DOWNLOADS_ID, kind: 'downloads', name: 'Downloaded', tracks};
+  return {id: DOWNLOADS_ID, kind: 'downloads', name: 'Downloads', tracks};
 }
 
 /**
  * Every collection in the library, in the order the library shows them:
- * Liked Songs and Downloaded first (they always exist), then saved albums and
+ * Liked Songs and Downloads first (they always exist), then saved albums and
  * source playlists, then the user's own playlists.
  *
  * `likes` and `downloads` are passed in rather than read from their stores.

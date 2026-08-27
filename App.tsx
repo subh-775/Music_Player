@@ -2,6 +2,8 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BackHandler,
   Linking,
+  PermissionsAndroid,
+  Platform,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -24,6 +26,7 @@ import {ArtistScreen} from './src/screens/ArtistScreen';
 import {PlayerScreen} from './src/screens/PlayerScreen';
 import {PlayerBar} from './src/components/PlayerBar';
 import {BottomNav, type Tab} from './src/components/BottomNav';
+import {SheetHost} from './src/components/Sheet';
 import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
@@ -40,7 +43,6 @@ import {
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
-import {SleepSheet} from './src/components/SleepSheet';
 import {resetDrawer, settleDrawer} from './src/drawer';
 import {C} from './src/theme';
 import {
@@ -113,7 +115,6 @@ function Shell() {
    *  both point at the one component. */
   const [eqOpen, setEqOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
-  const [sleepOpen, setSleepOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
@@ -151,6 +152,7 @@ function Shell() {
     // alive — if `adb logcat -s MPJS` shows nothing at all, the problem is the
     // logging, not the thing being investigated.
     diag('boot', `Music_Player ${appVersion || '?'} starting`);
+    askForNotifications();
     hydrate().then(applyAudioEffects);
     // Boot the engine, then restore the last session so the mini player is
     // there on reopen (same song, paused, at the timestamp you left).
@@ -323,6 +325,17 @@ function Shell() {
 
   /** Home's quick-access tiles. Home only knows WHAT was tapped; the
    *  tracklists live here, next to everything else that opens a Collection. */
+  /** Re-read the download folder and swap the open collection for what is
+   *  actually on disk now. */
+  const refreshDownloadsCollection = useCallback(async () => {
+    try {
+      const {tracks} = await getLocalLibrary();
+      setCollection(downloadsCollection(overlayDownloadArtwork(tracks)));
+    } catch {
+      setCollection(null);
+    }
+  }, []);
+
   const openQuick = useCallback(
     async (dest: QuickDest) => {
       if (dest.kind === 'liked') {
@@ -510,8 +523,6 @@ function Shell() {
         // to return to where the drawer was opened, not drop you into a
         // Settings list you never asked to see.
         setEqOpen(true);
-      } else if (dest === 'sleep') {
-        setSleepOpen(true);
       } else if (dest === 'help') {
         // The one drawer item that is not an overlay: it leaves the app. Handled
         // HERE rather than inside Sidebar so every destination is still resolved
@@ -604,7 +615,17 @@ function Shell() {
               onPlay={(t, ctx) => play(t, ctx, collection.id)}
               onMenu={openSheet}
               onChanged={() => {
-                setCollection(null);
+                // Downloads stays OPEN and re-reads the folder. Closing it was
+                // right for a playlist that was just deleted — there is nothing
+                // to go back to — but deleting three songs out of forty is not
+                // leaving the screen, and being thrown out of it (onto a list
+                // that had not rescanned either) is what made the delete look
+                // like it had not worked.
+                if (collection.kind === 'downloads') {
+                  refreshDownloadsCollection();
+                } else {
+                  setCollection(null);
+                }
                 setLibraryNonce(n => n + 1);
               }}
             />
@@ -671,12 +692,6 @@ function Shell() {
             <EqualizerScreen onClose={() => setEqOpen(false)} />
           </View>
         )}
-
-        {/* The bottom of the page dissolves into the bar below it instead of
-            meeting a hairline. Last child of the body, so it paints over
-            whatever is scrolling — which is the whole point, and the reason it
-            is not part of BottomNav's own style. */}
-        <BodyFade />
       </View>
 
       {/*
@@ -693,9 +708,32 @@ function Shell() {
       */}
       <Toaster bottom={playerOpen ? 118 : engine ? 132 : 78} />
 
-      {engine && <PlayerBar onExpand={expandPlayer} />}
+      {/*
+        The bars FLOAT over the page rather than sitting under it.
 
-      <BottomNav active={tab} onChange={switchTab} />
+        In flow they were the bottom of the layout, which meant nothing was ever
+        behind them: the strip either side of the mini player was solid black
+        and the tab bar could not be translucent over anything. Out of flow, the
+        page runs the full height of the window and passes behind both — which
+        is what the translucency and the fade are for, and the only way the
+        floating bar reads as floating.
+
+        box-none so a touch that lands in the fade, beside the mini player,
+        still reaches the list underneath.
+
+        The cost is that every scrolling surface has to end BOTTOM_INSET above
+        the bottom; see src/layout.ts.
+      */}
+      <View style={styles.bottomStack} pointerEvents="box-none">
+        <BodyFade />
+        {engine && <PlayerBar onExpand={expandPlayer} />}
+        <BottomNav active={tab} onChange={switchTab} />
+      </View>
+
+      {/* Where every <Sheet> in the app is actually drawn — see Sheet.tsx.
+          Mounted after the bars and given a zIndex above the player, so a menu
+          raised from any screen covers all of it. */}
+      <SheetHost />
 
       <TrackActionSheet
         track={sheetTrack}
@@ -726,8 +764,6 @@ function Shell() {
         />
       )}
 
-      <SleepSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
-
       <UpdateModal />
 
       {/* Above everything, and the real UI is already mounted and painted
@@ -757,6 +793,30 @@ function Shell() {
   );
 }
 
+/**
+ * Ask for notifications on Android 13+.
+ *
+ * The permission is declared in the manifest, which was enough before API 33
+ * and is not enough now: from 13 it has to be granted at runtime, and until it
+ * is, the media notification never appears. That is not a cosmetic loss — the
+ * notification is the visible half of the foreground service, so on a phone
+ * with an aggressive battery manager the app looks like a candidate for
+ * killing, and there is no lock-screen transport at all.
+ *
+ * Asked once at boot and never insisted on. A refusal is a legitimate answer;
+ * playback still works, and Android will not show the dialog again anyway.
+ */
+function askForNotifications(): void {
+  if (Platform.OS !== 'android' || Number(Platform.Version) < 33) {
+    return;
+  }
+  PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+  ).catch(() => {
+    /* the dialog is a courtesy — never let it break the boot path */
+  });
+}
+
 export default function App(): React.JSX.Element {
   return (
     // GestureHandlerRootView must wrap everything that uses a gesture handler
@@ -771,19 +831,26 @@ export default function App(): React.JSX.Element {
 }
 
 /**
- * A short upward fade at the foot of the scrolling area.
+ * The page dissolving into the bars, instead of meeting a hard edge.
  *
- * 28px, from nothing to the page colour. Long enough that a row of text
- * dissolves rather than being clipped, short enough that it never eats a row
- * you were trying to read.
+ * It starts ABOVE the mini player and reaches full page colour behind the tab
+ * bar, so a row scrolling out of sight fades rather than being cut off by a
+ * hairline. Absolutely positioned inside the floating stack and non-interactive,
+ * so it costs the content underneath nothing.
  */
 function BodyFade() {
   return (
     <Svg style={styles.bodyFade} pointerEvents="none">
       <Defs>
         <LinearGradient id="bodyfade" x1="0" y1="0" x2="0" y2="1">
+          {/* Three stops, not two. A straight ramp put the fade at half
+              strength exactly where the mini player is, which greys out the
+              artwork either side of it — the part that is meant to show
+              through. It stays light past the bar and does its darkening in
+              the last third, behind the tabs. */}
           <Stop offset="0" stopColor={C.bg} stopOpacity="0" />
-          <Stop offset="1" stopColor={C.bg} stopOpacity="0.95" />
+          <Stop offset="0.6" stopColor={C.bg} stopOpacity="0.22" />
+          <Stop offset="1" stopColor={C.bg} stopOpacity="0.92" />
         </LinearGradient>
       </Defs>
       <Rect width="100%" height="100%" fill="url(#bodyfade)" />
@@ -793,8 +860,21 @@ function BodyFade() {
 
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
-  body: {flex: 1},
-  bodyFade: {position: 'absolute', left: 0, right: 0, bottom: 0, height: 28},
+  body: {flex: 1, zIndex: 0},
+  // zIndex AND elevation. Document order alone decides this on iOS; Android
+  // resolves overlapping siblings by elevation first, and the mini player
+  // inside this layer carries an elevation of its own.
+  bottomStack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+    elevation: 20,
+  },
+  // Taller than the bars it sits behind, so the fade begins in open page and
+  // is already at full strength by the time it reaches them.
+  bodyFade: {position: 'absolute', left: 0, right: 0, bottom: 0, top: -36},
   // Above every overlay: player 30, sheets 40, drawer 45. The splash is the
   // one thing that must cover a half-built app.
   splash: {...StyleSheet.absoluteFillObject, zIndex: 60, backgroundColor: C.bg},
