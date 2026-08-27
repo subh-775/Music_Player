@@ -545,22 +545,29 @@ kbd {
 
 /* A section heading, not another link in a slightly different colour.
    These were --text-3 at the same size as the links under them, which made a
-   list of twenty entries read as one undifferentiated column. Brighter, with a
-   rule under it and real space above, so the eye can find the group it wants
-   without reading every row. */
+   list of twenty entries read as one undifferentiated column.
+
+   Sentence case at body size rather than small caps with wide tracking. Caps
+   plus 0.1em of letter-spacing is a label, and a label wants to be read
+   letter by letter; these are words you glance at. Same size as the links
+   under them, separated by weight and colour instead — which is what makes
+   the column look calm rather than sectioned. */
 .side-title {
-  margin: 0 0 var(--s-3);
-  padding: 0 var(--s-3) var(--s-2);
-  border-bottom: 1px solid var(--line-soft);
-  font-size: var(--fs-xs);
+  margin: 0 0 var(--s-2);
+  padding: 0 var(--s-3);
+  font-size: var(--fs-ui);
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: -0.005em;
   color: var(--text);
 }
 
+/* The rule goes ABOVE the group and spans the column, instead of underlining
+   the heading. Underlined, it read as a heavy box drawn round each title; as a
+   divider it is just the seam between two groups, which is all it is. */
 .side-group + .side-group {
-  margin-top: var(--s-6);
+  margin-top: var(--s-5);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line-soft);
 }
 
 .side-link {
