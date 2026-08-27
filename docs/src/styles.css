@@ -16,7 +16,8 @@
  *
  * Neither end is pure. The app itself is #000 because it targets AMOLED panels
  * where black is pixels switched off; a documentation page is a wall of body
- * text, and text on pure black haloes. 14% dark and 98% light instead.
+ * text, and text on pure black haloes. The dark ground here is a charcoal --
+ * 20% lightness, #141715 -- and the light one is a warm paper, not white.
  */
 :root {
   /* ── Brand ─────────────────────────────────────────────────────────────── */
@@ -34,6 +35,14 @@
   --fs-xl: 1.953rem; /* 31 */
   --fs-2xl: 2.441rem; /* 39 */
   --fs-3xl: 3.052rem; /* 49 */
+
+  /*
+   * Weights are a three-step ladder, not a switch: 400 body, 500 for chrome
+   * and table headers, 600 for headings and anything emphatic, 700 for h1, h2
+   * and numeric values only. Almost everything used to be 700, and when
+   * everything emphatic is the same weight, weight stops carrying information
+   * and size has to do all the work — which is what read as flat.
+   */
 
   /* ── Space — 4pt grid, named for meaning not for value ─────────────────── */
   --s-1: 4px;
@@ -74,18 +83,22 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: oklch(14% 0.006 155);
-  --bg-soft: oklch(17.5% 0.006 155);
-  --surface: oklch(20% 0.007 155);
-  --surface-2: oklch(24% 0.008 155);
-  --surface-hover: oklch(26% 0.009 155);
+  /* 20%, not 14%. The old value resolved to #070a08 - three percent off pure
+     black, which the eye reads as "off" rather than as a dark grey, and which
+     leaves nowhere to put a surface above it. */
+  --bg: oklch(20% 0.007 155); /* #141715 */
+  --bg-soft: oklch(23% 0.007 155);
+  --surface: oklch(25% 0.008 155);
+  --surface-2: oklch(29% 0.009 155);
+  --surface-hover: oklch(32% 0.01 155);
 
-  --text: oklch(96% 0.004 155);
-  --text-2: oklch(75% 0.008 155);
-  --text-3: oklch(60% 0.009 155);
+  --text: oklch(96% 0.004 155); /* 16.1:1 */
+  --text-2: oklch(75% 0.008 155); /*  8.2:1 */
+  /* 60% measured 4.4:1 against the lifted ground and stopped clearing AA. */
+  --text-3: oklch(63% 0.009 155); /*  5.2:1 */
 
-  --line: oklch(29% 0.008 155);
-  --line-soft: oklch(23% 0.007 155);
+  --line: oklch(34% 0.009 155);
+  --line-soft: oklch(28% 0.008 155);
 
   /* Desaturated a touch and lifted, per the rule for accents on dark: the same
      chroma that reads as confident on white reads as neon on near-black. */
@@ -107,91 +120,80 @@
 
   /* Two layers: a tight contact shadow that anchors the edge, and a wide soft
      one that carries the height. One box-shadow can do either, never both. */
-  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.4), 0 2px 6px oklch(0% 0 0 / 0.24);
-  --shadow-2: 0 2px 4px oklch(0% 0 0 / 0.4), 0 10px 28px oklch(0% 0 0 / 0.34);
-  --shadow-3: 0 4px 10px oklch(0% 0 0 / 0.44), 0 24px 60px oklch(0% 0 0 / 0.5);
+  /* Pulled back with the ground. These were tuned against a page that was
+     already almost black, where most of the shadow did nothing at all; on a
+     charcoal every layer reads, and at the old strength the cards looked like
+     they were floating a foot off the page. */
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.28), 0 2px 6px oklch(0% 0 0 / 0.16);
+  --shadow-2: 0 2px 4px oklch(0% 0 0 / 0.28), 0 10px 28px oklch(0% 0 0 / 0.22);
+  --shadow-3: 0 4px 10px oklch(0% 0 0 / 0.3), 0 24px 60px oklch(0% 0 0 / 0.34);
 }
 
 /* ── Light ───────────────────────────────────────────────────────────────── */
+/*
+ * A warm paper, not white: #e8e2d4 is oklch(91.4% 0.020 88).
+ *
+ * Two things about it are easy to get wrong. Beige is DARKER than white by
+ * more than it looks, so every accent has to come down with it - the old
+ * --brand-600 measures 3.1:1 on this ground and fails AA for body text, where
+ * on the near-white it passed, which is why nobody had noticed. And --surface
+ * has to be LIGHTER than --bg: on a white page a card is the same white and
+ * the border does the work, but on paper a card at the same value is invisible
+ * and a card below it reads as a hole.
+ *
+ * Every neutral carries the same hue 88, so the page reads as one paper stock
+ * rather than as beige with grey cards on it.
+ */
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: oklch(98.6% 0.003 155);
-  --bg-soft: oklch(97% 0.005 155);
-  --surface: oklch(99.6% 0.002 155);
-  --surface-2: oklch(96.5% 0.006 155);
-  --surface-hover: oklch(94.5% 0.008 155);
+  --bg: oklch(91.4% 0.02 88); /* #e8e2d4 */
+  --bg-soft: oklch(89.5% 0.022 88);
+  --surface: oklch(94.6% 0.014 88); /* lighter than --bg: cards lift */
+  --surface-2: oklch(88.2% 0.024 88);
+  --surface-hover: oklch(86% 0.026 88);
 
-  --text: oklch(22% 0.014 155);
-  --text-2: oklch(44% 0.014 155);
-  --text-3: oklch(57% 0.012 155);
+  --text: oklch(24% 0.016 88); /* 12.8:1 */
+  --text-2: oklch(45% 0.016 88); /*  5.8:1 */
+  --text-3: oklch(49% 0.016 88); /*  4.9:1 - clears AA at body size */
 
-  --line: oklch(90% 0.006 155);
-  --line-soft: oklch(94% 0.005 155);
+  --line: oklch(83% 0.026 88);
+  --line-soft: oklch(87% 0.024 88);
 
-  /* Darker than the app's green: #1db954 on white is 2.4:1, which fails for
-     text. The 600 step clears AA at body size and still reads as the brand. */
-  --brand: var(--brand-600);
-  --brand-dim: var(--brand-700);
-  --brand-ink: oklch(99% 0.012 150);
-  --brand-wash: oklch(58% 0.155 150 / 0.09);
-  --brand-edge: oklch(58% 0.155 150 / 0.26);
+  /* 700, not 600: 5.2:1 here, and still unmistakably the app's green. */
+  --brand: var(--brand-700);
+  --brand-dim: oklch(38% 0.105 150);
+  --brand-ink: oklch(97% 0.01 88);
+  --brand-wash: oklch(46% 0.125 150 / 0.1);
+  --brand-edge: oklch(46% 0.125 150 / 0.28);
 
-  --warn: oklch(52% 0.12 75);
-  --warn-wash: oklch(52% 0.12 75 / 0.09);
-  --warn-edge: oklch(52% 0.12 75 / 0.24);
-  --danger: oklch(52% 0.18 25);
-  --danger-wash: oklch(52% 0.18 25 / 0.08);
-  --danger-edge: oklch(52% 0.18 25 / 0.24);
-  --info: oklch(50% 0.13 245);
-  --info-wash: oklch(50% 0.13 245 / 0.08);
-  --info-edge: oklch(50% 0.13 245 / 0.24);
+  /* Re-derived against 91.4%, not against the 98.6% these were tuned on. Each
+     is a step darker than it was, for the same reason the brand is. */
+  --warn: oklch(46% 0.115 75);
+  --warn-wash: oklch(46% 0.115 75 / 0.1);
+  --warn-edge: oklch(46% 0.115 75 / 0.26);
+  --danger: oklch(47% 0.175 25);
+  --danger-wash: oklch(47% 0.175 25 / 0.09);
+  --danger-edge: oklch(47% 0.175 25 / 0.26);
+  --info: oklch(45% 0.13 245);
+  --info-wash: oklch(45% 0.13 245 / 0.09);
+  --info-edge: oklch(45% 0.13 245 / 0.26);
 
-  --shadow-1: 0 1px 2px oklch(30% 0.02 155 / 0.08),
-    0 2px 6px oklch(30% 0.02 155 / 0.06);
-  --shadow-2: 0 2px 4px oklch(30% 0.02 155 / 0.08),
-    0 10px 28px oklch(30% 0.02 155 / 0.1);
-  --shadow-3: 0 4px 10px oklch(30% 0.02 155 / 0.12),
-    0 24px 60px oklch(30% 0.02 155 / 0.16);
+  --shadow-1: 0 1px 2px oklch(30% 0.03 88 / 0.1),
+    0 2px 6px oklch(30% 0.03 88 / 0.07);
+  --shadow-2: 0 2px 4px oklch(30% 0.03 88 / 0.1),
+    0 10px 28px oklch(30% 0.03 88 / 0.12);
+  --shadow-3: 0 4px 10px oklch(30% 0.03 88 / 0.14),
+    0 24px 60px oklch(30% 0.03 88 / 0.18);
 }
 
-/* Someone who has never touched the toggle gets their system preference. The
-   [data-theme] rules above win over this because they are more specific. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    color-scheme: light;
-    --bg: oklch(98.6% 0.003 155);
-    --bg-soft: oklch(97% 0.005 155);
-    --surface: oklch(99.6% 0.002 155);
-    --surface-2: oklch(96.5% 0.006 155);
-    --surface-hover: oklch(94.5% 0.008 155);
-    --text: oklch(22% 0.014 155);
-    --text-2: oklch(44% 0.014 155);
-    --text-3: oklch(57% 0.012 155);
-    --line: oklch(90% 0.006 155);
-    --line-soft: oklch(94% 0.005 155);
-    --brand: var(--brand-600);
-    --brand-dim: var(--brand-700);
-    --brand-ink: oklch(99% 0.012 150);
-    --brand-wash: oklch(58% 0.155 150 / 0.09);
-    --brand-edge: oklch(58% 0.155 150 / 0.26);
-    --warn: oklch(52% 0.12 75);
-    --warn-wash: oklch(52% 0.12 75 / 0.09);
-    --warn-edge: oklch(52% 0.12 75 / 0.24);
-    --danger: oklch(52% 0.18 25);
-    --danger-wash: oklch(52% 0.18 25 / 0.08);
-    --danger-edge: oklch(52% 0.18 25 / 0.24);
-    --info: oklch(50% 0.13 245);
-    --info-wash: oklch(50% 0.13 245 / 0.08);
-    --info-edge: oklch(50% 0.13 245 / 0.24);
-    --shadow-1: 0 1px 2px oklch(30% 0.02 155 / 0.08),
-      0 2px 6px oklch(30% 0.02 155 / 0.06);
-    --shadow-2: 0 2px 4px oklch(30% 0.02 155 / 0.08),
-      0 10px 28px oklch(30% 0.02 155 / 0.1);
-    --shadow-3: 0 4px 10px oklch(30% 0.02 155 / 0.12),
-      0 24px 60px oklch(30% 0.02 155 / 0.16);
-  }
-}
+/*
+ * There is no prefers-color-scheme block any more. There was one, and it
+ * restated all twenty-odd tokens above verbatim - two copies of a palette is
+ * exactly how one gets updated and the other does not. The inline script in
+ * index.html stamps data-theme on <html> before first paint, from storage or
+ * from the system preference, so one palette serves both.
+ */
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
 
@@ -257,7 +259,10 @@ button {
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  padding: 0 var(--s-5);
+  /* The bar spans the window; its CONTENTS line up with the shell's 1440px
+     cap. Otherwise the logo and the nav sit at the window edges while the page
+     under them is centred, which looks worse than either extreme. */
+  padding-inline: max(var(--s-5), calc((100% - 1440px) / 2));
   background: color-mix(in oklab, var(--bg) 82%, transparent);
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
@@ -307,7 +312,7 @@ button {
 .hdr-links a {
   color: var(--text-2);
   font-size: var(--fs-ui);
-  font-weight: 600;
+  font-weight: 500;
   padding: var(--s-2) var(--s-3);
   border-radius: var(--r-sm);
   transition: color var(--t-fast) var(--ease-out);
@@ -383,14 +388,9 @@ button {
   box-shadow: var(--shadow-1);
   transition: transform var(--t-mid) var(--ease-out);
 }
-:root[data-theme='dark'] .theme-knob,
-:root:not([data-theme='light']) .theme-knob {
+/* data-theme is always present now, so the knob follows it and nothing else. */
+:root[data-theme='dark'] .theme-knob {
   transform: translateX(20px);
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) .theme-knob {
-    transform: none;
-  }
 }
 
 .hdr-sep {
@@ -430,7 +430,7 @@ button {
 kbd {
   font-family: var(--font);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   padding: 4px 6px;
   border-radius: 5px;
@@ -482,7 +482,7 @@ kbd {
   margin: 0 0 var(--s-2);
   padding: 0 var(--s-3);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -507,7 +507,7 @@ kbd {
 }
 .side-link.on {
   color: var(--brand);
-  font-weight: 700;
+  font-weight: 600;
   background: var(--brand-wash);
 }
 
@@ -577,7 +577,7 @@ kbd {
   margin: var(--s-6) 0 var(--s-2);
   font-size: var(--fs-md);
   line-height: 1.35;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.02em;
   scroll-margin-top: calc(var(--header-h) + var(--s-4));
 }
@@ -585,7 +585,7 @@ kbd {
 .prose h4 {
   margin: var(--s-5) 0 var(--s-2);
   font-size: var(--fs-base);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
@@ -743,12 +743,13 @@ kbd {
   border-bottom: 1px solid var(--line);
   color: var(--text-3);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 .prose td {
+  font-variant-numeric: tabular-nums;
   padding: var(--s-3) var(--s-4);
   border-bottom: 1px solid var(--line-soft);
   color: var(--text-2);
@@ -797,7 +798,7 @@ kbd {
   gap: 6px;
   margin-bottom: var(--s-2);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -843,7 +844,7 @@ kbd {
 .toc-title {
   margin: 0 0 var(--s-3);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -862,7 +863,7 @@ kbd {
 }
 .toc a.on {
   color: var(--brand);
-  font-weight: 700;
+  font-weight: 600;
 }
 .toc a.lvl-3 {
   padding-left: var(--s-3);
@@ -922,7 +923,7 @@ kbd {
 .pager .dir {
   display: block;
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -938,7 +939,7 @@ kbd {
 .pager .name {
   display: block;
   color: var(--brand);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 0.95rem;
 }
 .pager a.next {
@@ -1027,7 +1028,7 @@ kbd {
 .pal-crumb {
   display: block;
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -1035,7 +1036,7 @@ kbd {
 .pal-name {
   display: block;
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 0.95rem;
   margin-top: 1px;
 }
@@ -1109,7 +1110,7 @@ kbd {
   background: var(--brand-wash);
   color: var(--brand);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 .hero-eyebrow b {
@@ -1118,34 +1119,23 @@ kbd {
   background: var(--brand);
   color: var(--brand-ink);
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .hero h1 {
   margin: var(--s-4) 0 0;
-  font-size: clamp(2.4rem, 7vw, var(--fs-3xl));
+  font-size: clamp(2rem, 7vw, var(--fs-3xl));
   line-height: 1.03;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  /* -0.04em started closing the counters on a and e at 49px. */
+  letter-spacing: -0.025em;
   text-wrap: balance;
 }
+/* Solid. The gradient that used to be here was decoration standing in for
+   hierarchy, and the colour alone already separates the line. */
 .hero h1 em {
   font-style: normal;
-  /* The site's only gradient, on three words of one headline. Gradient text is
-     a default worth refusing — it is usually decoration standing in for
-     hierarchy — but here it marks the single claim the product is built around,
-     and nothing else on the site competes with it. The solid colour underneath
-     is what anyone without background-clip gets. */
   color: var(--brand);
-  background: linear-gradient(
-    100deg,
-    var(--brand-400) 0%,
-    var(--brand-500) 55%,
-    var(--brand-600) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 .hero-lede {
@@ -1172,7 +1162,7 @@ kbd {
   border-radius: var(--r-full);
   border: 1px solid transparent;
   font-size: 0.9375rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.01em;
   cursor: pointer;
   transition: transform var(--t-fast) var(--ease-out),
@@ -1239,7 +1229,7 @@ kbd {
 .tile h3 {
   margin: 0 0 var(--s-2);
   font-size: 1.0625rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
 .tile p {
@@ -1253,7 +1243,7 @@ kbd {
   margin-top: var(--s-3);
   color: var(--brand);
   font-size: var(--fs-ui);
-  font-weight: 700;
+  font-weight: 600;
 }
 .tile-ico {
   display: grid;
@@ -1326,11 +1316,11 @@ kbd {
 .demo-head h4 {
   margin: 0;
   font-size: var(--fs-ui);
-  font-weight: 700;
+  font-weight: 600;
 }
 .demo-head span {
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -1417,7 +1407,7 @@ kbd {
   background: transparent;
   color: var(--text-2);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   transition: border-color var(--t-fast) var(--ease-out),
     color var(--t-fast) var(--ease-out);
@@ -1488,93 +1478,69 @@ kbd {
   color: var(--text-3);
 }
 
-/* ── Release list ────────────────────────────────────────────────────────── */
+/* ── Latest release ──────────────────────────────────────────────────────── */
 
-.rel-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
+/* Four cells, equal weight, one border. Not a card and not a shadow: it is a
+   strip of facts, and dressing it as a card implies it is something to act on
+   rather than something to read. */
+.rel-badge {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
   margin: var(--s-5) 0;
-}
-
-.rel {
-  display: block;
-  padding: var(--s-3) var(--s-4);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: var(--surface);
-  transition: border-color var(--t-fast) var(--ease-out),
-    background-color var(--t-fast) var(--ease-out);
+  background: var(--line);
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--t-fast) var(--ease-out);
 }
-.rel:hover {
+.rel-badge:hover {
   border-color: var(--brand-edge);
-  background: var(--surface-2);
   text-decoration: none;
 }
-.rel-latest {
-  border-color: var(--brand-edge);
-  background: var(--brand-wash);
-}
-
-.rel-head {
+.rel-cell {
   display: flex;
-  align-items: center;
-  gap: var(--s-3);
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface);
 }
-.rel-tag {
-  color: var(--text);
-  font-weight: 700;
-  font-size: 0.9375rem;
-  font-variant-numeric: tabular-nums;
-}
-.rel-chip {
-  padding: 2px 8px;
-  border-radius: var(--r-full);
-  background: var(--brand);
-  color: var(--brand-ink);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.rel-date {
-  margin-left: auto;
-  color: var(--text-3);
+.rel-cell b {
   font-size: var(--fs-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
-.rel-note {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-2);
-  font-size: var(--fs-ui);
-  line-height: 1.55;
+.rel-cell span {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  /* A download count that ticks over must not shift the row it sits in. */
+  font-variant-numeric: tabular-nums;
 }
 
-/* Three grey bars while the request is out. A spinner says "wait"; this says
-   what is coming and how much of it, and the list does not jump when it
-   arrives. */
-.rel-skel {
-  pointer-events: none;
-}
-.rel-skel span {
-  display: block;
-  height: 11px;
-  border-radius: 4px;
-  background: var(--surface-2);
+/* A grey block while the request is out, at the height the badge will be, so
+   the page does not jump when it arrives. */
+.rel-badge-skel {
+  min-height: 148px;
+  border-color: var(--line);
+  background: var(--surface);
   animation: skel 1.4s var(--ease-out) infinite;
-}
-.rel-skel span:first-child {
-  width: 30%;
-}
-.rel-skel span:last-child {
-  width: 72%;
-  margin-top: var(--s-2);
 }
 @keyframes skel {
   50% {
     opacity: 0.45;
+  }
+}
+
+@media (min-width: 700px) {
+  .rel-badge {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .rel-badge-skel {
+    min-height: 74px;
   }
 }
 
@@ -1619,7 +1585,7 @@ kbd {
 .gtext h4 {
   margin: 0 0 var(--s-1);
   font-size: 0.9375rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 .gtext p {
@@ -1649,11 +1615,9 @@ kbd {
   top: 14px;
   height: 62px;
   border-radius: 7px;
-  background: linear-gradient(
-    135deg,
-    var(--brand-dim),
-    color-mix(in oklab, var(--brand-dim) 35%, var(--bg))
-  );
+  /* A flat fill stands in for artwork as well as a gradient did - this is an
+     illustration of a gesture, not of an album cover. */
+  background: color-mix(in oklab, var(--brand-dim) 70%, var(--bg));
 }
 .pill-line {
   position: absolute;
@@ -2101,7 +2065,25 @@ kbd {
     padding: var(--s-6) var(--s-6) var(--s-9);
   }
   .doc-inner {
-    margin: 0;
+    /* auto, not 0. Pinned left, 760px of prose sat against the sidebar with a
+       band of nothing between it and the table of contents - which is what
+       made a wide window read as unbalanced rather than as spacious. */
+    margin-inline: auto;
+  }
+}
+
+/* Short viewports - a phone in landscape, a split-screen window. HEIGHT is
+   what the palette is actually constrained by, and the 78vh rule below 700px
+   never applies here because a landscape phone is 900px wide. */
+@media (max-height: 560px) {
+  .pal {
+    max-height: 88vh;
+  }
+  .pal-foot {
+    display: none;
+  }
+  .hero {
+    padding-bottom: var(--s-5);
   }
 }
 

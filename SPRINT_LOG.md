@@ -1299,7 +1299,89 @@ something to attempt blind.
 existing user to uninstall and reinstall, so it stays a decision made at a
 moment of the user's choosing.
 
+## Round 10 — the documentation catches up with the app
+
+**Five pages described a control that had not existed for two releases.** The
+queue grip became a timer glyph and a queue glyph in round 6; `player.mdx`,
+`queue.mdx`, `quick-start.mdx`, `introduction.mdx` and the gesture cards all
+still told people to pull it. The sleep timer moved into the player in round 7
+and two pages still put it in the drawer. Both are now written to what ships,
+along with the things that had never been documented at all: the capsule flips
+from anywhere on it, the queue sheet lets its list scroll to the top before it
+starts to follow your finger, and crossfade skips cleanly rather than dipping
+when the next track cannot buffer in time. That last one needed saying, because
+an occasional plain cut reads as a bug unless the page says it is a decision.
+
+The rule that would have caught all of it is now the first standing constraint
+above.
+
+**The marketing register is out, and the privacy claims with it.** "No account,
+no telemetry, no server" is a promise, and a reader has no way to check a
+promise. "Playlists, liked songs and history are written to the app's own
+storage on the device; downloads go to a folder you pick, outside app storage"
+describes how the thing is built, and anyone can go and verify it. The second
+is stronger AND it is the kind of statement a project should be making. The
+`0 — accounts, ever` statistic went for the same reason: a number with no
+information in it, sitting in a row beside three real ones.
+
+The headline led with `No account.` It leads with what actually distinguishes
+the app now — one search, three catalogues, one list, and a song that exists in
+more than one place appearing once with the others held as fallbacks.
+
+**`How It Works` was an implementation document.** It named the embedded
+runtime and the framework, gave the loopback address, and drew the request path
+out to the three services. It is now **Data & storage**, and it answers the
+question a reader actually has — where does my stuff go — in a table that was
+already the best thing on the page. Everything runs on the phone; that is all
+the shape anyone needs.
+
+**The releases page listed every version and said nothing nine times over.** CI
+generates the release bodies, so the "first real sentence" the list pulled out
+was a `…compare/v1.0.15...v1.0.16` URL. One badge now: tag, date, APK size,
+download count, linked to the release itself.
+
+**Colour.** Light mode is a warm paper (`#e8e2d4`) rather than near-white, and
+that is not a background swap: beige is darker than white by more than it looks,
+so `--brand-600` measured 3.1:1 on it and failed AA for body text. Every accent
+came down a step, `--surface` went LIGHTER than `--bg` so cards lift instead of
+reading as holes, and every neutral carries the paper's own hue so the page is
+one stock rather than beige with grey cards on it. Dark mode was `#070a08` —
+three percent off pure black, whatever the comment above it claimed — and is now
+a `#141715` charcoal with the shadow opacities pulled back, because a black
+shadow that did nothing on near-black reads heavily on a charcoal.
+
+The duplicated `prefers-color-scheme` block is gone. It restated all twenty-odd
+light tokens verbatim, which is how one copy gets updated and the other does
+not; the inline script now always stamps `data-theme`, so there is one palette.
+
+**Layout.** `.doc-inner` had `margin: 0` above 1280px, so the prose pinned to
+the left of its column with a band of nothing between it and the table of
+contents — the "disbalanced" look, and it was one word. The header's contents
+line up with the shell's cap now instead of sitting at the window edges. And the
+command palette is constrained by HEIGHT, not width: a phone in landscape is
+900px wide, so the mobile rule never applied and the palette overflowed.
+
+**Both gradients are gone** — the hero's, whose only argument was that it marked
+a claim that no longer exists, and the fake album art in the gesture card.
+
+**Weight was doing no work.** Thirty-two of forty-five declarations were 700.
+When everything emphatic is the same weight, weight stops carrying information
+and size has to do all of it. Three steps now: 500 for chrome and table headers,
+600 for headings and anything emphatic, 700 for h1, h2 and numeric values only.
+Uppercase micro-labels dropped to 600 — caps plus tracking plus bold is three
+emphasis signals on the same three words.
+
+**And the licence is stated.** GPL-3.0, named, with what it means in practice
+for someone who is reading rather than building, and `fair-use.mdx` links to it
+instead of saying "published for education and for personal use" — which is not
+a licence and did not match the LICENSE file at the root.
+
 ### Standing constraints
+- **Any control renamed, moved or removed: grep `docs/content` for its old name
+  before merging.** The queue "grip" became two glyphs in round 6 and the docs
+  went on describing the grip in five places for two releases — a page that
+  confidently names a control the reader cannot find is worse than no page,
+  because it makes them doubt themselves rather than the documentation.
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the
   in-app updater's signature chain holds. Swapping to a real keystore forces a

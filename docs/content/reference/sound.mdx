@@ -30,6 +30,14 @@ Nought is off — the right answer for albums that were sequenced to run togethe
 
 The overlap is a real fade on both tracks, not a cut. Near the end of a song the outgoing track ramps down while the incoming one ramps up, which is why the setting is in seconds rather than being a switch.
 
+### When it doesn't fade
+
+The next song is opened and buffered about twenty seconds before it is needed. If it is still not ready when the boundary arrives — a slow connection, a source having a bad day — **the tracks change plainly instead**, with no fade at all.
+
+That is deliberate, and it is the better of the two failures: fading a song down into a silence nothing is filling is an audible dip, and a dip sounds broken in a way a clean cut does not. **Settings → Diagnostics** records which happened on each boundary if you want to know.
+
+A downloaded next track never has this problem — the file opens instantly.
+
 <Warn>
   Crossfade and **Repeat this song** do not combine usefully: a track crossfading into itself is a track played twice, quietly, over itself. Repeat wins.
 </Warn>

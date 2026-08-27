@@ -7,14 +7,14 @@
     <title>Fix_Music — Documentation</title>
     <meta
       name="description"
-      content="Fix_Music for Android: search, stream and download from JioSaavn, SoundCloud and YouTube. No account. Every gesture, setting and feature, documented."
+      content="Fix_Music for Android: search, stream and download from JioSaavn, SoundCloud and YouTube as one catalogue. Every gesture, setting and feature, documented."
     />
-    <meta name="theme-color" content="#0e100f" />
+    <meta name="theme-color" content="#141715" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Fix_Music — Documentation" />
     <meta
       property="og:description"
-      content="One library, three sources, no account. Every gesture, setting and feature, documented."
+      content="One search across JioSaavn, SoundCloud and YouTube, merged into a single list. Every gesture, setting and feature, documented."
     />
     <!-- Absolute, deliberately: Vite rewrites href/src against the base path but
          never a meta content attribute, and a crawler cannot resolve a relative
@@ -30,17 +30,26 @@
        * reader who chose light gets a black screen for one frame on every
        * navigation - the flash that makes a site feel cheap. This is the one
        * thing that cannot wait for a framework to mount.
+       *
+       * It ALWAYS stamps an attribute now, falling back to the system
+       * preference and then to dark. The stylesheet used to carry a second
+       * copy of the entire light palette inside a prefers-color-scheme query
+       * purely to serve the un-stamped case; deciding it here instead means
+       * there is one palette to maintain rather than two.
        */
       (function () {
+        var theme = 'dark';
         try {
           var saved = localStorage.getItem('fm-theme');
           if (saved === 'light' || saved === 'dark') {
-            document.documentElement.dataset.theme = saved;
+            theme = saved;
+          } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+            theme = 'light';
           }
         } catch (e) {
-          /* private window, or site data blocked - fall through to the media
-             query in the stylesheet, which needs no JS at all */
+          /* private window, or site data blocked - the dark default stands */
         }
+        document.documentElement.dataset.theme = theme;
       })();
     </script>
   </head>

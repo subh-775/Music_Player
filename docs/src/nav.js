@@ -12,7 +12,7 @@ const SLUG = 'subh-775/Music_Player';
 
 export const SITE = {
   name: 'Fix_Music',
-  tagline: 'One library. Three sources. No account.',
+  tagline: 'An Android music player that searches three catalogues as one',
   slug: SLUG,
   repo: `https://github.com/${SLUG}`,
   releases: `https://github.com/${SLUG}/releases/latest`,
@@ -59,7 +59,7 @@ export const SIDEBAR = [
       {text: 'Settings', link: '/reference/settings'},
       {text: 'Sound & Quality', link: '/reference/sound'},
       {text: 'Updates', link: '/reference/updates'},
-      {text: 'How It Works', link: '/reference/architecture'},
+      {text: 'Data & Storage', link: '/reference/architecture'},
       {text: 'Troubleshooting', link: '/reference/troubleshooting'},
     ],
   },
@@ -68,6 +68,7 @@ export const SIDEBAR = [
     items: [
       {text: 'Releases', link: '/releases'},
       {text: 'Fair Use', link: '/fair-use'},
+      {text: 'Licence', link: '/licence'},
     ],
   },
 ];

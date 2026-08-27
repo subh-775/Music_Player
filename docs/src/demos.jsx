@@ -354,7 +354,7 @@ const CARDS = [
   [
     'pullUp',
     'Pull up the queue',
-    'From the grip at the bottom of the player. It opens as the drag is recognised rather than when you let go, so the sheet is already on its way up under your finger. Push back down to change your mind.',
+    'From anywhere along the bottom row of the player, or by tapping the queue glyph on its right. The sheet opens as the drag is recognised rather than when you let go, so it is already on its way up under your finger. Push back down to change your mind.',
   ],
   [
     'edge',
@@ -363,7 +363,7 @@ const CARDS = [
   ],
   [
     'reorder',
-    'Hold a grip to reorder',
+    'Hold a handle to reorder',
     'In the queue, press and hold the handle on any upcoming song and drag it where you want it. The playing track stays pinned and cannot be moved — moving it would stop the music.',
   ],
 ];
