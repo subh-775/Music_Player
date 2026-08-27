@@ -364,6 +364,7 @@ button {
 }
 
 .hdr-links {
+  flex: none;
   display: none;
   align-items: center;
   gap: var(--s-1);
@@ -1064,6 +1065,44 @@ kbd {
 .pal-field input::placeholder {
   color: var(--text-3);
 }
+
+/* The chip is the default because most of the time there is a keyboard to
+   press. Below 700px it swaps for a real button - see the note in search.jsx. */
+.pal-close {
+  display: none;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  margin: -8px -8px -8px 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.pal-close:active {
+  background: var(--surface-2);
+}
+
+/*
+ * Esc chip, or a cross.
+ *
+ * Width is the wrong question: a phone in landscape is 844px wide and still
+ * has no Esc key. The condition is whether there is a keyboard to press, which
+ * `pointer: coarse` answers directly, and a short viewport catches the rest.
+ * Only one of the two is ever shown.
+ */
+@media (pointer: coarse), (max-width: 699px), (max-height: 560px) {
+  .pal-esc {
+    display: none;
+  }
+  .pal-close {
+    display: flex;
+  }
+}
+
 
 .pal-list {
   overflow-y: auto;
@@ -1896,20 +1935,35 @@ kbd {
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
 /*
- * Under 700px the search field stops being a field.
+ * Under 1000px the search field stops being a field.
  *
- * A 420px box reading "Search  Ctrl K" has nothing to offer a phone: the
+ * Not under 700. From 700 up the nav links appear, and between there and 1000
+ * the header was being asked to hold a brand, a 420px search box, three links,
+ * a Download link and three controls. There is not room, and flex does not
+ * fail politely: the box and the links drew straight through each other, so
+ * the bar read "SearcGuide" with "Ctrl K" stamped on top of it.
+ *
+ * A 420px box reading "Search  Ctrl K" has nothing to offer a phone either: the
  * keyboard hint is meaningless without a keyboard, and the box collides with
  * the brand at exactly the width where every pixel is already spoken for. It
  * collapses to the same 40px icon slot as every other control in the header,
  * and the palette it opens is unchanged — the real field lives in there.
  */
-@media (max-width: 699px) {
+@media (max-width: 999px) {
+  /* The bar still carries a burger down here, so everything else gives up a
+     little room: at exactly 700px, where the links first appear, the row was
+     three pixels wider than the bar holding it. */
   .hdr {
-    gap: var(--s-1);
-    padding: 0 var(--s-3);
+    gap: var(--s-2);
+    padding-inline: var(--s-4);
   }
+  .hdr-links {
+    margin-right: 0;
+  }
+  /* Right-aligned rather than centred: a lone icon in the middle of the bar
+     with the links to its right looks like something that failed to load. */
   .hdr-mid {
+    flex: none;
     justify-content: flex-end;
   }
   .search-btn {
@@ -1930,6 +1984,13 @@ kbd {
   .search-btn span,
   .search-btn kbd {
     display: none;
+  }
+}
+
+@media (max-width: 699px) {
+  .hdr {
+    gap: var(--s-1);
+    padding: 0 var(--s-3);
   }
   .brand {
     font-size: 1rem;
