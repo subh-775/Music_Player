@@ -43,7 +43,7 @@ export function UpdateModal() {
             <>
               <Text style={styles.title}>Downloading update</Text>
               <Text style={styles.message}>
-                Fix_Music {info?.version} — hang tight, this only takes a moment.
+                Relaxify {info?.version} — hang tight, this only takes a moment.
               </Text>
               <View style={styles.barTrack}>
                 <View style={[styles.barFill, {width: `${Math.max(4, pct)}%`}]} />

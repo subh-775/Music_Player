@@ -319,7 +319,7 @@ _stream_session = _build_pooled_session(pool=8, maxsize=16)
 
 
 def get_default_download_dir() -> str:
-    """The user's custom folder if set, else Downloads/Fix_Spotify/music, else
+    """The user's custom folder if set, else Downloads/Relaxify/music, else
     the app-private dir. See android_env.downloads_dir() for why."""
     return android_env.downloads_dir()
 

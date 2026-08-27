@@ -25,7 +25,14 @@ _dirs = {
 }
 
 # The folder name we own inside the phone's public Download directory.
-PUBLIC_SUBDIR = ("Fix_Spotify", "music")
+PUBLIC_SUBDIR = ("Relaxify", "music")
+
+# What that folder used to be called. Downloads are found by WALKING the folder
+# — scan_local_downloads() rebuilds the offline library from the tags in the
+# files it finds there — so simply renaming the constant would have emptied the
+# library of every song an existing user had already downloaded. The files
+# would still be on the phone; the app would just have stopped looking at them.
+LEGACY_PUBLIC_SUBDIRS = (("Fix_Spotify", "music"),)
 
 
 def configure(
@@ -136,14 +143,26 @@ def is_writable(path: str) -> bool:
 
 
 def default_downloads_dir() -> str:
-    """Downloads/Fix_Spotify/music — the phone's real, user-visible Download
+    """Downloads/Relaxify/music — the phone's real, user-visible Download
     folder, so songs show up in any file manager and SURVIVE an uninstall.
+
+    An install that already keeps music under one of the old names carries on
+    using it. Moving those files would be a bulk copy of somebody's music
+    library on the back of a rename, and leaving them behind would hide them
+    from the library scan; staying put costs nothing and cannot lose anything.
+    Only a fresh install gets the new folder.
 
     Empty when Android gave us no public Download path at all.
     """
-    if _dirs["public"]:
-        return str(Path(_dirs["public"], *PUBLIC_SUBDIR))
-    return ""
+    if not _dirs["public"]:
+        return ""
+    current = Path(_dirs["public"], *PUBLIC_SUBDIR)
+    if not current.is_dir():
+        for legacy in LEGACY_PUBLIC_SUBDIRS:
+            previous = Path(_dirs["public"], *legacy)
+            if previous.is_dir():
+                return str(previous)
+    return str(current)
 
 
 def private_downloads_dir() -> str:
@@ -157,7 +176,7 @@ def downloads_dir() -> str:
 
     Order of preference:
       1. a custom folder the user picked in Settings
-      2. Downloads/Fix_Spotify/music  (needs All-files access)
+      2. Downloads/Relaxify/music  (needs All-files access)
       3. the app-private external dir  (always writable, no permission, but
          invisible in file managers and WIPED on uninstall)
 

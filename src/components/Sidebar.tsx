@@ -213,7 +213,7 @@ export const Sidebar = React.memo(function Sidebar({
           <View style={styles.brandRow}>
             <Image source={ICON} style={styles.brandIcon} />
             <View style={styles.brandText}>
-              <Text style={styles.brand}>Fix_Music</Text>
+              <Text style={styles.brand}>Relaxify</Text>
               <Text style={styles.brandSub}>Your library, your sound</Text>
             </View>
           </View>

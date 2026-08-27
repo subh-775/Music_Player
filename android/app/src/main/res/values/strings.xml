@@ -1,10 +1,8 @@
 <resources>
-    <!-- NOT "Music Player": that collides with the stock music app on most
-         Android phones, so the launcher, the share sheet and the installer
-         dialog all showed two identically-named entries with no way to tell
-         which was which.
-         The package id stays com.musicplayer on purpose — changing THAT makes
-         every existing install a different app, which breaks the in-app
-         updater and loses everyone's playlists. -->
-    <string name="app_name">Fix_Music</string>
+    <!-- The launcher name only. The package id stays com.musicplayer on
+         purpose — changing THAT makes every existing install a different app,
+         which breaks the in-app updater and loses everyone's playlists. The
+         React root component is likewise still "MusicPlayer" and has to match
+         index.js; neither is user-visible. -->
+    <string name="app_name">Relaxify</string>
 </resources>
