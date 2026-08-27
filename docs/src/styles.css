@@ -336,6 +336,9 @@ button {
 .brand {
   display: flex;
   align-items: center;
+  /* Its glyph is 30px; the row it sits in is 60px. Padding rather than height,
+     so the mark stays put and only the target grows. */
+  min-height: 44px;
   gap: var(--s-2);
   color: var(--text);
   font-weight: 700;
@@ -423,6 +426,16 @@ button {
  * position is a state — the knob sits left on light, right on dark, and the
  * icon rides with it.
  */
+/* 46x26 to look at, 44px to hit.
+   The pill stays the size it should be; the pseudo-element under it is what a
+   thumb actually lands on. A 26px control is well under the 44px minimum, and
+   on a phone the two nearest things to it are a link that leaves the site and
+   a menu — both wrong to open by accident. */
+.theme-switch::after {
+  content: '';
+  position: absolute;
+  inset: -10px -2px; /* 26 + 20 = 46, measured by hit-testing outward */
+}
 .theme-switch {
   position: relative;
   flex: none;
@@ -508,6 +521,53 @@ kbd {
   display: grid;
 }
 
+/*
+ * Scrollbars, on the three things inside the page that scroll.
+ *
+ * These were the platform default, which on Windows is a ~15px light grey
+ * trough with a hard-edged thumb. Against a near-black sidebar that is not a
+ * scrollbar, it is a bright rule down the inside edge of the column — and it
+ * was what made the sidebar look like it had been drawn with a heavy border.
+ *
+ * `scrollbar-width` and `scrollbar-color` are the standard properties and are
+ * enough in current Chromium and Firefox; the ::-webkit- rules cover older
+ * builds. The track is transparent on purpose: a scrollbar should be visible
+ * while you are using it and close to invisible while you are reading.
+ */
+html {
+  /* `auto`, not `thin`: this is the bar the reader drags for a long page, and
+     it should stay easy to grab. Only its colours follow the theme. */
+  scrollbar-color: var(--line) var(--bg);
+}
+
+.side,
+.toc-inner,
+.pal-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.side::-webkit-scrollbar,
+.toc-inner::-webkit-scrollbar,
+.pal-list::-webkit-scrollbar {
+  width: 6px;
+}
+.side::-webkit-scrollbar-track,
+.toc-inner::-webkit-scrollbar-track,
+.pal-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.side::-webkit-scrollbar-thumb,
+.toc-inner::-webkit-scrollbar-thumb,
+.pal-list::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--r-full);
+}
+.side:hover::-webkit-scrollbar-thumb,
+.toc-inner:hover::-webkit-scrollbar-thumb,
+.pal-list:hover::-webkit-scrollbar-thumb {
+  background: var(--line);
+}
+
 /* ── Shell ───────────────────────────────────────────────────────────────── */
 
 .shell {
@@ -567,7 +627,16 @@ kbd {
 .side-group + .side-group {
   margin-top: var(--s-5);
   padding-top: var(--s-5);
+  /* Inset by the same amount as the links' own padding, so the rule lines up
+     with the text rather than running the full width of the column and into
+     the scrollbar. */
+  margin-inline: var(--s-3);
+  padding-inline: 0;
   border-top: 1px solid var(--line-soft);
+}
+.side-group + .side-group > .side-title,
+.side-group + .side-group > .side-link {
+  margin-inline: calc(-1 * var(--s-3));
 }
 
 .side-link {
