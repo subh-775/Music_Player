@@ -70,8 +70,12 @@
    * the same weight, weight stops carrying information and size has to do all
    * of the work — which is exactly what read as flat.
    */
-  --w-display: 300; /* h1, h2, the hero */
-  --w-heading: 300;
+  /* 400, not the reference's 300. At 80px on a desktop 300 is a statement;
+     on a phone, where the same headline is 36px and the screen is often read
+     in daylight, it thins out to the point of looking unfinished. 400 keeps
+     the light, wide-set voice and stays legible at both ends. */
+  --w-display: 400; /* h1, h2, the hero */
+  --w-heading: 400;
   --w-strong: 500; /* buttons, nav, table headers, uppercase labels */
   --w-label: 500;
 
@@ -539,14 +543,24 @@ kbd {
   margin-top: var(--s-6);
 }
 
+/* A section heading, not another link in a slightly different colour.
+   These were --text-3 at the same size as the links under them, which made a
+   list of twenty entries read as one undifferentiated column. Brighter, with a
+   rule under it and real space above, so the eye can find the group it wants
+   without reading every row. */
 .side-title {
-  margin: 0 0 var(--s-2);
-  padding: 0 var(--s-3);
+  margin: 0 0 var(--s-3);
+  padding: 0 var(--s-3) var(--s-2);
+  border-bottom: 1px solid var(--line-soft);
   font-size: var(--fs-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-3);
+  color: var(--text);
+}
+
+.side-group + .side-group {
+  margin-top: var(--s-6);
 }
 
 .side-link {
@@ -638,7 +652,7 @@ kbd {
   margin: var(--s-6) 0 var(--s-2);
   font-size: var(--fs-lg);
   line-height: 1.35;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: -0.02em;
   scroll-margin-top: calc(var(--header-h) + var(--s-4));
 }
@@ -910,12 +924,20 @@ kbd {
   text-transform: uppercase;
   color: var(--text-3);
 }
+/* One line each, truncated. A contents list is scanned, not read: three
+   headings that each wrap to three lines are nine lines the eye has to work
+   through to find one word, and the column stops looking like a list at all.
+   The full text is on the element's title, and the heading it points at says
+   it in full anyway. */
 .toc a {
   display: block;
   padding: 5px 0;
   color: var(--text-3);
   font-size: 0.8125rem;
-  line-height: 1.45;
+  line-height: 1.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: color var(--t-fast) var(--ease-out);
 }
 .toc a:hover {
@@ -1960,10 +1982,13 @@ kbd {
   .hdr-links {
     margin-right: 0;
   }
-  /* Right-aligned rather than centred: a lone icon in the middle of the bar
-     with the links to its right looks like something that failed to load. */
+  /* Still flexible, and right-aligned. Making it `flex: none` left the search
+     icon sitting immediately after the wordmark with a gap after it, so the
+     bar read as four things scattered across it rather than a name on the left
+     and controls on the right. It keeps the slack, so the icon joins the
+     control group where it belongs. */
   .hdr-mid {
-    flex: none;
+    flex: 1;
     justify-content: flex-end;
   }
   .search-btn {
@@ -1989,8 +2014,12 @@ kbd {
 
 @media (max-width: 699px) {
   .hdr {
-    gap: var(--s-1);
+    gap: var(--s-2);
     padding: 0 var(--s-3);
+  }
+  /* The controls read as one group rather than three separate things. */
+  .hdr-right {
+    gap: 2px;
   }
   .brand {
     font-size: 1rem;
