@@ -222,6 +222,30 @@
  * system preference, so one palette serves both.
  */
 
+/*
+ * Crossing between the two palettes.
+ *
+ * Only the body used to transition, so the page ground faded while every
+ * surface, rule, heading and icon on top of it cut across in one frame - which
+ * reads worse than no transition at all, because the eye follows the parts
+ * that jumped.
+ *
+ * A permanent transition on every colour is not the answer either: it would
+ * put a third of a second of lag behind every hover and every focus ring. So
+ * the class is added for the length of the swap and taken away again (see
+ * useTheme in App.jsx), and while it is there EVERY element crosses over
+ * together. !important because it has to beat the component-level transitions
+ * that are already on buttons, cards and links.
+ */
+.theming,
+.theming *,
+.theming *::before,
+.theming *::after {
+  transition: background-color 320ms ease, color 320ms ease,
+    border-color 320ms ease, fill 320ms ease, box-shadow 320ms ease,
+    opacity 320ms ease !important;
+}
+
 /* ── Base ────────────────────────────────────────────────────────────────── */
 
 *,
@@ -248,8 +272,6 @@ body {
   letter-spacing: -0.006em;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
-  transition: background-color var(--t-mid) var(--ease-out),
-    color var(--t-mid) var(--ease-out);
 }
 
 a {
@@ -1118,8 +1140,11 @@ kbd {
 
 /* ── Home ────────────────────────────────────────────────────────────────── */
 
+/* The same 1440 cap as .shell, deliberately: at 1120 the front page was
+   narrower than every page it links to, so moving from home into the guide
+   made the content jump wider for no reason the reader can see. */
 .home {
-  max-width: 1120px;
+  max-width: 1440px;
   margin: 0 auto;
   /* The header is FIXED, and this page is not inside .shell — which is where
      the offset for it lives. Without clearing it here the first thing on the
@@ -1167,7 +1192,10 @@ kbd {
 
 .hero-lede {
   margin: var(--s-5) 0 0;
-  max-width: 54ch;
+  /* 68 characters, not 54. The measure has to be capped or the line becomes
+     hard to track back from, but 54 left a third of the column empty beside a
+     paragraph that was wrapping every seven words. */
+  max-width: 68ch;
   font-size: var(--fs-md);
   font-weight: 400;
   line-height: 1.55;
@@ -1220,6 +1248,10 @@ kbd {
   transform: translateY(0) scale(0.98);
 }
 
+/* On a phone the mark comes FIRST — the hero stacks, and a column of text with
+   a logo below it reads as a page that has not finished loading. From 700px up
+   the two sit side by side and the order goes back to what the markup says:
+   words on the left, where reading starts, and the mark on the right. */
 .hero-art {
   display: grid;
   place-items: center;
@@ -1991,10 +2023,14 @@ kbd {
     padding: calc(var(--header-h) + var(--s-7)) var(--s-6) var(--s-9);
   }
   .hero {
-    grid-template-columns: 1.15fr 0.85fr;
+    /* The text column takes the larger share, and the gap is wide enough that
+       the two columns read as two things rather than as one crowded one. */
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+    gap: var(--s-7);
   }
   .hero-art {
-    display: block;
+    display: grid;
+    order: 0;
   }
   .bento {
     grid-template-columns: repeat(3, 1fr);
@@ -2041,6 +2077,14 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+  /* A crossfade is still motion. Someone who has asked for less of it gets the
+     new palette at once. */
+  .theming,
+  .theming *,
+  .theming *::before,
+  .theming *::after {
+    transition: none !important;
   }
   *,
   *::before,

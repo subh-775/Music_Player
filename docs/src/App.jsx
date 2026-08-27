@@ -129,6 +129,10 @@ function useRouter() {
 
 /* ── Theme ───────────────────────────────────────────────────────────────── */
 
+/** How long the palette takes to cross over. Matches styles.css. */
+const THEME_FADE = 320;
+let themingTimer = 0;
+
 function useTheme() {
   // The inline script in index.html always stamps data-theme before first
   // paint, from storage or from the system preference, so this reads one
@@ -140,7 +144,18 @@ function useTheme() {
   const toggle = useCallback(() => {
     setTheme(prev => {
       const next = prev === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next;
+      const root = document.documentElement;
+      // Only WHILE swapping. A permanent transition on every colour would make
+      // every hover and every focus ring drag behind the pointer; this arms
+      // one for the length of the change and then takes it away again, so the
+      // page fades between the two palettes and nothing else is affected.
+      root.classList.add('theming');
+      window.clearTimeout(themingTimer);
+      themingTimer = window.setTimeout(
+        () => root.classList.remove('theming'),
+        THEME_FADE + 40,
+      );
+      root.dataset.theme = next;
       try {
         localStorage.setItem('fm-theme', next);
       } catch {
