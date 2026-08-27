@@ -395,7 +395,8 @@ function CrossfadeSlider({
         <View style={styles.rowText}>
           <Text style={styles.rowLabel}>Crossfade</Text>
           <Text style={styles.rowHint}>
-            Overlap the end of one song into the next
+            Overlap the end of one song into the next. Skipped when the next
+            song can't buffer in time.
           </Text>
         </View>
         <Text style={[styles.sliderValue, shown === 0 && styles.sliderOff]}>

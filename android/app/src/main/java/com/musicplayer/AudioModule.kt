@@ -532,15 +532,42 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      */
     @ReactMethod
     fun startCrossfade(durationMs: Int, promise: Promise) {
+        startWhenReady(durationMs, promise, 0)
+    }
+
+    /**
+     * Wait a beat for the buffer rather than checking once.
+     *
+     * A single check threw away every overlap whose stream arrived a few
+     * hundred milliseconds late — which, on a mobile connection, is most of
+     * them. Beyond about a second the fade would be visibly shorter than the
+     * one that was asked for, and a clean cut is the better answer.
+     */
+    private fun startWhenReady(durationMs: Int, promise: Promise, waitedMs: Int) {
         cfHandler.post {
             val mp = cfPlayer
-            if (mp == null || !cfReady) {
+            if (mp == null) {
                 promise.resolve(false)
+                return@post
+            }
+            if (!cfReady) {
+                if (waitedMs >= 1200) {
+                    Log.w(TAG, "crossfade: buffer never arrived")
+                    promise.resolve(false)
+                } else {
+                    cfHandler.postDelayed(
+                        { startWhenReady(durationMs, promise, waitedMs + 100) },
+                        100,
+                    )
+                }
                 return@post
             }
             try {
                 mp.start()
-                rampUp(mp, durationMs)
+                // Ramp over what is LEFT, not the nominal span: a late start
+                // that still rose over the full duration would still be
+                // climbing when the outgoing track ended.
+                rampUp(mp, (durationMs - waitedMs).coerceAtLeast(200))
                 promise.resolve(true)
             } catch (e: Exception) {
                 Log.w(TAG, "startCrossfade failed: ${e.message}")

@@ -11,7 +11,6 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   NativeModules,
@@ -51,6 +50,7 @@ import {
 import {usePlaybackOrigin} from '../player';
 import {toast} from '../toast';
 import {Sheet} from '../components/Sheet';
+import {ConfirmModal} from '../components/ConfirmModal';
 import {listWindowing} from '../components/TrackRow';
 import {BOTTOM_INSET} from '../layout';
 
@@ -99,6 +99,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
   const [newName, setNewName] = useState('');
   /** The row a long-press opened options for. */
   const [menuFor, setMenuFor] = useState<Collection | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Collection | null>(null);
   const [renaming, setRenaming] = useState<Collection | null>(null);
   const [renameText, setRenameText] = useState('');
 
@@ -243,21 +244,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
 
   const doDelete = useCallback((c: Collection) => {
     setMenuFor(null);
-    Alert.alert(
-      `Delete "${c.name}"?`,
-      'The songs themselves are not touched.',
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deletePlaylist(playlistIdOf(c));
-            toast(`Deleted ${c.name}`);
-          },
-        },
-      ],
-    );
+    setConfirmDelete(c);
   }, []);
 
   const submitRename = useCallback(() => {
@@ -339,13 +326,10 @@ export const LibraryScreen = React.memo(function LibraryScreen({
                   {item.name}
                 </Text>
                 <View style={styles.metaLine}>
-                  {/* Liked Songs and Downloads carry the pin too. They are
-                      pinned — permanently, by construction, above everything
-                      the pin list can reorder — and a row that sits at the top
-                      of the list with no mark on it reads as an accident. */}
-                  {(isPinned(idOf(item)) ||
-                    item.kind === 'liked' ||
-                    item.kind === 'downloads') && (
+                  {/* Only rows that can actually be pinned. The fixtures sit
+                      at the top by construction, and marking them with the
+                      state of a control they do not have says nothing. */}
+                  {isPinned(idOf(item)) && (
                     <View style={styles.pin}>
                       <PinGlyph size={12} color={DOWNLOAD_TINT} />
                     </View>
@@ -417,6 +401,22 @@ export const LibraryScreen = React.memo(function LibraryScreen({
           </View>
         )}
       </Sheet>
+
+      <ConfirmModal
+        visible={!!confirmDelete}
+        title={confirmDelete ? `Delete "${confirmDelete.name}"?` : ''}
+        message="The songs themselves are not touched."
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => {
+          if (confirmDelete) {
+            deletePlaylist(playlistIdOf(confirmDelete));
+            toast(`Deleted ${confirmDelete.name}`);
+          }
+          setConfirmDelete(null);
+        }}
+      />
 
       {/* Rename dialog — same shape as "New playlist". These two stay <Modal>
           on purpose: a dialog with a TextInput wants a real window so the soft

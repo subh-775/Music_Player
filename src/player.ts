@@ -46,6 +46,7 @@ import {setPausedByDuck} from './duckState';
 import {sleepTimerOnTrackChange} from './sleepTimer';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
+import {diag} from './diag';
 
 let ready = false;
 let available: boolean | null = null;
@@ -1329,7 +1330,15 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
         crossfadeSupported &&
         !cfActive &&
         active != null &&
-        remaining <= span + 4 &&
+        // Twenty seconds of lead, or span + 8 on a long fade, whichever is
+        // more. Preparing is silent and free to abandon; the only thing that
+        // matters is that the buffer has ARRIVED by the boundary, and a stream
+        // pulled through the local proxy can take several seconds to open. A
+        // four-second margin on a twelve-second fade left the overlap still
+        // buffering when it was asked to start — and a not-ready overlap
+        // cancels the fade entirely, which is a crossfade setting that does
+        // nothing at all.
+        remaining <= Math.max(span + 8, 20) &&
         cfPreparedFor !== key &&
         fadedFor !== key
       ) {
@@ -1367,6 +1376,10 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
             const overlapping =
               crossfadeSupported && !cfActive && (await beginCrossfade(ms));
             cfActive = overlapping;
+            // Says which of the two happened. Without it a crossfade skipped
+            // because the stream was slow is indistinguishable from one that is
+            // switched off, which makes "is it even working?" unanswerable.
+            diag('crossfade', overlapping ? `overlap ${ms}ms` : 'not ready');
             if (overlapping) {
               // The ramp runs NATIVELY (Handler, not a JS timer) so it cannot
               // stall half way down when the app is backgrounded, and it

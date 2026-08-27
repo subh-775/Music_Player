@@ -860,8 +860,18 @@ function BodyFade() {
 
 const styles = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
-  body: {flex: 1},
-  bottomStack: {position: 'absolute', left: 0, right: 0, bottom: 0},
+  body: {flex: 1, zIndex: 0},
+  // zIndex AND elevation. Document order alone decides this on iOS; Android
+  // resolves overlapping siblings by elevation first, and the mini player
+  // inside this layer carries an elevation of its own.
+  bottomStack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+    elevation: 20,
+  },
   // Taller than the bars it sits behind, so the fade begins in open page and
   // is already at full strength by the time it reaches them.
   bodyFade: {position: 'absolute', left: 0, right: 0, bottom: 0, top: -36},

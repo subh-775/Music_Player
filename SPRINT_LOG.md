@@ -1138,6 +1138,79 @@ than being closed out from under the user.
 spirit: they sit above everything the pin list can reorder, and a row pinned to
 the top with no mark on it reads as an accident.
 
+## Round 9 — the sheets learn about their own lists, and crossfade gets its lead back
+
+**Crossfade did nothing at all, and the reason was arithmetic.** Round 8 split
+prepare from start, which killed the dip, and then gated the start on the
+buffer having arrived — correctly. What it got wrong was the lead: prepare
+fired at `span + 4`, and the watcher is a 1s tick, so at the 12s setting the
+overlap had between one and three seconds to open a proxied network stream. It
+usually had not, `startCrossfade` checked `cfReady` once, resolved false, and
+the deliberate "no fade when there is no overlap" rule turned every boundary
+into a plain cut. The setting looked switched off.
+
+Two changes, and they have to be read together. Prepare now runs at
+`max(span + 8, 20)` seconds out — preparing is silent and free to abandon, so
+there was never a reason to be thrifty with it. And `startCrossfade` waits
+instead of checking: up to 1.2s in 100ms steps, then gives up. A stream that
+arrives 400ms late still crossfades; one that never arrives still cuts cleanly.
+The ramp runs over what is LEFT of the duration rather than the nominal span,
+because a late start that still rose over the full twelve seconds would be
+climbing while the outgoing track ended.
+
+And it says which happened. `diag('crossfade', 'overlap 12000ms' | 'not ready')`
+— without that line a crossfade skipped for a slow stream is indistinguishable
+from one that is switched off, which makes "is it even working?" a question
+nobody can answer. The Settings hint says so too: "Skipped when the next song
+can't buffer in time." An occasional plain cut should read as designed.
+
+**Both sheets fought their own lists, in opposite directions.** The pan wrapped
+the whole sheet with `activeOffsetY([-1000, 12])`, so any 12px downward drag
+anywhere claimed the gesture. "Add to playlist" uses a plain FlatList, which has
+no RNGH gesture to arbitrate with, so the sheet won every time and scrolling up
+through playlists dragged the sheet instead. The queue uses DraggableFlatList,
+which is RNGH-native and won every time, so the sheet could only be dragged from
+its header. Same cause, opposite symptom — which is what said it was one fix.
+
+`Sheet` takes an optional `scrollY` now and switches to `manualActivation` when
+it gets one. Whether a downward drag belongs to the sheet or the list depends on
+where the list IS, not on the direction of the first twelve pixels — and an
+activeOffset can only express the second. The sheet activates when the list has
+nothing left to give (`scrollY <= 0`) and the finger is still pulling down, or
+when the drag started on the handle, which is an unambiguous statement about the
+sheet whatever the list is doing. `engagedAt` records the translation at the
+moment of handover so the sheet moves one-to-one from there rather than jumping
+by however far the list had already scrolled. Sheets with no scrollable — the
+five others — keep exactly the recognition they had.
+
+The queue feeds it from `onScrollOffsetChange`, which DraggableFlatList already
+exposes for this. The playlist sheet's list became an `Animated.FlatList` with
+`useAnimatedScrollHandler`, so the offset reaches the gesture on the UI thread;
+a JS `onScroll` would be a frame or two stale at exactly the moment it decides
+who owns the finger.
+
+**The drop jitter was round 7's own fix.** Deferring the optimistic `setQueue`
+by a frame was meant to let ScaleDecorator finish; what it actually did was
+paint the OLD order for one frame after the finger lifted, so the row snapped
+back to where it came from and then jumped to the drop point. DraggableFlatList
+expects the data updated synchronously in `onDragEnd` — its release animation is
+built around it. Synchronous again, and `activeScale` is 1: the lift is carried
+by the shadow, and a 3% scale is invisible going up and the only thing still
+animating on the way down.
+
+**The pin comes off the fixtures.** Asked for twice, argued back twice, and the
+argument was wrong: a pin is a control's STATE, and Liked Songs and Downloads
+have no such control — `canPin` excludes them and long-press returns early. A
+marker for an action you cannot take says nothing. (No stored ids to clean up:
+those two rows were never pinnable, so nothing was ever written for them.)
+
+**And the last `Alert.alert` in the app is gone** — deleting a playlist now uses
+`ConfirmModal` like every other destructive action, instead of the OS's grey
+window.
+
+**Still open, deliberately:** the release keystore, for the same reason as last
+round.
+
 ## Round 8 — audit round 7, and three of its diagnoses corrected
 
 **Sheets could not cover the bars, and no zIndex was ever going to fix it.**

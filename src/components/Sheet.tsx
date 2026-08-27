@@ -40,6 +40,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import {C, S} from '../theme';
@@ -134,6 +135,9 @@ export function SheetHost() {
 const IN = {duration: 220, easing: Easing.out(Easing.cubic)};
 const OUT = {duration: 160, easing: Easing.in(Easing.cubic)};
 
+/** The strip at the top of a sheet where a drag is always a sheet drag. */
+const HANDLE_GRAB = 44;
+
 /** How far down you have to drag (or how fast you have to flick) to dismiss. */
 const DISMISS_DISTANCE = 90;
 const DISMISS_VELOCITY = 800;
@@ -144,6 +148,7 @@ export function Sheet({
   children,
   style,
   dragEnabled = true,
+  scrollY,
 }: {
   open: boolean;
   onClose: () => void;
@@ -159,6 +164,20 @@ export function Sheet({
    * the sheet has no business winning. Whoever holds the row says so.
    */
   dragEnabled?: boolean;
+  /**
+   * The scroll offset of the sheet's own list, if it has one. 0 means "already
+   * at the top".
+   *
+   * Handing it over is what makes this a scroll-aware sheet instead of a sheet
+   * that fights its own content. Without it the pan claimed any 12px downward
+   * drag anywhere on the sheet, and the two lists failed in opposite
+   * directions: a plain FlatList has no RNGH gesture to arbitrate with, so the
+   * sheet always won and scrolling up moved the sheet; DraggableFlatList is
+   * RNGH-native and always won, so the sheet could only be dragged by its
+   * header. With it, the list scrolls until it reaches its top, and only then
+   * does further downward travel move the sheet.
+   */
+  scrollY?: SharedValue<number>;
 }) {
   // The live window, not a module-load snapshot: a fold opening or a rotation
   // changes it, and a stale "gone" position leaves the sheet parked halfway up
@@ -213,6 +232,14 @@ export function Sheet({
     [sheetH],
   );
 
+  // Gesture bookkeeping. startX/startY are the touch's origin (manual
+  // activation gets touches, not translations); onHandle remembers whether this
+  // drag began on the handle; engagedAt is -1 until the sheet takes over.
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const onHandle = useSharedValue(false);
+  const engagedAt = useSharedValue(-1);
+
   // Hardware back dismisses the sheet before anything behind it sees the press.
   useEffect(() => {
     if (!open) {
@@ -232,13 +259,54 @@ export function Sheet({
   // and downward.
   const drag = Gesture.Pan()
     .enabled(dragEnabled)
+    // Manual only when there is a list to defer to. Whether a downward drag
+    // belongs to the sheet or to the list depends on where the list IS, not on
+    // the direction of the first twelve pixels — which is the one thing an
+    // activeOffset can express. Sheets with no scrollable keep the plain
+    // recognition they have always had.
+    .manualActivation(!!scrollY)
     .activeOffsetY([-1000, 12])
     .failOffsetX([-20, 20])
+    .onTouchesDown(e => {
+      const t = e.allTouches[0];
+      if (!t) {
+        return;
+      }
+      startX.value = t.absoluteX;
+      startY.value = t.absoluteY;
+      // The handle always drags, wherever the list happens to be scrolled to.
+      // Grabbing the handle is an unambiguous statement about the sheet.
+      onHandle.value = t.absoluteY < height - sheetH.value + HANDLE_GRAB;
+    })
+    .onTouchesMove((e, state) => {
+      if (!scrollY) {
+        return; // not manual — RNGH recognises this one itself
+      }
+      const t = e.allTouches[0];
+      if (!t) {
+        return;
+      }
+      const dx = t.absoluteX - startX.value;
+      const dy = t.absoluteY - startY.value;
+      if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
+        state.fail();
+      } else if (dy > 12 && (onHandle.value || scrollY.value <= 0)) {
+        state.activate();
+      }
+    })
     .onUpdate(e => {
-      y.value = Math.max(0, e.translationY);
+      // Where in this gesture the sheet took over, so it moves one-to-one with
+      // the finger from THERE. Without it the sheet would jump down by however
+      // far the list had already scrolled at the moment it handed over.
+      if (engagedAt.value < 0) {
+        engagedAt.value = e.translationY;
+      }
+      y.value = Math.max(0, e.translationY - engagedAt.value);
     })
     .onEnd(e => {
-      if (e.translationY > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
+      const travelled = e.translationY - Math.max(0, engagedAt.value);
+      engagedAt.value = -1;
+      if (travelled > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
         y.value = withTiming(HIDE_Y, OUT, finished => {
           if (finished) {
             runOnJS(close)();
@@ -247,6 +315,9 @@ export function Sheet({
       } else {
         y.value = withTiming(0, IN);
       }
+    })
+    .onFinalize(() => {
+      engagedAt.value = -1;
     });
 
   const sheetStyle = useAnimatedStyle(() => ({

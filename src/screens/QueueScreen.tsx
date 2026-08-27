@@ -29,6 +29,7 @@
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {type SharedValue} from 'react-native-reanimated';
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
@@ -64,6 +65,7 @@ let lastActive: number | null = null;
 export function QueuePane({
   onDragBegin,
   onDragEnd: onRowDragEnd,
+  scrollY,
 }: {
   /**
    * A row has been lifted. Surfaced so the sheet this now lives in can stand
@@ -75,6 +77,8 @@ export function QueuePane({
    */
   onDragBegin?: () => void;
   onDragEnd?: () => void;
+  /** The sheet's scroll-awareness. See <Sheet scrollY>. */
+  scrollY?: SharedValue<number>;
 } = {}) {
   const [queue, setQueue] = useState<RNTPTrack[]>(lastQueue);
   const [active, setActive] = useState<number | null>(lastActive);
@@ -191,13 +195,11 @@ export function QueuePane({
         return;
       }
       settleUntil.current = Date.now() + 2000;
-      // Optimistic: keep the played tracks, splice in the reordered tail — but
-      // one frame later. ScaleDecorator is still animating the lifted row from
-      // 1.03 back to 1 at this point, and swapping the data underneath it is
-      // what made the row jump at the very end of a drop.
-      requestAnimationFrame(() =>
-        setQueue(prev => [...prev.slice(0, activeIdx + 1), ...data]),
-      );
+      // Optimistic, and SYNCHRONOUS. DraggableFlatList's release animation
+      // assumes the list already shows the new order the instant the finger
+      // lifts; deferring this by a frame painted the OLD order once, so the row
+      // snapped back to where it came from and then jumped to the drop point.
+      setQueue(prev => [...prev.slice(0, activeIdx + 1), ...data]);
       const ok = await moveQueueItem(activeIdx + 1 + from, activeIdx + 1 + to);
       if (!ok) {
         settleUntil.current = 0;
@@ -211,7 +213,10 @@ export function QueuePane({
     ({item, getIndex, drag, isActive}: RenderItemParams<RNTPTrack>) => {
       const j = getIndex() ?? 0;
       return (
-        <ScaleDecorator activeScale={1.03}>
+        // activeScale 1: the lift is carried by the shadow. A 3% scale is
+        // barely visible going up and is the only thing still animating on the
+        // way down, where it reads as the row settling twice.
+        <ScaleDecorator activeScale={1}>
           <Row
             track={item}
             onPress={() => jump(activeIdx + 1 + j)}
@@ -296,6 +301,13 @@ export function QueuePane({
           offset: ROW_H * i,
           index: i,
         })}
+        // Tells the sheet above where this list is, so it only starts to
+        // follow the finger once there is nothing left to scroll.
+        onScrollOffsetChange={off => {
+          if (scrollY) {
+            scrollY.value = off;
+          }
+        }}
         activationDistance={12}
         autoscrollThreshold={72}
         containerStyle={styles.listBox}

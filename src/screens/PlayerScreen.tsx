@@ -234,6 +234,9 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   /** True while a queue row is lifted — the sheet's own drag stands down, or it
    *  wins a 12px-vs-12px tie it has no business winning. */
   const [rowDragging, setRowDragging] = useState(false);
+  /** Where the queue list is scrolled to, so the sheet knows when the pull
+   *  belongs to it and not to the list. */
+  const queueScrollY = useSharedValue(0);
   const [repeat, setRepeatState] = useState<RepeatMode>(RepeatMode.Off);
   // From the player module, not local state — the playlist screen toggles the
   // same thing, and two copies of this flag is why the icon went stale.
@@ -1026,6 +1029,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           open={queueOpen}
           onClose={() => setQueueOpen(false)}
           dragEnabled={!rowDragging}
+          scrollY={queueScrollY}
           style={styles.queueSheet}>
           {/* Title, subtitle and the pinned now-playing row all live INSIDE
               QueuePane — it is the thing that knows what is playing, and the
@@ -1035,6 +1039,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           <QueuePane
             onDragBegin={() => setRowDragging(true)}
             onDragEnd={() => setRowDragging(false)}
+            scrollY={queueScrollY}
           />
         </Sheet>
       </Animated.View>
