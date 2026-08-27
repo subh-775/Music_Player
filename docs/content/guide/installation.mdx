@@ -8,6 +8,12 @@ Open **[the latest release](https://github.com/subh-775/Music_Player/releases/la
 
 Downloading on a computer and transferring the file works exactly as well. There is one file; there are no variants to choose between.
 
+<Note title="64-bit phones only">
+  The APK is built for **arm64-v8a**, which is every Android phone sold in roughly the last decade. Older 32-bit handsets (`armeabi-v7a`), x86 Chromebooks and most emulators cannot install it — Android will refuse the file rather than install a broken app.
+
+  This is a size decision, not an oversight: the app embeds a full CPython runtime, and shipping a second architecture would roughly double the download for everyone to serve a shrinking minority.
+</Note>
+
 ## 2. Allow the install
 
 Tap the downloaded file. The first time, Android will say your browser or file manager is not allowed to install apps.

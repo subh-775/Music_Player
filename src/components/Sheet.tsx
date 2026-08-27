@@ -17,12 +17,18 @@
  * a translate on views React has already made, and closing is the same in
  * reverse with nothing to tear down.
  */
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   BackHandler,
-  Dimensions,
   Pressable,
   StyleSheet,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
   type ViewStyle,
@@ -39,17 +45,82 @@ import Animated, {
 import {C, S} from '../theme';
 
 /**
- * How far down "gone" is. The LONGEST edge, not the height.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Every sheet in the app renders HERE, not where it is written.
  *
- * Read once at module load, which is fine only because max(w, h) is the same
- * number in both orientations — a plain `height` read is not. The activity
- * handles rotation itself (configChanges lists `orientation`), so a portrait
- * height captured in landscape used to leave the sheet's closed position
- * halfway up a portrait screen, with the sheet still visible.
+ * `zIndex` in React Native only orders siblings inside one parent. A sheet
+ * belonging to LibraryScreen lives inside the tabs container; the mini player
+ * and the tab bar are siblings of that container which paint after it. No
+ * zIndex on the sheet can cross that boundary — so the library's long-press
+ * menu was structurally incapable of covering the mini player, and the same
+ * went for the collection menu and every panel inside Settings.
+ *
+ * Hoisting the state for each of those sheets up to App would work and would be
+ * a large, error-prone move of ownership. This does the same job by moving the
+ * ELEMENTS instead: a Sheet publishes its rendered tree to this registry and
+ * renders nothing in place, and <SheetHost /> — mounted once at the app root,
+ * above everything — renders whatever is published. Owners keep their state,
+ * their props and their callbacks exactly as they are.
+ *
+ * Hooks still run in the owning component (they are called there); only the
+ * output moves. That matters for the gesture and the shared values, which stay
+ * bound to the sheet that created them.
  */
-const HIDE_Y = (({width, height}) => Math.max(width, height))(
-  Dimensions.get('window'),
-);
+type Entry = {id: number; node: React.ReactNode};
+
+let entries: Entry[] = [];
+const hostSubs = new Set<() => void>();
+
+function notifyHost(): void {
+  hostSubs.forEach(fn => fn());
+}
+
+function publish(id: number, node: React.ReactNode): void {
+  const at = entries.findIndex(e => e.id === id);
+  entries =
+    at >= 0
+      ? [...entries.slice(0, at), {id, node}, ...entries.slice(at + 1)]
+      : [...entries, {id, node}];
+  notifyHost();
+}
+
+function unpublish(id: number): void {
+  const next = entries.filter(e => e.id !== id);
+  if (next.length !== entries.length) {
+    entries = next;
+    notifyHost();
+  }
+}
+
+function subscribeHost(fn: () => void): () => void {
+  hostSubs.add(fn);
+  return () => {
+    hostSubs.delete(fn);
+  };
+}
+
+let sheetSeq = 0;
+
+/**
+ * Mount ONCE, at the app root, after everything a sheet must cover.
+ *
+ * Its zIndex is above the player (30) and the drawer (45) deliberately: a sheet
+ * is always the most recent thing the user asked for.
+ */
+export function SheetHost() {
+  const list = useSyncExternalStore(
+    subscribeHost,
+    () => entries,
+    () => entries,
+  );
+  return (
+    <View style={styles.portal} pointerEvents="box-none">
+      {list.map(e => (
+        <React.Fragment key={e.id}>{e.node}</React.Fragment>
+      ))}
+    </View>
+  );
+}
 
 /**
  * Decelerate in, accelerate out — never the default.
@@ -89,6 +160,17 @@ export function Sheet({
    */
   dragEnabled?: boolean;
 }) {
+  // The live window, not a module-load snapshot: a fold opening or a rotation
+  // changes it, and a stale "gone" position leaves the sheet parked halfway up
+  // the screen.
+  const {width, height} = useWindowDimensions();
+  const HIDE_Y = Math.max(width, height);
+
+  const id = useRef(0);
+  if (!id.current) {
+    id.current = ++sheetSeq;
+  }
+
   const y = useSharedValue(HIDE_Y);
   /**
    * Mounted from the first open, and never unmounted again.
@@ -115,7 +197,7 @@ export function Sheet({
       return;
     }
     y.value = withTiming(open ? 0 : HIDE_Y, open ? IN : OUT);
-  }, [open, present, y]);
+  }, [open, present, y, HIDE_Y]);
 
   /**
    * The sheet's own height, so the scrim can fade over the distance the sheet
@@ -177,11 +259,7 @@ export function Sheet({
     opacity: interpolate(y.value, [0, sheetH.value], [1, 0], 'clamp'),
   }));
 
-  if (!present) {
-    return null;
-  }
-
-  return (
+  const tree = !present ? null : (
     // 'none' while closed, because the host is no longer unmounted between
     // opens — a parked sheet must not sit in front of the app eating touches.
     <View style={styles.host} pointerEvents={open ? 'box-none' : 'none'}>
@@ -199,6 +277,22 @@ export function Sheet({
       </GestureDetector>
     </View>
   );
+
+  // Published on EVERY render — the tree contains this sheet's own children,
+  // which change whenever the owner re-renders. No dependency array, on
+  // purpose.
+  useEffect(() => {
+    publish(id.current, tree);
+  });
+
+  // And withdrawn when the owner goes away, so a screen that unmounts with its
+  // menu open cannot leave the menu behind.
+  useEffect(() => {
+    const mine = id.current;
+    return () => unpublish(mine);
+  }, []);
+
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -210,6 +304,9 @@ const styles = StyleSheet.create({
   // fix with zIndex at all, because the player was a Dialog window in a
   // different hierarchy — see the note at the top of PlayerScreen's render.
   host: {...StyleSheet.absoluteFillObject, zIndex: 40},
+  // The layer every sheet is actually drawn in. Above the player (30), the
+  // drawer (45) and the floating bars (which have none), below the toaster.
+  portal: {...StyleSheet.absoluteFillObject, zIndex: 50},
   scrim: {...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)'},
   sheet: {
     position: 'absolute',

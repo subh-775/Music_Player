@@ -1138,6 +1138,94 @@ than being closed out from under the user.
 spirit: they sit above everything the pin list can reorder, and a row pinned to
 the top with no mark on it reads as an accident.
 
+## Round 8 — audit round 7, and three of its diagnoses corrected
+
+**Sheets could not cover the bars, and no zIndex was ever going to fix it.**
+`zIndex` orders siblings inside one parent; a sheet owned by LibraryScreen lives
+inside the tabs container, and the bars are siblings of that container painted
+after it. Hoisting each screen's sheet state up to App would work and would move
+a lot of ownership for a layering problem, so `Sheet` moves the ELEMENTS
+instead: it publishes its rendered tree to a registry and renders nothing in
+place, and `<SheetHost />` at the app root draws whatever is published, above
+everything. Owners keep their state and their props exactly as they were. Hooks
+still run in the owning component — only the output moves.
+
+**`addToQueue` was the one mutation that did not end at `refreshEngineMirror`,
+and two separate reports came out of that.** The queue sheet never repainted
+after "add to queue" (queueListeners fire only from there), and pressing next
+published the wrong song: `publishStep` reads `engineQueue[activeIndex + 1]` to
+show the next title immediately, so it announced whatever was next BEFORE the
+insert and then snapped to the real one when the engine's event landed.
+
+**The audit's fix for the drop flicker would not have worked, twice over.** It
+proposed backfilling `_qid` inside `refreshEngineMirror` and dropping the
+keyExtractor fallback. But QueueScreen reads `TrackPlayer.getQueue()` itself, so
+the mirror's ids never reach it; and `getQueue()` returns fresh objects each
+call, so a backfilled id would be NEW on every refresh — key churn on every
+repaint, worse than what it replaced. Dropping the fallback would then leave
+adopted queues with undefined keys. What shipped instead numbers the
+OCCURRENCES of each song: a track that appears once keeps `id#0` wherever it is
+dragged, and two copies of one song swap numbers when reordered — swapping the
+keys of two identical rows is invisible by definition. The optimistic `setQueue`
+also moved behind a `requestAnimationFrame`, because it was landing while
+ScaleDecorator was still animating the lifted row back to 1.
+
+**Crossfade: the dip and the doubling were the same missing distinction.**
+`startCrossfade` opened the stream AND started it, and resolved when
+`prepareAsync()` was *called*, not when it finished. JS took that `true` as
+"the overlap is playing" and faded the outgoing track down against silence —
+that is the dip. When preparation finally landed after the boundary, the overlap
+started at 0:00 on a track RNTP had already advanced to — that is the doubling.
+It is two calls now: `prepareCrossfade(url)` while the outgoing track still has
+`span + 4` seconds, and `startCrossfade(durationMs)` at the boundary, which
+returns FALSE if nothing is ready. On false, nothing fades at all: a clean cut
+sounds like a decision, a dip sounds broken.
+
+Two more things went with it. The overlap prefers the next track's LOCAL file
+when there is one — instant to open, no network, and it stops the same song
+being pulled through the single-process proxy twice. And the start is a one-shot
+timer at the exact boundary rather than the 1s watcher tick: on a nine-second
+fade a tick-aligned start is up to a second late, an 11% error that lands
+differently every track, which is most of why it felt inconsistent even when it
+worked.
+
+**Sleep timer moved to the player** — a now-action taken with the phone
+face-down belongs next to the music, not two gestures away in the drawer — and
+it is tinted while armed, which is the only way to know it is running without
+opening the sheet. Help gets `ArrowUpRight`, because a chevron promises another
+page inside the app and it opens the documentation site.
+
+**Smaller, all from the audit:** the bottom row stopped fading during an artwork
+swipe (right for a passive grip, wrong for two live controls); the capsule is
+one target that flips rather than two segments, half of which are always a
+no-op; timestamps sit 2px under the bar in `C.text` at 700 with the opacity
+knocked back; the mini player's progress line runs edge to edge along the very
+bottom instead of level with the artwork's lower edge; controls are 42px with
+bigger glyphs; select-all is an icon with an accessibility label carrying what
+the words used to.
+
+**Kept against the audit's advice:** the pin stays on Liked Songs and Downloads.
+The audit is right that it says nothing about ordering — they are forced to the
+top regardless — but it was asked for, and "these two are pinned" is true. The
+glyph is now an upright pushpin drawn here rather than lucide's 45° `Pin`, which
+at 12px filled reads as a paper plane.
+
+**Cross-device, decided rather than drifted into:** arm64-v8a only, and the
+Installation page now says so — 32-bit handsets, x86 Chromebooks and most
+emulators cannot install this APK, and a second ABI would roughly double the
+download for everyone because of the embedded CPython. `POST_NOTIFICATIONS` is
+requested at boot on Android 13+; without it the media notification never
+appears, which costs the lock-screen transport and makes the app look killable.
+`Sheet` reads the live window instead of a module-load snapshot, so a fold or a
+rotation cannot leave it parked halfway up the screen. And a failed API call now
+probes `/health` and says "the music engine stopped" rather than blaming the
+network — reporting only, because restarting Flask under a running app is not
+something to attempt blind.
+
+**Still open, deliberately:** the release keystore. Rotating it forces every
+existing user to uninstall and reinstall, so it stays a decision made at a
+moment of the user's choosing.
+
 ### Standing constraints
 - No hardcoding for one device; must work across Android phones.
 - Release is **debug-keystore signed** and the keystore is committed, so the

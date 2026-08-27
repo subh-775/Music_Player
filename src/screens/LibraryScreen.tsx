@@ -21,8 +21,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ImagePlus, Pencil, Pin, Plus, Trash2} from 'lucide-react-native';
+import {ImagePlus, Pencil, Plus, Trash2} from 'lucide-react-native';
 import {C, S, T} from '../theme';
+import {PinGlyph} from '../components/PinGlyph';
 import {getLocalLibrary, type Track} from '../backend';
 import {useLikes} from '../store';
 import {useFollowedArtists} from '../artists';
@@ -345,12 +346,9 @@ export const LibraryScreen = React.memo(function LibraryScreen({
                   {(isPinned(idOf(item)) ||
                     item.kind === 'liked' ||
                     item.kind === 'downloads') && (
-                    <Pin
-                      size={12}
-                      color={DOWNLOAD_TINT}
-                      fill={DOWNLOAD_TINT}
-                      style={styles.pin}
-                    />
+                    <View style={styles.pin}>
+                      <PinGlyph size={12} color={DOWNLOAD_TINT} />
+                    </View>
                   )}
                   <Text style={styles.rowSub} numberOfLines={1}>
                     {collectionSubtitle(item)}
@@ -379,7 +377,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
                 style={styles.sheetRow}
                 activeOpacity={0.7}
                 onPress={() => doPin(menuFor)}>
-                <Pin size={20} color={C.sub} />
+                <PinGlyph size={19} color={C.sub} />
                 <Text style={styles.sheetLabel}>
                   {isPinned(idOf(menuFor)) ? 'Unpin' : 'Pin'}
                 </Text>

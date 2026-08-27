@@ -24,6 +24,7 @@ import {
 import {
   ArrowDownToLine,
   CheckSquare,
+  CheckSquare2,
   ChevronLeft,
   Heart,
   ImagePlus,
@@ -33,6 +34,7 @@ import {
   Play,
   Shuffle,
   Square,
+  SquareX,
   Trash2,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
@@ -382,10 +384,24 @@ export function CollectionScreen({
         {selecting ? (
           <>
             <Text style={styles.barTitle}>{selected.size} selected</Text>
-            <TouchableOpacity onPress={toggleAll} style={styles.selectAll}>
-              <Text style={styles.selectAllText}>
-                {allSelected ? 'Clear' : 'Select all'}
-              </Text>
+            {/* An icon, not a word — the header beside it already says
+                "n selected", so this only has to say what tapping does. The
+                accessibility label carries the meaning that the text used to,
+                because an unlabelled glyph is invisible to a screen reader in a
+                way the words never were. */}
+            <TouchableOpacity
+              onPress={toggleAll}
+              hitSlop={10}
+              style={styles.selectAll}
+              accessibilityRole="button"
+              accessibilityLabel={
+                allSelected ? 'Clear the selection' : 'Select all songs'
+              }>
+              {allSelected ? (
+                <SquareX size={22} color={C.accent} />
+              ) : (
+                <CheckSquare2 size={22} color={C.accent} />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               onPress={deleteSelected}
@@ -701,8 +717,7 @@ const styles = StyleSheet.create({
   },
   barBtn: {padding: 4},
   barTitle: {...T.rowTitle, color: C.text, flex: 1, fontSize: 17},
-  selectAll: {paddingHorizontal: 10, paddingVertical: 6},
-  selectAllText: {...T.sub, color: C.accent, fontWeight: '700'},
+  selectAll: {paddingHorizontal: 8, paddingVertical: 6},
   // The bars at the foot of the app float OVER the page now, so a list has to
   // end above them or its last row is permanently behind one. See src/layout.ts.
   list: {paddingBottom: BOTTOM_INSET},

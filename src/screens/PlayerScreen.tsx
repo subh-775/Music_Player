@@ -50,6 +50,7 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Timer,
 } from 'lucide-react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Svg, {Rect} from 'react-native-svg';
@@ -89,6 +90,8 @@ import {Seekbar} from '../components/Seekbar';
 import {SeekPeek} from '../components/SeekPeek';
 import {QueuePane} from './QueueScreen';
 import {Sheet} from '../components/Sheet';
+import {SleepSheet} from '../components/SleepSheet';
+import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {toast} from '../toast';
 
 /**
@@ -225,6 +228,9 @@ export const PlayerScreen = React.memo(function PlayerScreen({
 
   const [pane, setPane] = useState<Pane>('song');
   const [queueOpen, setQueueOpen] = useState(false);
+  const [sleepOpen, setSleepOpen] = useState(false);
+  /** Non-empty while a timer is running — 'in 24 min', 'end of track'. */
+  const sleepArmed = sleepLabel(useSleepTimer());
   /** True while a queue row is lifted — the sheet's own drag stands down, or it
    *  wins a 12px-vs-12px tie it has no business winning. */
   const [rowDragging, setRowDragging] = useState(false);
@@ -481,12 +487,6 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       ),
     [],
   );
-
-  /** The grip steps aside while the artwork is being swiped — during a skip the
-   *  eye belongs on the cover, not on an affordance for something else. */
-  const gripStyle = useAnimatedStyle(() => ({
-    opacity: 1 - Math.min(1, Math.abs(slide.value) / 120),
-  }));
 
   const commit = useCallback(
     (to: 'next' | 'prev') => {
@@ -965,22 +965,50 @@ export const PlayerScreen = React.memo(function PlayerScreen({
               the screen still opens the sheet — which is where a thumb reaches
               for it anyway. */}
           <GestureDetector gesture={queuePull}>
-            <Animated.View style={[styles.bottomRow, gripStyle]}>
+            {/* No longer fades with the artwork swipe. That was right when
+                this row was a grip and the words "Your queue" — a passive
+                affordance that should get out of the way — and wrong now that
+                it holds two live controls. Dimming a button mid-swipe reads as
+                the screen reloading. */}
+            <View style={styles.bottomRow}>
               <PaneSwitch
                 pane={pane}
                 onPick={setPane}
                 lyricsDead={!lyricsState.available}
               />
-              <TouchableOpacity
-                onPress={() => setQueueOpen(true)}
-                hitSlop={14}
-                activeOpacity={1}
-                accessibilityRole="button"
-                accessibilityLabel="Open the queue"
-                style={styles.queueBtn}>
-                <QueueGlyph size={22} color={C.text} />
-              </TouchableOpacity>
-            </Animated.View>
+              <View style={styles.bottomRight}>
+                {/* Sleep timer, next to the thing it will stop. It was in the
+                    drawer, which is two gestures away from the music and the
+                    wrong place for something you reach for with the phone
+                    already face-down. Tinted when armed — otherwise the only
+                    way to know it is running is to go and look. */}
+                <TouchableOpacity
+                  onPress={() => setSleepOpen(true)}
+                  hitSlop={14}
+                  activeOpacity={1}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    sleepArmed ? `Sleep timer: ${sleepArmed}` : 'Sleep timer'
+                  }
+                  style={styles.queueBtn}>
+                  <Timer
+                    size={21}
+                    color={sleepArmed ? C.accent : C.text}
+                    strokeWidth={2}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => setQueueOpen(true)}
+                  hitSlop={14}
+                  activeOpacity={1}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open the queue"
+                  style={styles.queueBtn}>
+                  <QueueGlyph size={22} color={C.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
           </GestureDetector>
         </View>
 
@@ -992,6 +1020,8 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           inside the player's own animated transform and its display:none pane
           stack — it sits in a sheet of its own, mounted only once opened.
         */}
+        <SleepSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
+
         <Sheet
           open={queueOpen}
           onClose={() => setQueueOpen(false)}
@@ -1065,30 +1095,48 @@ function PaneSwitch({
   const songOn = pane === 'song';
   const lyricsOn = pane === 'lyrics' && !lyricsDead;
 
+  /**
+   * One target, not two.
+   *
+   * A two-state switch has one meaning — the other one — so hitting the
+   * segment you are already on to no effect, or missing a 40px half, is all
+   * cost and no information. `pointerEvents="none"` on the icons is what lets a
+   * tap squarely on the inactive glyph reach this handler.
+   */
+  const flip = () => {
+    if (pane !== 'song') {
+      onPick('song');
+    } else if (lyricsDead) {
+      toast('No lyrics available for this song');
+    } else {
+      onPick('lyrics');
+    }
+  };
+
   return (
-    <View style={styles.capsule}>
-      <Animated.View style={[styles.capsuleThumb, thumb]} />
-      <TouchableOpacity
-        style={styles.seg}
-        activeOpacity={0.8}
-        onPress={() => onPick('song')}>
+    <TouchableOpacity
+      style={styles.capsule}
+      activeOpacity={0.85}
+      hitSlop={8}
+      accessibilityRole="switch"
+      accessibilityState={{checked: pane === 'lyrics'}}
+      accessibilityLabel={pane === 'song' ? 'Show lyrics' : 'Show the artwork'}
+      onPress={flip}>
+      <Animated.View
+        style={[styles.capsuleThumb, thumb]}
+        pointerEvents="none"
+      />
+      <View style={styles.seg} pointerEvents="none">
         <Disc3 size={16} color={songOn ? C.bg : C.sub} strokeWidth={2.2} />
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.seg}
-        activeOpacity={0.8}
-        onPress={() =>
-          lyricsDead
-            ? toast('No lyrics available for this song')
-            : onPick('lyrics')
-        }>
+      </View>
+      <View style={styles.seg} pointerEvents="none">
         <Quote
           size={16}
           color={lyricsOn ? C.bg : lyricsDead ? C.faint : C.sub}
           strokeWidth={2.2}
         />
-      </TouchableOpacity>
-    </View>
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -1436,6 +1484,7 @@ const styles = StyleSheet.create({
   // No ring, no fill, no press state: the capsule at the other end of this row
   // is the only lit thing down here, and two lit things is a competition.
   queueBtn: {padding: 6},
+  bottomRight: {flexDirection: 'row', alignItems: 'center', gap: 2},
   /**
    * A DEFINITE height, not a maxHeight — and this is what makes the queue
    * scroll.

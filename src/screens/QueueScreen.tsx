@@ -144,6 +144,36 @@ export function QueuePane({
   );
   const nowPlaying = active == null ? null : queue[active];
 
+  /**
+   * A key per row, and it has to hold still across a reorder.
+   *
+   * `_qid` (player.ts) is the real answer: one id per queue INSTANCE, so five
+   * copies of a song are five distinct rows. But a queue adopted from a service
+   * that outlived the JS context carries none, and the fallback then decides
+   * how those rows behave. An index-based one is the worst possible choice —
+   * every row that moves gets a new key, so React unmounts and remounts it, and
+   * the new <Image> and fresh layout show up as a pop exactly as the drop
+   * settles.
+   *
+   * This numbers the OCCURRENCES of each song instead. A track that appears
+   * once keeps `id#0` wherever it is dragged to; two copies of one song swap
+   * their numbers when reordered, and swapping the keys of two identical rows
+   * is invisible by definition.
+   */
+  const rowKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return upcoming.map(t => {
+      const qid = (t as {_qid?: string})._qid;
+      if (qid) {
+        return qid;
+      }
+      const base = String(t.id ?? t.url ?? 'x');
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      return `${base}#${n}`;
+    });
+  }, [upcoming]);
+
   const firstRecommended = useMemo(
     () => upcoming.findIndex(t => sourceTrackFor(t)?._autoplay),
     [upcoming],
@@ -161,8 +191,13 @@ export function QueuePane({
         return;
       }
       settleUntil.current = Date.now() + 2000;
-      // Optimistic: keep the played tracks, splice in the reordered tail.
-      setQueue(prev => [...prev.slice(0, activeIdx + 1), ...data]);
+      // Optimistic: keep the played tracks, splice in the reordered tail — but
+      // one frame later. ScaleDecorator is still animating the lifted row from
+      // 1.03 back to 1 at this point, and swapping the data underneath it is
+      // what made the row jump at the very end of a drop.
+      requestAnimationFrame(() =>
+        setQueue(prev => [...prev.slice(0, activeIdx + 1), ...data]),
+      );
       const ok = await moveQueueItem(activeIdx + 1 + from, activeIdx + 1 + to);
       if (!ok) {
         settleUntil.current = 0;
@@ -247,14 +282,7 @@ export function QueuePane({
 
       <DraggableFlatList
         data={upcoming}
-        // _qid, not id. `id` is title+artist, so five copies of one song in the
-        // queue are five rows claiming one key — which is what made several
-        // rows lift together and sent a drop to the wrong index. The
-        // index-suffixed fallback is for tracks restored from a session saved
-        // by an earlier process, which carry no _qid.
-        keyExtractor={(t, i) =>
-          String((t as {_qid?: string})._qid ?? `${t.id ?? t.url ?? 'x'}#${i}`)
-        }
+        keyExtractor={(_t, i) => rowKeys[i] ?? String(i)}
         renderItem={renderItem}
         onDragBegin={() => {
           dragging.current = true;

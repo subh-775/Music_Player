@@ -71,10 +71,12 @@ const saved = createStore<Collection[]>('mp.savedCollections.v1', [], raw =>
 export const hydrateSavedCollections = saved.hydrate;
 
 /** Stable identity for something saved from a source. */
-export function savedId(c: {source?: string; name?: string; artist?: string}): string {
-  return String(
-    c.source || `${c.name || ''}|${c.artist || ''}`,
-  ).toLowerCase();
+export function savedId(c: {
+  source?: string;
+  name?: string;
+  artist?: string;
+}): string {
+  return String(c.source || `${c.name || ''}|${c.artist || ''}`).toLowerCase();
 }
 
 export function isSaved(c: Collection): boolean {

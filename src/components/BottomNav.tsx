@@ -58,9 +58,9 @@ const styles = StyleSheet.create({
     // edge that says "the page stops here", and it does not — it carries on
     // behind the bar, which is now something you can faintly see. The fade
     // above (BodyFade in App.tsx) is what stops that reading as clutter.
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
-  tab: {flex: 1, alignItems: 'center', gap: 4, paddingVertical: 9},
+  tab: {flex: 1, alignItems: 'center', gap: 4, paddingVertical: 8},
   label: {
     fontSize: 10,
     letterSpacing: 0.3,

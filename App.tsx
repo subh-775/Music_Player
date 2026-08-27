@@ -2,6 +2,8 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BackHandler,
   Linking,
+  PermissionsAndroid,
+  Platform,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -24,6 +26,7 @@ import {ArtistScreen} from './src/screens/ArtistScreen';
 import {PlayerScreen} from './src/screens/PlayerScreen';
 import {PlayerBar} from './src/components/PlayerBar';
 import {BottomNav, type Tab} from './src/components/BottomNav';
+import {SheetHost} from './src/components/Sheet';
 import {Toaster} from './src/components/Toaster';
 import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
@@ -40,7 +43,6 @@ import {
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
-import {SleepSheet} from './src/components/SleepSheet';
 import {resetDrawer, settleDrawer} from './src/drawer';
 import {C} from './src/theme';
 import {
@@ -113,7 +115,6 @@ function Shell() {
    *  both point at the one component. */
   const [eqOpen, setEqOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
-  const [sleepOpen, setSleepOpen] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
@@ -151,6 +152,7 @@ function Shell() {
     // alive — if `adb logcat -s MPJS` shows nothing at all, the problem is the
     // logging, not the thing being investigated.
     diag('boot', `Music_Player ${appVersion || '?'} starting`);
+    askForNotifications();
     hydrate().then(applyAudioEffects);
     // Boot the engine, then restore the last session so the mini player is
     // there on reopen (same song, paused, at the timestamp you left).
@@ -521,8 +523,6 @@ function Shell() {
         // to return to where the drawer was opened, not drop you into a
         // Settings list you never asked to see.
         setEqOpen(true);
-      } else if (dest === 'sleep') {
-        setSleepOpen(true);
       } else if (dest === 'help') {
         // The one drawer item that is not an overlay: it leaves the app. Handled
         // HERE rather than inside Sidebar so every destination is still resolved
@@ -730,6 +730,11 @@ function Shell() {
         <BottomNav active={tab} onChange={switchTab} />
       </View>
 
+      {/* Where every <Sheet> in the app is actually drawn — see Sheet.tsx.
+          Mounted after the bars and given a zIndex above the player, so a menu
+          raised from any screen covers all of it. */}
+      <SheetHost />
+
       <TrackActionSheet
         track={sheetTrack}
         from={sheetFrom}
@@ -759,8 +764,6 @@ function Shell() {
         />
       )}
 
-      <SleepSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
-
       <UpdateModal />
 
       {/* Above everything, and the real UI is already mounted and painted
@@ -788,6 +791,30 @@ function Shell() {
       )}
     </SafeAreaView>
   );
+}
+
+/**
+ * Ask for notifications on Android 13+.
+ *
+ * The permission is declared in the manifest, which was enough before API 33
+ * and is not enough now: from 13 it has to be granted at runtime, and until it
+ * is, the media notification never appears. That is not a cosmetic loss — the
+ * notification is the visible half of the foreground service, so on a phone
+ * with an aggressive battery manager the app looks like a candidate for
+ * killing, and there is no lock-screen transport at all.
+ *
+ * Asked once at boot and never insisted on. A refusal is a legitimate answer;
+ * playback still works, and Android will not show the dialog again anyway.
+ */
+function askForNotifications(): void {
+  if (Platform.OS !== 'android' || Number(Platform.Version) < 33) {
+    return;
+  }
+  PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+  ).catch(() => {
+    /* the dialog is a courtesy — never let it break the boot path */
+  });
 }
 
 export default function App(): React.JSX.Element {

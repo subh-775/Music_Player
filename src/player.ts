@@ -34,6 +34,7 @@ import {
 import {
   applyAudioEffects,
   beginCrossfade,
+  prepareCrossfade,
   crossfadePosition,
   crossfadeSupported,
   endCrossfade,
@@ -629,6 +630,15 @@ export async function addToQueue(track: Track): Promise<void> {
   // below the current song left the two lists disagreeing from that point on,
   // and the warm went to whatever happened to be last.
   queueSource = [...queueSource.slice(0, at), track, ...queueSource.slice(at)];
+  // And the ENGINE mirror, which is a different thing again.
+  //
+  // Without this, addToQueue was the one mutation that did not end here, and
+  // two reports followed from it. The open queue sheet never repainted, because
+  // queueListeners fire only from this function. And pressing next published
+  // the wrong song: publishStep reads engineQueue[activeIndex + 1] to show the
+  // next title immediately, so it announced whatever was next BEFORE the
+  // insert and then snapped to the real one when the engine's own event landed.
+  await refreshEngineMirror();
 }
 
 /**
@@ -1160,12 +1170,37 @@ let fadedFor = '';
 let cfActive = false;
 
 /**
+ * The track the overlap has been PREPARED for, and the one-shot that starts it.
+ *
+ * Preparation happens while the outgoing track still has `span + 4` seconds to
+ * run, because opening a live stream through the proxy is not instant, and the
+ * previous design treated "I have called prepareAsync" as "the overlap is
+ * playing".
+ *
+ * The start is a one-shot timer at the exact boundary rather than the 1s
+ * watcher tick. On a nine-second fade a tick-aligned start is up to a second
+ * late — an 11% error that lands differently on every track, which is most of
+ * why the crossfade felt inconsistent even when it worked.
+ */
+let cfPreparedFor = '';
+let cfStartTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelScheduledFade(): void {
+  if (cfStartTimer) {
+    clearTimeout(cfStartTimer);
+    cfStartTimer = null;
+  }
+}
+
+/**
  * Tear down a running crossfade WITHOUT the handoff seek — for a manual skip or
  * stop, where the user is choosing the next track rather than letting the queue
  * flow into it. Restores full volume so the chosen track isn't left quiet.
  */
 function cancelCrossfade(): void {
   cfActive = false;
+  cancelScheduledFade();
+  cfPreparedFor = '';
   endCrossfade();
   // ALWAYS restore full volume, natively — a fade-down that never reached its
   // handoff (backgrounded mid-fade, the setting toggled off, a pause on the
@@ -1284,42 +1319,70 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       }
       const remaining = duration - position;
 
-      if (remaining <= span && fadedFor !== key) {
-        fadedFor = key;
-        // Ramp the outgoing track DOWN over its final `span` seconds. The
-        // incoming track is put back to full by restoreFullVolume() on the
-        // track change (and by the native ramp's own fail-safe).
-
-        // Real crossfade: start the SECOND stream on the incoming track, rising,
-        // so it overlaps this fade-down. Only if the build supports it and the
-        // next track's stream URL is known; otherwise this degrades to a plain
-        // fade-down with full volume restored on the track change.
-        if (crossfadeSupported && !cfActive && active != null) {
-          try {
-            const q = await TrackPlayer.getQueue();
-            const nextUrl = q[active + 1]?.url;
-            const repeatOne =
-              (await TrackPlayer.getRepeatMode()) === RepeatMode.Track;
-            if (
-              nextUrl &&
-              !repeatOne &&
-              (await beginCrossfade(String(nextUrl), Math.round(span * 1000)))
-            ) {
-              cfActive = true;
-            }
-          } catch {
-            /* couldn't resolve the next stream — plain fade it is */
+      // ── 1. Buffer the incoming track, well before it is needed ────────
+      //
+      // Silent, and not a commitment: if the fade never happens the prepared
+      // player is simply dropped. What it buys is certainty at the boundary —
+      // the difference between an overlap that can start on time and one that
+      // is still opening a socket.
+      if (
+        crossfadeSupported &&
+        !cfActive &&
+        active != null &&
+        remaining <= span + 4 &&
+        cfPreparedFor !== key &&
+        fadedFor !== key
+      ) {
+        cfPreparedFor = key;
+        try {
+          const repeatOne =
+            (await TrackPlayer.getRepeatMode()) === RepeatMode.Track;
+          // The LOCAL file when there is one. A downloaded next track opens in
+          // milliseconds and costs no network — and it stops the same song
+          // being pulled through the single-process proxy twice, once for this
+          // overlap and once for RNTP a moment later.
+          const nextSource = queueSource[active + 1];
+          const q = await TrackPlayer.getQueue();
+          const nextUrl = nextSource?.file_path
+            ? `file://${nextSource.file_path}`
+            : q[active + 1]?.url;
+          if (!repeatOne && nextUrl) {
+            await prepareCrossfade(String(nextUrl));
           }
+        } catch {
+          /* nothing to prepare — the plain path below still works */
         }
+      }
 
-        // The ramp itself runs NATIVELY (Handler, not a JS timer) so it cannot
-        // stall half way down when the app is backgrounded, and it restores
-        // full volume by itself once the boundary passes.
-        fadeOutPlayer(Math.round(span * 1000));
-      } else if (remaining > span + 1 && fadedFor === key) {
+      // ── 2. Start it AT the boundary, not on the next tick ──────────────
+      if (remaining <= span + 1 && fadedFor !== key && !cfStartTimer) {
+        fadedFor = key;
+        const ms = Math.round(span * 1000);
+        // remaining - span is how long until the fade should begin. Usually a
+        // few hundred milliseconds; never negative.
+        const delay = Math.max(0, Math.round((remaining - span) * 1000));
+        cfStartTimer = setTimeout(() => {
+          cfStartTimer = null;
+          (async () => {
+            const overlapping =
+              crossfadeSupported && !cfActive && (await beginCrossfade(ms));
+            cfActive = overlapping;
+            if (overlapping) {
+              // The ramp runs NATIVELY (Handler, not a JS timer) so it cannot
+              // stall half way down when the app is backgrounded, and it
+              // restores full volume by itself once the boundary passes.
+              fadeOutPlayer(ms);
+            }
+            // And if it is NOT overlapping: no fade at all. Fading into a
+            // silence nothing is filling is the worst of both — it was the
+            // audible dip, and it happened every time the stream was slow to
+            // open. A plain cut sounds like a decision; a dip sounds broken.
+          })().catch(() => {});
+        }, delay);
+      } else if (remaining > span + 2 && fadedFor === key) {
         // Seeked backwards out of the fade zone — cancel it and go back to full.
         fadedFor = '';
-        cancelCrossfade(); // drops the overlap AND restores volume natively
+        cancelCrossfade(); // drops the overlap, the schedule AND the volume
       }
     } catch {
       /* engine not up */
