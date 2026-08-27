@@ -48,7 +48,7 @@ export const SIDEBAR = [
       {text: 'The Queue', link: '/guide/queue'},
       {text: 'Equalizer', link: '/guide/equalizer'},
       {text: 'Lyrics', link: '/guide/lyrics'},
-      {text: 'Spotify Import', link: '/guide/spotify-import'},
+      {text: 'Import from Spotify', link: '/guide/spotify-import'},
       {text: 'Your Library', link: '/guide/library'},
       {text: 'Downloads & Offline', link: '/guide/downloads'},
     ],

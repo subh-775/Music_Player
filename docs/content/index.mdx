@@ -1,53 +1,46 @@
-import {EqDemo} from '../src/demos.jsx';
+import {AppMark} from '../src/demos.jsx';
 
 <section className="hero">
   <div>
-    <span className="hero-eyebrow"><b>Android</b> APK from GitHub Releases</span>
+    <span className="hero-eyebrow">For Android</span>
 
     <h1>One search.<br />Three catalogues.<br /><em>One list.</em></h1>
 
     <p className="hero-lede">
       Fix_Music searches JioSaavn, SoundCloud and YouTube together and merges
-      the results into a single list. A song that exists in more than one place
-      appears once — the others stay on as fallbacks, so a stream that fails
-      swaps source instead of showing you an error.
+      the results into a single list. A track that exists in more than one
+      place appears once; the remaining sources stay available as fallbacks, so
+      a stream that fails switches source rather than reporting an error.
     </p>
 
     <div className="hero-actions">
-      <a className="btn btn-primary" href="https://github.com/subh-775/Music_Player/releases/latest">Download the APK</a>
-      <a className="btn btn-ghost" href="/guide/introduction">Read the guide</a>
-    </div>
-
-    <div className="stat-row">
-      <div className="stat"><b>3</b><span>sources, one list</span></div>
-      <div className="stat"><b>8</b><span>equalizer bands</span></div>
-      <div className="stat"><b>12s</b><span>max crossfade</span></div>
-      <div className="stat"><b>320</b><span>kbps ceiling</span></div>
+      <a className="btn btn-primary" href="/guide/quick-start">Get started</a>
+      <a className="btn btn-ghost" href="https://github.com/subh-775/Music_Player/releases/latest">Download<span className="ext" aria-hidden="true">↗</span></a>
     </div>
   </div>
 
   <div className="hero-art">
-    <EqDemo />
+    <AppMark />
   </div>
 </section>
 
 <section className="bento">
   <div className="tile tile-wide">
-    <h3>One song, one row</h3>
+    <h3>One track, one row</h3>
     <p>
-      A track that lives on all three sources appears once. The other two stay
-      on as silent backups, so a dead stream swaps source instead of throwing an
-      error at you — and the studio cut outranks the “slowed + reverb” bootleg
-      unless you actually asked for one.
+      A track available on all three sources is listed once. The other two are
+      retained as fallbacks, so an unavailable stream switches source rather
+      than returning an error — and the studio recording is ranked above
+      derivative uploads unless the query asks for one.
     </p>
     <a className="more" href="/guide/finding-music">How search works →</a>
   </div>
 
   <div className="tile">
-    <h3>Built for one thumb</h3>
+    <h3>Designed for one-handed use</h3>
     <p>
-      Swipe the artwork to change song, double-tap to seek, pull up from the
-      bottom for the queue, drag down to put the player away.
+      Swipe the artwork to change track, double-tap to seek, pull up from the
+      bottom of the player for the queue, and drag down to dismiss it.
     </p>
     <a className="more" href="/guide/gestures">Every gesture →</a>
   </div>
@@ -55,47 +48,49 @@ import {EqDemo} from '../src/demos.jsx';
   <div className="tile">
     <h3>Downloads you keep</h3>
     <p>
-      Real files, in a folder you chose, tagged and with artwork embedded. They
-      play in any other app and survive uninstalling this one.
+      Ordinary audio files, written to a folder you choose, tagged and with
+      artwork embedded. They play in any other application and survive
+      uninstalling this one.
     </p>
-    <a className="more" href="/guide/downloads">Downloads & offline →</a>
+    <a className="more" href="/guide/downloads">Downloads and offline →</a>
   </div>
 
   <div className="tile tile-wide">
-    <h3>Sound shaped to your device, not to a spec sheet</h3>
+    <h3>Sound matched to your device, not to a specification</h3>
     <p>
-      Android does not let an app choose its own band frequencies — most phones
-      expose five, some ten, each with its own gain range. The eight-band curve
-      you draw is interpolated onto whatever your handset really has, in log
-      frequency, and clamped to its real limits.
+      Android does not allow an application to choose its own band
+      frequencies — most handsets expose five, some ten, each with its own gain
+      range. The eight-band curve you set is interpolated onto whatever your
+      device actually provides, in log frequency, and clamped to its real
+      limits.
     </p>
-    <a className="more" href="/guide/equalizer">Tune your sound →</a>
+    <a className="more" href="/guide/equalizer">Adjust your sound →</a>
   </div>
 
   <div className="tile">
-    <h3>Paste a Spotify link</h3>
+    <h3>Import from Spotify</h3>
     <p>
-      Any public playlist or album URL becomes a playlist you own, matched
-      against the sources track by track.
+      Any public playlist or album address becomes a playlist you own, matched
+      against the three sources track by track.
     </p>
     <a className="more" href="/guide/spotify-import">Import a playlist →</a>
   </div>
 
   <div className="tile">
-    <h3>Your library stays on your phone</h3>
+    <h3>Your library stays on your device</h3>
     <p>
-      Playlists, liked songs, listening history and settings are written to the
-      app's own storage on the device. Downloads go to a folder you pick,
-      outside app storage, and survive uninstalling.
+      Playlists, liked tracks, listening history and settings are written to the
+      application's own storage on the handset. Downloads are written to a
+      folder you choose, outside application storage, and survive uninstalling.
     </p>
     <a className="more" href="/reference/architecture">Where things are stored →</a>
   </div>
 
   <div className="tile">
-    <h3>Updates itself</h3>
+    <h3>Updates in place</h3>
     <p>
-      Checks GitHub quietly, tells you with a dot, and installs in place — your
-      library untouched.
+      Checks for a new version in the background, indicates one with a dot, and
+      installs over the existing app with your library untouched.
     </p>
     <a className="more" href="/reference/updates">Updates →</a>
   </div>
@@ -105,12 +100,12 @@ import {EqDemo} from '../src/demos.jsx';
 
 ## Start here
 
-Three pages get you playing music:
+Three pages are enough to get you playing music:
 
-1. **[Installation](/guide/installation)** — the APK, and the one Android prompt you have to answer.
+1. **[Installation](/guide/installation)** — how to install the product, and the one Android prompt you have to answer.
 2. **[Quick Start](/guide/quick-start)** — first search to first download, in a few minutes.
-3. **[Gestures](/guide/gestures)** — the part that makes the app feel like it was built for a phone.
+3. **[Gestures](/guide/gestures)** — the controls that are not discoverable by tapping around.
 
-Something not behaving? **[Troubleshooting](/reference/troubleshooting)** answers the questions that actually come up, with the real reason rather than a reassurance.
+If something is not behaving as described, **[Troubleshooting](/reference/troubleshooting)** covers the questions that come up in practice, with the reason rather than a reassurance.
 
 </section>

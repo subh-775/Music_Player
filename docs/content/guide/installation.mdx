@@ -1,15 +1,15 @@
 # Installation
 
-Fix_Music is distributed as an APK from GitHub Releases. It is not on the Play Store, so Android will ask you once for permission to install it — and only once.
+Fix_Music is published on GitHub rather than through the Play Store. Android therefore asks once for permission to install it, and only once.
 
-## 1. Download the APK
+## 1. Download the installer
 
 Open **[the latest release](https://github.com/subh-775/Music_Player/releases/latest)** on the phone itself and download `Music_Player.apk`.
 
 Downloading on a computer and transferring the file works exactly as well. There is one file; there are no variants to choose between.
 
 <Note title="64-bit phones only">
-  The APK is built for **arm64-v8a**, which is every Android phone sold in roughly the last decade. Older 32-bit handsets (`armeabi-v7a`), x86 Chromebooks and most emulators cannot install it — Android will refuse the file rather than install a broken app.
+  The installer is built for **arm64-v8a**, which is every Android phone sold in roughly the last decade. Older 32-bit handsets (`armeabi-v7a`), x86 Chromebooks and most emulators cannot install it — Android will refuse the file rather than install a broken app.
 
   This is a size decision, not an oversight: the app embeds a full CPython runtime, and shipping a second architecture would roughly double the download for everyone to serve a shrinking minority.
 </Note>
@@ -51,14 +51,14 @@ Nothing is requested at install time. Each is asked for at the moment it is firs
 | --- | --- | --- |
 | **Notifications** | First playback | Music still plays; you lose the lock-screen and notification controls |
 | **Storage** | First download | Streaming still works; downloads cannot be written |
-| **Install packages** | An update is ready | In-app updates stop; you can still install a new APK by hand |
+| **Install packages** | An update is ready | In-app updates stop; you can still install a new build by hand |
 
 ## Updating later
 
 Once installed, the app checks for new releases by itself and can download and install them from inside Settings. You will not repeat any of the above.
 
 <Danger title="Never uninstall to update">
-  Install the new APK **over** the old app. Uninstalling deletes your playlists, liked songs and listening history — Android wipes app data on uninstall and there is no way to get it back. The in-app updater always installs over the top, which is the safe path.
+  Install the new build **over** the existing app. Uninstalling deletes your playlists, liked songs and listening history — Android wipes app data on uninstall and there is no way to get it back. The in-app updater always installs over the top, which is the safe path.
 
   Your **downloads** survive either way: they live in your own music folder, outside the app's storage.
 </Danger>
