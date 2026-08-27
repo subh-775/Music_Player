@@ -215,6 +215,7 @@ function Toc({path}) {
           <a
             key={i.id}
             href={`#${i.id}`}
+            title={i.text}
             className={`${i.level === 3 ? 'lvl-3 ' : ''}${active === i.id ? 'on' : ''}`}>
             {i.text}
           </a>
@@ -481,27 +482,10 @@ export default function App() {
         </div>
       )}
 
+      {/* One line. The row of links that used to sit above it repeated the
+          header and the sidebar on every page, which is three places to keep
+          in step and two of them the reader has already seen. */}
       <footer className="foot">
-        <p>
-          <a href={SITE.repo} target="_blank" rel="noreferrer">
-            Source
-          </a>{' '}
-          ·{' '}
-          <a href={SITE.allReleases} target="_blank" rel="noreferrer">
-            Releases
-          </a>{' '}
-          ·{' '}
-          <a href={SITE.issues} target="_blank" rel="noreferrer">
-            Report a problem
-          </a>{' '}
-          ·{' '}
-          <a href="/fair-use">Fair use</a>{' '}
-          ·{' '}
-          <a href="/licence">Licence</a>
-        </p>
-        {/* The affiliation disclaimer belongs on Fair Use, where it is stated
-            once with the reasoning around it. Repeating it under every page of
-            a reference site is noise on 20 pages to make a point on one. */}
         <p>For educational and personal use.</p>
       </footer>
 
