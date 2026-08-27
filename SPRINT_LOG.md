@@ -1435,6 +1435,70 @@ palette measured open in portrait and landscape with no row collision. Every
 text pair clears AA: dark 16.0 / 10.3 / 7.1 with the accent at 11.1; light
 17.0 / 9.4 / 6.2 with the accent at 5.9.
 
+## Round 12 — a new mark and a new name
+
+The application is **Relaxify** now, and its icon is a white DJ on a saturated
+green tile rather than a light-blue disc on navy. Two changes, and between them
+they touched the launcher, the drawer, the startup animation, the front page,
+every documentation page and the README.
+
+**The icon set is generated, not hand-cut.** The master is a flat green square
+with white line art, and every output needs the art separated from that green:
+the adaptive foreground and the monochrome layer have to be art on
+transparency, or the launcher masks a green square out of a green square and
+the tile gets a hard edge the mask was supposed to remove. Alpha comes from
+projecting each pixel onto the green-to-white line — the only thing those
+pixels can be — which recovers real anti-aliased coverage at the edges instead
+of thresholding them into a staircase. Compositing the recovered art back onto
+a flat green also drops the master's compression noise, so the square icons
+have an exactly uniform ground rather than a mottled one.
+
+**The safe zone is 66 of 108dp, and the first attempt used 99.4% of it.** Sized
+to the ink rather than to the master's own padding, the mark landed at 131.2px
+against a 132.0px limit — a hairline, not a margin, and one rounding difference
+in a launcher's mask from touching the edge. It sits at 93% now. The first
+contact sheet I rendered also lied: it masked the full 108dp canvas, when a
+launcher crops to the central 72dp *first*, so every adaptive tile looked far
+smaller than it will actually be. Simulating the crop is what made the sizing
+judgeable at all.
+
+**Renaming the download folder would have emptied everyone's library.**
+`Downloads/Fix_Spotify/music` still carried the *predecessor's* name, which on
+an app called Relaxify is a loose end a user finds within a day. But
+`scan_local_downloads()` rebuilds the offline library by walking that folder and
+reading the tags out of the files in it — so changing the constant would have
+left every already-downloaded song on the phone and invisible to the app. An
+install that already has music under an old name now keeps using it, and only a
+fresh install gets `Downloads/Relaxify/music`. Nothing moves, nothing is lost,
+and the fallback has a test.
+
+**Three names deliberately not changed.** The package id stays
+`com.musicplayer`: changing it makes every existing install a different
+application, which breaks the in-app updater and loses everyone's playlists.
+The React root component stays `MusicPlayer` because it has to match
+`MainActivity.getMainComponentName()`, and neither is user-visible. And the
+`fm-theme` storage key stays, because renaming it silently resets the theme for
+every reader who had chosen one.
+
+**Round 11's colour reasoning is now overtaken.** It recorded that the site and
+the icon needed no reconciling because both were the accent on the surface.
+That is no longer true: the mark is green and the site is blue, so the hero
+halo — which is the icon's own light, not site chrome — follows a `--brand-mark`
+token rather than the accent. A blue glow around a green tile reads as a colour
+bug rather than as light. The rest of the palette is untouched.
+
+Corner radius is baked into the PNG *and* set in the styles that draw it, at
+the same 22.5%: GitHub renders the README's mark with no CSS at all, so a file
+that is only round when something rounds it would have square corners in the
+one place the project introduces itself. The CSS values are percentages now,
+because the same mark is drawn at 26px, 30px and 260px and one pixel radius
+cannot be the right curve at three sizes.
+
+Verified before pushing: 21 routes across three viewports in both themes, run
+headed — no stale name, no broken image, no overflow, every title branded. All
+20 mipmaps asserted for size, mode, transparency and safe-zone fit. `tsc` and
+`eslint` clean.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs

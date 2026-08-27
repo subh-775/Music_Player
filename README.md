@@ -2,7 +2,7 @@
 
 <img src="docs/public/logo.png" alt="" width="96" height="96">
 
-# Fix_Music
+# Relaxify
 
 A music player for Android. Search, stream and download from three catalogues
 in one place.
@@ -19,7 +19,7 @@ in one place.
 
 ## About
 
-Fix_Music is a music player for everyday listening. One search covers JioSaavn,
+Relaxify is a music player for everyday listening. One search covers JioSaavn,
 SoundCloud and YouTube, and the results arrive as a single list rather than
 three you have to compare.
 

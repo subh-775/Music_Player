@@ -1,7 +1,7 @@
 @import '@fontsource-variable/montserrat';
 
 /*
- * Fix_Music documentation — design system.
+ * Relaxify documentation — design system.
  *
  * ## Colour
  *
@@ -28,10 +28,7 @@
    * dark ground and a link on the light one are the same colour at different
    * brightnesses rather than two different blues.
    *
-   * This turned out to need no reconciling with the product at all: the
-   * Android launcher icon is a #7fc8ff disc on a #161f34 tile, which is the
-   * reference design's accent on the reference design's surface. The site and
-   * the icon it opens with are the same two colours.
+   * The product's own mark is deliberately NOT this blue — see --brand-mark.
    */
   --brand-300: #a8daff;
   --brand-400: #7fc8ff; /* the design's accent, as measured */
@@ -40,6 +37,15 @@
      has real headroom and is still recognisably the same blue. */
   --brand-600: #145d94;
   --brand-700: #14547f;
+
+  /* The launcher icon's green, sampled from the artwork rather than picked to
+     match the site. It is the app's colour, not the documentation's, and it is
+     used in exactly one place: the halo behind the mark on the front page. The
+     channels are listed separately because that halo needs the colour at three
+     opacities, and rgb(... / a) is the version of this every browser we serve
+     has supported for years. */
+  --brand-mark: #1da34d;
+  --brand-mark-rgb: 29 163 77;
 
   /*
    * ── Type ────────────────────────────────────────────────────────────────
@@ -352,7 +358,11 @@ button {
 .brand img {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  /* A percentage, not a pixel value: the same mark is drawn at 30px here, 26px
+     on a phone and 260px in the hero, and one fixed radius cannot be the right
+     curve at all three. This is the curve baked into the file itself, so the
+     two agree at every size. */
+  border-radius: 22.5%;
   display: block;
 }
 
@@ -1412,15 +1422,17 @@ html {
   position: relative;
   width: min(260px, 58vw);
   height: auto;
-  border-radius: var(--r-lg);
+  border-radius: 22.5%;
 }
-/* A glow in the mark's own colour, which is the accent: the product's launcher
-   icon is a light-blue disc on navy, so the palette this site now wears and the
-   icon it opens with are the same two colours. Nothing needed reconciling.
+/* A glow in the MARK's colour, which is no longer the site's accent.
+   The icon used to be a light-blue disc on navy and the halo simply reused the
+   accent; the mark is green now, and a blue glow around a green tile reads as a
+   colour bug rather than as light. It follows --brand-mark instead, so the two
+   can never drift apart again.
 
    This is the one radial fill on the site and it is not decoration standing in
    for hierarchy — it is the halo the icon has when it is lit, and without it a
-   navy tile on a near-black page has no edge at all. */
+   saturated tile on a near-black page has no edge at all. */
 .appmark-halo {
   position: absolute;
   width: min(340px, 76vw);
@@ -1428,8 +1440,8 @@ html {
   border-radius: 50%;
   background: radial-gradient(
     circle,
-    rgba(127, 200, 255, 0.22) 0%,
-    rgba(127, 200, 255, 0.07) 48%,
+    rgb(var(--brand-mark-rgb) / 0.24) 0%,
+    rgb(var(--brand-mark-rgb) / 0.08) 48%,
     transparent 70%
   );
 }

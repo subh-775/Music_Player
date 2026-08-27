@@ -11,7 +11,7 @@
 const SLUG = 'subh-775/Music_Player';
 
 export const SITE = {
-  name: 'Fix_Music',
+  name: 'Relaxify',
   tagline: 'An Android music player that searches three catalogues as one',
   slug: SLUG,
   repo: `https://github.com/${SLUG}`,
