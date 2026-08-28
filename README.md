@@ -7,11 +7,11 @@
 A music player for Android. Search, stream and download from three catalogues
 in one place.
 
-[![Release](https://img.shields.io/github/v/release/subh-775/Music_Player?label=Release&labelColor=161F34&color=7FC8FF)](https://github.com/subh-775/Music_Player/releases/latest)
-[![Build](https://img.shields.io/github/actions/workflow/status/subh-775/Music_Player/build-android.yml?event=push&label=Build&labelColor=161F34&color=7FC8FF)](https://github.com/subh-775/Music_Player/actions/workflows/build-android.yml)
-[![App Docs](https://img.shields.io/badge/App%20Docs-Read-161F34?labelColor=161F34&color=7FC8FF)](https://subh-775.github.io/Music_Player/)
-[![Downloads](https://img.shields.io/github/downloads/subh-775/Music_Player/total?label=Downloads&labelColor=161F34&color=7FC8FF)](https://github.com/subh-775/Music_Player/releases)
-[![Licence](https://img.shields.io/github/license/subh-775/Music_Player?label=Licence&labelColor=161F34&color=7FC8FF)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/subh-775/Music_Player?label=Release&labelColor=102514&color=1DB954)](https://github.com/subh-775/Music_Player/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/subh-775/Music_Player/build-android.yml?event=push&label=Build&labelColor=102514&color=1DB954)](https://github.com/subh-775/Music_Player/actions/workflows/build-android.yml)
+[![App Docs](https://img.shields.io/badge/App%20Docs-Read-1DB954?labelColor=102514&color=1DB954)](https://subh-775.github.io/Music_Player/)
+[![Downloads](https://img.shields.io/github/downloads/subh-775/Music_Player/total?label=Downloads&labelColor=102514&color=1DB954)](https://github.com/subh-775/Music_Player/releases)
+[![Licence](https://img.shields.io/github/license/subh-775/Music_Player?label=Licence&labelColor=102514&color=1DB954)](LICENSE)
 
 </div>
 

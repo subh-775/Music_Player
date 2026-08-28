@@ -6,44 +6,55 @@
  * ## Colour
  *
  * The ground, the surfaces, the rules and the accent are hex, because they are
- * measured values from the reference design and rewriting a measurement in
- * another notation only invites it to drift. The three status colours are
- * still OKLCH: those ARE built by walking lightness, and OKLCH is the only
- * notation where two tokens one step apart actually look one step apart.
+ * measured values and rewriting a measurement in another notation only invites
+ * it to drift. The three status colours are still OKLCH: those ARE built by
+ * walking lightness, and OKLCH is the only notation where two tokens one step
+ * apart actually look one step apart.
  *
- * Neutrals are the reference design's own: a near-black ground (#030710), a
- * deep blue-grey surface (#161f34) and a mid-blue rule (#2f4b68). They are not
- * neutral in the strict sense and are not meant to be — every one of them sits
- * on the accent's hue, which is what makes the page read as one material
- * rather than as blue text on grey card stock.
+ * This palette was the reference design's sky blue and is now the product's
+ * green, and it was rotated rather than redrawn: every token kept the exact
+ * LIGHTNESS it had and only its hue moved to #1db954's. Contrast is driven
+ * almost entirely by lightness, so the ratios this palette was tuned to hold
+ * survive the move by construction instead of needing to be re-tuned by hand —
+ * body text measured 16.0:1 on the dark ground as a blue and 16.1:1 as a green.
+ * Chroma is the part that could not simply be carried over: the sRGB gamut is
+ * a different shape at green than at blue, so each colour had its chroma
+ * reduced until it fit, which is the one lossy step.
+ *
+ * Neutrals are a near-black ground (#020903), a deep green-grey surface
+ * (#102514) and a mid-green rule (#315237). They are not neutral in the strict
+ * sense and are not meant to be — every one of them sits on the accent's hue,
+ * which is what makes the page read as one material rather than as green text
+ * on grey card stock.
  *
  * Neither end is pure. Text on pure black haloes, and text on pure white
- * glares; the ground is #030710 and the light one is a pale sky, not paper.
+ * glares; the dark ground is #020903 and the light one is a pale green, not
+ * paper.
  */
 :root {
   /* ── Brand ─────────────────────────────────────────────────────────────── */
   /*
-   * Sky blue, measured from the reference design: #7fc8ff is the accent, and
-   * the ramp walks lightness away from it in both directions so a link on the
-   * dark ground and a link on the light one are the same colour at different
-   * brightnesses rather than two different blues.
-   *
-   * The product's own mark is deliberately NOT this blue — see --brand-mark.
+   * The product's green. #1db954 is the accent, and the ramp walks lightness
+   * away from it in both directions so a link on the dark ground and a link on
+   * the light one are the same colour at different brightnesses rather than
+   * two different greens.
    */
-  --brand-300: #a8daff;
-  --brand-400: #7fc8ff; /* the design's accent, as measured */
-  /* Measured, not guessed: #1c6fae landed at exactly 4.50:1 on the light
-     ground, which is AA by a rounding error rather than by design. This step
-     has real headroom and is still recognisably the same blue. */
-  --brand-600: #145d94;
-  --brand-700: #14547f;
+  --brand-300: #6ad682;
+  --brand-400: #1db954; /* the product's green, unaltered */
+  /* The accent cannot survive the trip to a light ground unchanged: #1db954 on
+     the pale green page is 2.2:1. These two are the same hue carried down in
+     lightness until they are legible — 5.9:1 and 7.4:1 — and they sit at the
+     sRGB gamut edge, which is as chromatic as a green this dark can be. */
+  --brand-600: #00682a;
+  --brand-700: #005822;
 
-  /* The launcher icon's green, sampled from the artwork rather than picked to
-     match the site. It is the app's colour, not the documentation's, and it is
-     used in exactly one place: the halo behind the mark on the front page. The
-     channels are listed separately because that halo needs the colour at three
-     opacities, and rgb(... / a) is the version of this every browser we serve
-     has supported for years. */
+  /* The launcher icon's green, sampled from the artwork. It is very close to
+     the accent but not equal to it — the tile is #1da34d and the accent is
+     #1db954 — and it stays its own token because the halo is light coming off
+     THAT tile, so if the artwork is ever re-cut the two should move
+     independently. The channels are listed separately because the halo needs
+     the colour at three opacities, and rgb(... / a) is the version of this
+     every browser we serve has supported for years. */
   --brand-mark: #1da34d;
   --brand-mark-rgb: 29 163 77;
 
@@ -129,28 +140,27 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #030710;
-  --bg-soft: #0a101f;
-  --surface: #161f34; /* the design's surface, unaltered */
-  --surface-2: #1e2a44;
-  --surface-hover: #263553;
+  --bg: #020903;
+  --bg-soft: #061509;
+  --surface: #102514;
+  --surface-2: #17321c;
+  --surface-hover: #1f3e25;
 
-  --text: #cce9ff;
-  --text-2: #9cbdda;
-  --text-3: #7e9cba;
+  --text: #d2edd5;
+  --text-2: #a1c3a6;
+  --text-3: #81a386;
 
-  --line: #2f4b68;
-  --line-soft: #1e3149;
+  --line: #315237;
+  --line-soft: #1d3722;
 
   --brand: var(--brand-400);
-  --brand-dim: #4f9ad4;
-  /* Text ON the accent. The design pairs its light blue with the near-black
-     ground rather than with white, and it is right to: white on #7fc8ff is
-     1.8:1 and unreadable. */
-  --brand-ink: #030710;
+  --brand-dim: #5da66b;
+  /* Text ON the accent: the near-black ground, not white. White on #1db954 is
+     2.6:1 and unreadable; the ground is 7.8:1 on the same fill. */
+  --brand-ink: #020903;
   --brand-hover: var(--brand-300);
-  --brand-wash: rgba(127, 200, 255, 0.1);
-  --brand-edge: rgba(127, 200, 255, 0.3);
+  --brand-wash: rgba(29, 185, 84, 0.1);
+  --brand-edge: rgba(29, 185, 84, 0.3);
 
   --warn: oklch(84% 0.13 85);
   --warn-wash: oklch(84% 0.13 85 / 0.1);
@@ -158,8 +168,9 @@
   --danger: oklch(76% 0.15 22);
   --danger-wash: oklch(76% 0.15 22 / 0.1);
   --danger-edge: oklch(76% 0.15 22 / 0.28);
-  /* Info sits closest to the accent, so it is pulled toward cyan to stay
-     distinguishable from an ordinary link. */
+  /* Blue, and deliberately left blue. It used to be pulled toward cyan to
+     separate it from a blue accent; against a green one it separates itself,
+     and a callout is a status colour rather than part of the brand. */
   --info: oklch(84% 0.09 210);
   --info-wash: oklch(84% 0.09 210 / 0.1);
   --info-edge: oklch(84% 0.09 210 / 0.26);
@@ -174,11 +185,11 @@
 
 /* ── Light ───────────────────────────────────────────────────────────────── */
 /*
- * The reference design's light side is its accent used as a ground: a real sky
- * blue behind near-black text. Taken literally at full strength it is a page
- * you cannot read for ten minutes, so the ground is that blue held back to a
- * pale tint and the text is the design's own #030710 — which is where the
- * contrast comes from, and it is enormous.
+ * The light side is the accent used as a ground: the product's green behind
+ * near-black text. Taken literally at full strength it is a page you cannot
+ * read for ten minutes, so the ground is that green held back to a pale tint
+ * and the text is the near-black — which is where the contrast comes from, and
+ * it is enormous.
  *
  * As on the dark side, --surface is LIGHTER than --bg. A card at the same
  * value as the page is invisible; a card below it reads as a hole.
@@ -186,28 +197,28 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: #dceeff;
-  --bg-soft: #cfe6fb;
-  --surface: #eef7ff;
-  --surface-2: #c8e1f8;
-  --surface-hover: #b9d8f4;
+  --bg: #def1e1;
+  --bg-soft: #d2ead5;
+  --surface: #eff9f0;
+  --surface-2: #cce6cf;
+  --surface-hover: #bedec2;
 
-  --text: #030710;
-  --text-2: #2b3d52;
-  --text-3: #46586d;
+  --text: #020903;
+  --text-2: #2b422f;
+  --text-3: #475d4a;
 
-  --line: #a8c6e0;
-  --line-soft: #c3daee;
+  --line: #adcbb1;
+  --line-soft: #c7deca;
 
   /* The accent has to come a long way down to be a link on a light ground:
-     #7fc8ff on #dceeff is 1.3:1. The 600 step is a legible blue and reads as
+     #1db954 on #def1e1 is 2.2:1. The 600 step is a legible green and reads as
      the same colour at a different brightness. */
   --brand: var(--brand-600);
   --brand-dim: var(--brand-700);
-  --brand-ink: #f4fbff;
+  --brand-ink: #f6fcf6;
   --brand-hover: var(--brand-700);
-  --brand-wash: rgba(28, 111, 174, 0.1);
-  --brand-edge: rgba(28, 111, 174, 0.3);
+  --brand-wash: rgba(0, 104, 42, 0.1);
+  --brand-edge: rgba(0, 104, 42, 0.3);
 
   --warn: oklch(45% 0.115 75);
   --warn-wash: oklch(45% 0.115 75 / 0.1);
@@ -219,9 +230,9 @@
   --info-wash: oklch(44% 0.13 245 / 0.09);
   --info-edge: oklch(44% 0.13 245 / 0.26);
 
-  --shadow-1: 0 4px 10px rgba(3, 7, 16, 0.08);
-  --shadow-2: 0 12px 26px rgba(3, 7, 16, 0.1);
-  --shadow-3: 0 32px 68px rgba(3, 7, 16, 0.14);
+  --shadow-1: 0 4px 10px rgba(2, 9, 3, 0.08);
+  --shadow-2: 0 12px 26px rgba(2, 9, 3, 0.1);
+  --shadow-3: 0 32px 68px rgba(2, 9, 3, 0.14);
 }
 
 /*
@@ -1424,11 +1435,11 @@ html {
   height: auto;
   border-radius: 22.5%;
 }
-/* A glow in the MARK's colour, which is no longer the site's accent.
-   The icon used to be a light-blue disc on navy and the halo simply reused the
-   accent; the mark is green now, and a blue glow around a green tile reads as a
-   colour bug rather than as light. It follows --brand-mark instead, so the two
-   can never drift apart again.
+/* A glow in the MARK's colour rather than in the accent. The two are now
+   almost the same green, so this reads as a distinction without a difference —
+   it is not. The halo is the light coming off the actual tile, and pinning it
+   to --brand-mark is what keeps it honest if the artwork and the palette ever
+   part company again, as they did when the icon was green and the site blue.
 
    This is the one radial fill on the site and it is not decoration standing in
    for hierarchy — it is the halo the icon has when it is lit, and without it a

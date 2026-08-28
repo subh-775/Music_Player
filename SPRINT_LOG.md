@@ -1499,6 +1499,43 @@ headed — no stale name, no broken image, no overflow, every title branded. All
 20 mipmaps asserted for size, mode, transparency and safe-zone fit. `tsc` and
 `eslint` clean.
 
+## Round 13 — the palette follows the mark
+
+The site was still the reference design's sky blue while the product had gone
+green, which round 12 had already had to work around by giving the hero halo
+its own token. The palette moves to the product's #1db954.
+
+**Rotated, not redrawn.** Every token kept the exact lightness it had and only
+its hue moved. Contrast is driven almost entirely by lightness, so the ratios
+this palette was tuned to hold survive the move by construction rather than
+needing to be re-tuned by hand afterwards — body text measured 16.0:1 on the
+dark ground as a blue and 16.1:1 as a green, muted 10.3 to 10.4, faint 7.1 to
+7.2. Chroma is the one part that could not be carried over: the sRGB gamut is a
+different shape at green than at blue, so each colour had its chroma reduced by
+bisection until it fit.
+
+**The accents could not be rotated, only re-solved.** #1db954 is 7.8:1 on the
+dark ground and goes in unaltered — it is the brand, and that is comfortably
+AA. On the light ground it is 2.2:1 and unusable, so the light pair was solved
+for contrast instead: #00682a at 5.9:1 and #005822 at 7.4:1. Both sit at the
+gamut edge, which looked like an over-saturated choice until it was checked —
+at that lightness and hue, 0.127 chroma is simply all sRGB has.
+
+**Fourteen pairs measured, all AA at body size.** Then measured again in the
+browser rather than from the stylesheet, by rasterising the computed colours
+through a 1×1 canvas: Chromium serialises them as `oklch()`, which cannot be
+parsed as rgb, and what composites on the page is the only thing worth
+trusting. The browser agreed with the arithmetic to a tenth.
+
+**Left alone deliberately:** warn, danger and info. Those are status colours,
+not brand — a green warning is not a warning. Info had been pulled toward cyan
+to keep it distinct from a blue accent; against a green one it separates itself,
+so it is plain blue now and the comment saying otherwise is gone.
+
+Nothing outside `styles.css`, `index.html` and the README badges changed, so
+there is no new release: the application is byte-identical and tagging one
+would offer every user an update to the same build.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs
