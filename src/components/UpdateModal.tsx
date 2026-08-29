@@ -1,127 +1,116 @@
 /**
- * The in-app update popup. Appears when a newer release is found, shows the
- * download progress in place, and lets the user install or dismiss. Styled like
- * the rest of the app (matches ConfirmModal), not the OS.
+ * The in-app update prompt. Appears when a newer release is found, shows the
+ * download progress in place, and lets the user install or dismiss.
+ *
+ * A Sheet, not a centred Modal. Everything else in the app that asks a question
+ * is a Sheet or a ConfirmModal; a card floating in the middle of a dimmed
+ * screen read as something the OS had put in front of the app rather than part
+ * of it. It also gets "Later" for free — drag it away.
  */
 import React from 'react';
-import {Modal, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {AlertTriangle, ArrowRight, Sparkles} from 'lucide-react-native';
-import {C} from '../theme';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {AlertTriangle, ArrowRight, Download} from 'lucide-react-native';
+import {C, S} from '../theme';
 import {appVersion} from '../backend';
-import {
-  dismissUpdate,
-  startUpdateInstall,
-  useUpdate,
-} from '../update';
+import {dismissUpdate, startUpdateInstall, useUpdate} from '../update';
+import {Sheet} from './Sheet';
+import {formatSize, readableNotes} from '../updateNotes';
 
 export function UpdateModal() {
   const {phase, info, pct} = useUpdate();
-  const visible = phase === 'found' || phase === 'downloading' || phase === 'failed';
+  const visible =
+    phase === 'found' || phase === 'downloading' || phase === 'failed';
   const failed = phase === 'failed';
+  const notes = readableNotes(info?.notes ?? '');
+  const size = formatSize(info?.sizeBytes);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={dismissUpdate}
-      statusBarTranslucent>
-      <View style={styles.scrim}>
-        <View style={styles.card}>
-          {/* One badge, coloured by outcome — an accent burst for good news, a
-              flat amber ring for a failure. Replaces the plain text heading,
-              which read as a system dialog rather than part of the app. */}
-          <View style={[styles.badge, failed && styles.badgeWarn]}>
-            {failed ? (
-              <AlertTriangle size={22} color={C.danger} strokeWidth={2.2} />
-            ) : (
-              <Sparkles size={22} color={C.accent} strokeWidth={2.2} />
-            )}
-          </View>
-
-          {phase === 'downloading' ? (
-            <>
-              <Text style={styles.title}>Downloading update</Text>
-              <Text style={styles.message}>
-                Relaxify {info?.version} — hang tight, this only takes a moment.
-              </Text>
-              <View style={styles.barTrack}>
-                <View style={[styles.barFill, {width: `${Math.max(4, pct)}%`}]} />
-              </View>
-              <Text style={styles.pct}>{pct}%</Text>
-            </>
-          ) : failed ? (
-            <>
-              <Text style={styles.title}>Update failed</Text>
-              <Text style={styles.message}>
-                Couldn&apos;t download the update. Check your connection and try
-                again.
-              </Text>
-              <View style={styles.actions}>
-                <TouchableOpacity
-                  style={[styles.btn, styles.cancel]}
-                  onPress={dismissUpdate}>
-                  <Text style={styles.cancelText}>Later</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, styles.confirm]}
-                  onPress={startUpdateInstall}>
-                  <Text style={styles.confirmText}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            </>
+    <Sheet open={visible} onClose={dismissUpdate} style={styles.sheet}>
+      <View style={styles.body}>
+        {/* An update is a FILE ARRIVING. The sparkle that used to be here is
+            the visual language of a promotional banner, and it was also the
+            sidebar's glyph for "Your sound" — one icon meaning two unrelated
+            things. AlertTriangle stays for the failure; that one was right. */}
+        <View style={[styles.badge, failed && styles.badgeWarn]}>
+          {failed ? (
+            <AlertTriangle size={22} color={C.danger} strokeWidth={2.2} />
           ) : (
-            <>
-              <Text style={styles.title}>Update available</Text>
-              {/* from -> to, not a bare version number — that's what actually
-                  answers "what changes for me". */}
-              <View style={styles.versionRow}>
-                <Text style={styles.versionFrom}>{appVersion || '—'}</Text>
-                <ArrowRight size={13} color={C.faint} strokeWidth={2.4} />
-                <Text style={styles.versionTo}>{info?.version}</Text>
-              </View>
-              {!!info?.notes && (
-                <Text style={styles.message} numberOfLines={6}>
-                  {info.notes.trim()}
-                </Text>
-              )}
-              <View style={styles.actions}>
-                <TouchableOpacity
-                  style={[styles.btn, styles.cancel]}
-                  onPress={dismissUpdate}>
-                  <Text style={styles.cancelText}>Later</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, styles.confirm]}
-                  onPress={startUpdateInstall}>
-                  <Text style={styles.confirmText}>Update</Text>
-                </TouchableOpacity>
-              </View>
-            </>
+            <Download size={22} color={C.accent} strokeWidth={2.2} />
           )}
         </View>
+
+        {phase === 'downloading' ? (
+          <>
+            <Text style={styles.title}>Downloading update</Text>
+            <Text style={styles.message}>
+              Relaxify {info?.version} — this only takes a moment.
+            </Text>
+            <View style={styles.barTrack}>
+              <View style={[styles.barFill, {width: `${Math.max(4, pct)}%`}]} />
+            </View>
+            <Text style={styles.pct}>{pct}%</Text>
+          </>
+        ) : failed ? (
+          <>
+            <Text style={styles.title}>Update failed</Text>
+            <Text style={styles.message}>
+              Couldn&apos;t download the update. Check your connection and try
+              again.
+            </Text>
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.btn, styles.cancel]}
+                onPress={dismissUpdate}>
+                <Text style={styles.cancelText}>Later</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.confirm]}
+                onPress={startUpdateInstall}>
+                <Text style={styles.confirmText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.title}>Update available</Text>
+            {/* from -> to, not a bare version number — that's what actually
+                answers "what changes for me". The size sits on the same line,
+                right-aligned: it is the one fact that decides whether someone
+                taps Update while on mobile data. */}
+            <View style={styles.versionRow}>
+              <Text style={styles.versionFrom}>{appVersion || '—'}</Text>
+              <ArrowRight size={13} color={C.faint} strokeWidth={2.4} />
+              <Text style={styles.versionTo}>{info?.version}</Text>
+              {!!size && <Text style={styles.size}>{size}</Text>}
+            </View>
+            {!!notes && (
+              <Text style={styles.message} numberOfLines={6}>
+                {notes}
+              </Text>
+            )}
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.btn, styles.cancel]}
+                onPress={dismissUpdate}>
+                <Text style={styles.cancelText}>Later</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.confirm]}
+                onPress={startUpdateInstall}>
+                <Text style={styles.confirmText}>Update</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
-    </Modal>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  scrim: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 36,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: C.surfaceHi,
-    borderRadius: 18,
-    padding: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
-  },
+  // Scrim, handle, rounded top and the slide all live in <Sheet>.
+  sheet: {},
+  body: {paddingHorizontal: S.gutter, paddingTop: 6, paddingBottom: 18},
   badge: {
     width: 46,
     height: 46,
@@ -136,8 +125,14 @@ const styles = StyleSheet.create({
   versionRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 6},
   versionFrom: {color: C.faint, fontSize: 13, fontWeight: '600'},
   versionTo: {color: C.accent, fontSize: 14, fontWeight: '800'},
+  size: {color: C.faint, fontSize: 13, marginLeft: 'auto'},
   message: {color: C.sub, fontSize: 13, lineHeight: 19, marginTop: 10},
-  actions: {flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 22},
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 22,
+  },
   btn: {
     paddingHorizontal: 18,
     paddingVertical: 10,

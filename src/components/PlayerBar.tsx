@@ -36,7 +36,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
-import {Headphones, Heart, Pause, Play} from 'lucide-react-native';
+import {Headphones, Pause, Play} from 'lucide-react-native';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl} from '../tracks';
 import {Marquee} from './Marquee';
@@ -49,8 +49,9 @@ import {
   useIsPlaying,
   useProgress,
 } from '../player';
-import {useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
+import type {Track} from '../backend';
+import {AddButton} from './AddButton';
 import {toward, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
@@ -86,15 +87,16 @@ const MiniProgress = React.memo(function MiniProgress() {
  */
 export const PlayerBar = React.memo(function PlayerBar({
   onExpand,
+  onAddToPlaylist,
 }: {
   onExpand: () => void;
+  onAddToPlaylist: (t: Track) => void;
 }) {
   const active = useActiveTrack();
   const playing = useIsPlaying();
   const output = useAudioOutput();
 
   const track = useMemo(() => sourceTrackFor(active), [active]);
-  const {liked, toggle} = useLike(track);
 
   // Only the TITLE slides — the artwork just swaps to the new song, per the
   // request. And the skip is fired IMMEDIATELY, not behind the animation, so
@@ -250,14 +252,15 @@ export const PlayerBar = React.memo(function PlayerBar({
               </View>
             )}
 
-            <TouchableOpacity onPress={toggle} hitSlop={10} style={styles.ctl}>
-              <Heart
-                size={21}
-                color={liked ? C.accent : C.text}
-                fill={liked ? C.accent : 'transparent'}
-                strokeWidth={2}
-              />
-            </TouchableOpacity>
+            {/* The same control as the full player, so the two can never
+                disagree about what a press does. */}
+            <AddButton
+              track={track}
+              onOpenSheet={onAddToPlaylist}
+              size={23}
+              hitSlop={10}
+              style={styles.ctl}
+            />
 
             <TouchableOpacity
               onPress={() => togglePlay()}

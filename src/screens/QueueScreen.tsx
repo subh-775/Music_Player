@@ -40,8 +40,10 @@ import {C, S, T} from '../theme';
 import {
   Event,
   TrackPlayer,
+  markManualTrackChange,
   moveQueueItem,
   onQueueChanged,
+  playWithFade,
   sourceTrackFor,
   useShuffle,
 } from '../player';
@@ -129,8 +131,11 @@ export function QueuePane({
   const jump = useCallback(
     async (engineIndex: number) => {
       try {
+        // A row tap is the user choosing a track, so it must not consume an
+        // armed end-of-track timer — and it starts audio, so it gets the ramp.
+        markManualTrackChange();
         await TrackPlayer.skip(engineIndex);
-        await TrackPlayer.play();
+        await playWithFade();
         refresh();
       } catch {
         /* index vanished — the next event corrects it */
@@ -303,9 +308,34 @@ export function QueuePane({
         })}
         // Tells the sheet above where this list is, so it only starts to
         // follow the finger once there is nothing left to scroll.
+        //
+        // Three reporters, because this one cannot be done the way the
+        // playlist sheet does it. There, an useAnimatedScrollHandler writes the
+        // offset on the UI thread every frame. Here the list is a
+        // DraggableFlatList, which sets its OWN onScroll on the inner animated
+        // list AFTER spreading our props — so an onScroll passed in is
+        // silently dropped, and the only offset we can have is this one, which
+        // arrives over the JS thread and is therefore a frame or two late.
+        //
+        // Late is harmless while scrolling: mid-list the value is positive
+        // either way and the sheet correctly stays out of it. What is NOT
+        // harmless is the value the scroll STOPS on, which is what the next
+        // gesture reads. The two end events below fire at rest and carry the
+        // authoritative offset, so by the time a finger comes down again the
+        // value is exact regardless of what the stream of scroll events did.
         onScrollOffsetChange={off => {
           if (scrollY) {
             scrollY.value = off;
+          }
+        }}
+        onScrollEndDrag={e => {
+          if (scrollY) {
+            scrollY.value = e.nativeEvent.contentOffset.y;
+          }
+        }}
+        onMomentumScrollEnd={e => {
+          if (scrollY) {
+            scrollY.value = e.nativeEvent.contentOffset.y;
           }
         }}
         activationDistance={12}

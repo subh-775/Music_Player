@@ -122,6 +122,29 @@ export function removeTrackFromPlaylist(id: string, track: Track): void {
   );
 }
 
+/**
+ * Which of these playlists already hold the track.
+ *
+ * Takes the list rather than reading the store, because every caller is a
+ * component that has already subscribed to it — reading it again here would
+ * give a second, independently-timed copy of the same answer.
+ */
+export function playlistsContaining(
+  list: Playlist[],
+  track: Track | null,
+): Set<string> {
+  const t = track ? normalizeTrack(track) : null;
+  if (!t) {
+    return new Set();
+  }
+  const tid = getTrackId(t);
+  return new Set(
+    list
+      .filter(p => (p.tracks || []).some(x => getTrackId(x) === tid))
+      .map(p => p.id),
+  );
+}
+
 export function usePlaylists(): Playlist[] {
   return useStoreValue(store);
 }

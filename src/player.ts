@@ -43,7 +43,11 @@ import {
   restorePlayerVolume,
 } from './audioEffects';
 import {setPausedByDuck} from './duckState';
-import {sleepTimerOnTrackChange} from './sleepTimer';
+import {
+  scheduleEndOfTrackStop,
+  sleepMode,
+  sleepTimerOnTrackChange,
+} from './sleepTimer';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
 import {diag} from './diag';
@@ -75,6 +79,63 @@ let queuedAhead = 0;
  * the first few frames while ExoPlayer's output path settles, not to be noticed.
  */
 const FADE_IN_MS = 130;
+/**
+ * The ramp on a SKIP, which is a tenth of the one on a fresh start.
+ *
+ * It is there for the same reason — ExoPlayer opening its output clicks — but a
+ * skip is a button press waiting on a response, and 130ms of rise on top of the
+ * engine's own latency reads as the button being slow. Forty is enough to
+ * swallow the transient and is below the threshold where a rise is audible AS
+ * one.
+ */
+const SKIP_FADE_MS = 40;
+
+/**
+ * How recently a manual skip has to have happened for the next track change to
+ * count as that skip rather than as a song ending.
+ */
+const MANUAL_STEP_WINDOW_MS = 2000;
+let manualStepAt = 0;
+
+/** Called by anything that changes track because the USER said so. */
+export function markManualTrackChange(): void {
+  manualStepAt = Date.now();
+}
+
+/**
+ * The one place playback resumes from silence.
+ *
+ * The ramp used to live in playTrack alone, which made tapping a song smooth
+ * and left every other route in raw: resuming a restored session, the play
+ * button, the notification, a headset click, a queue row, both skips. The
+ * transient it hides belongs to ExoPlayer opening its output, so it belongs
+ * wherever that happens rather than wherever a track is chosen.
+ *
+ * setVolume is awaited so the floor is in place before play() rather than
+ * racing it.
+ */
+export async function playWithFade(ms: number = FADE_IN_MS): Promise<void> {
+  await TrackPlayer.setVolume(1);
+  await fadeInPlayer(ms);
+  await TrackPlayer.play();
+}
+
+/**
+ * Stop, but by receding rather than by cutting.
+ *
+ * Only the sleep timer uses this. Everything else that pauses is a button
+ * press, where anything but an instant stop reads as lag.
+ */
+export async function fadeToPause(ms = 2500): Promise<void> {
+  cancelCrossfade();
+  setPausedByDuck(false);
+  await fadeOutPlayer(ms);
+  // The native ramp restores 1.0 by itself once it completes, so the next play
+  // does not start silent.
+  setTimeout(() => {
+    TrackPlayer.pause().catch(() => {});
+  }, ms);
+}
 
 /**
  * WHERE the current queue was started from — a collection id, or ''.
@@ -261,8 +322,13 @@ export async function setupPlayer(): Promise<boolean> {
       // actually started, and keep the queue snapshot warm for the next gesture.
       publishTrack(e.track ?? null);
       // A native event, so the sleep timer's deadline is honoured even when the
-      // screen has been off long enough for JS timers to be throttled.
-      sleepTimerOnTrackChange();
+      // screen has been off long enough for JS timers to be throttled. This is
+      // the BACKSTOP for end-of-track; the punctual stop is armed by the
+      // watcher two seconds out. Only an automatic advance consumes the timer —
+      // pressing next with one armed is not a request to stop now.
+      sleepTimerOnTrackChange(
+        Date.now() - manualStepAt > MANUAL_STEP_WINDOW_MS,
+      );
       // Autoplay top-up rides the same native event, for the same reason.
       //
       // It used to be driven ONLY by the 1s JS interval in
@@ -383,21 +449,42 @@ export async function restoreSession(): Promise<boolean> {
     if (s.position > 0) {
       await TrackPlayer.seekTo(s.position);
     }
-    applyAudioEffects();
-    // The earlier tracks come back afterward, prepended so Previous still works;
-    // this shifts the active index to idx without ever showing track 0.
-    if (idx > 0) {
-      await TrackPlayer.add(
-        items.slice(0, idx).map(x => x.q!),
-        0,
-      );
-    }
+    // Awaited. A restored session sits paused, so there IS time to attach the
+    // chain properly — and an effects chain that attaches after audio is
+    // already out is exactly what the step change on resume sounds like.
+    await applyAudioEffects();
     // Seed the now-playing mirror. A restored session is left PAUSED, so no
     // track-change event fires — without this the mini player would sit blank
     // until the user pressed play (RNTP's own hook self-seeded on mount; ours
     // has to be told).
     await refreshEngineMirror();
     publishTrack(engineQueue[activeIndex] ?? null);
+    // The earlier tracks come back AFTER the player is on screen, prepended so
+    // Previous still works; this shifts the active index to idx without ever
+    // showing track 0.
+    //
+    // Deferred rather than awaited above, because its cost is proportional to
+    // how far into the queue you were: a 200-track playlist left at index 180
+    // serialises 180 items across the bridge before the first frame can render.
+    // Previous is not reachable in the time this takes — the player has to be
+    // drawn before it can be pressed.
+    if (idx > 0) {
+      setTimeout(() => {
+        (async () => {
+          await TrackPlayer.add(
+            items.slice(0, idx).map(x => x.q!),
+            0,
+          );
+          // And re-sync, because the mirror above was taken from the queue as
+          // it was BEFORE the prepend: it holds n-idx tracks with the active
+          // one at 0, while the engine now holds all n with the active one at
+          // idx. Left stale, Previous has nothing behind it and the queue sheet
+          // renders the tail of the queue as the whole of it.
+          await refreshEngineMirror();
+          publishTrack(engineQueue[activeIndex] ?? null);
+        })().catch(() => {});
+      }, 0);
+    }
     // Left paused — see above.
     return true;
   } catch {
@@ -550,9 +637,6 @@ export async function playTrack(
     // the output, a Bluetooth codec is still negotiating, and the effects chain
     // attaches a beat later. FADE_IN_MS is under the threshold where a rise is
     // perceptible AS a fade — it reads as a clean start, not a fade-in.
-    await TrackPlayer.setVolume(1);
-    // Awaited, so the floor is set before play() rather than racing it.
-    await fadeInPlayer(FADE_IN_MS);
     // Publish the tapped track immediately — waiting for the engine event showed
     // the old song's title for a beat. The mirror is seeded from the FULL list we
     // are about to build, not from the one-track queue that exists right now, so
@@ -561,7 +645,7 @@ export async function playTrack(
     activeIndex = startAt;
     publishTrack(engineQueue[startAt] ?? null);
     warmArtwork(startAt);
-    await TrackPlayer.play();
+    await playWithFade();
 
     // The rest of the queue, now that the song is audible. After: everything the
     // tapped track came before. Before: the earlier tracks, so Previous works —
@@ -846,13 +930,14 @@ export function useActiveTrack(): RNTPTrack | null {
  *  silence reads as the skip having failed. */
 export async function skipNext(): Promise<void> {
   cancelCrossfade(); // a manual skip isn't a crossfade — kill any overlap
+  markManualTrackChange();
   publishStep(1); // show the committed track NOW, before the engine catches up
   // publishStep already moved the mirror — warm the track it's now pointing
   // at before the engine even starts skipping to it.
   warmStream(sourceTrackFor(trackSnapshot), currentQuality());
   try {
     await TrackPlayer.skipToNext();
-    await TrackPlayer.play();
+    await playWithFade(SKIP_FADE_MS);
   } catch {
     // The skip didn't happen (queue changed under us) — take the optimistic
     // title back rather than leaving the UI showing a song that never started.
@@ -865,6 +950,7 @@ export async function skipNext(): Promise<void> {
  *  behaviour every other player has, so one stray tap can't lose your place. */
 export async function skipPrevious(): Promise<void> {
   cancelCrossfade();
+  markManualTrackChange();
   try {
     const pos = await TrackPlayer.getPosition();
     if (pos > 3) {
@@ -875,7 +961,7 @@ export async function skipPrevious(): Promise<void> {
     publishStep(-1);
     warmStream(sourceTrackFor(trackSnapshot), currentQuality());
     await TrackPlayer.skipToPrevious();
-    await TrackPlayer.play();
+    await playWithFade(SKIP_FADE_MS);
   } catch {
     await TrackPlayer.seekTo(0);
     await refreshEngineMirror();
@@ -993,7 +1079,7 @@ export async function togglePlay(): Promise<void> {
     cancelCrossfade(); // pausing must silence the overlap player too
     await TrackPlayer.pause();
   } else {
-    await TrackPlayer.play();
+    await playWithFade();
   }
 }
 
@@ -1056,7 +1142,15 @@ export async function topUpFromRadio(): Promise<void> {
   // the rest a moment later. Without this, a watcher tick landing in that gap
   // sees "only one track left" and appends radio picks BETWEEN the tapped song
   // and the rest of its own album.
-  if (radioBusy || buildingQueue || !readSettings().autoplay) {
+  // sleepMode: arming end-of-track on the last queued song would otherwise
+  // append eight more. Harmless once the pause lands — but it means the queue
+  // you wake up to is not the one you went to sleep on.
+  if (
+    radioBusy ||
+    buildingQueue ||
+    !readSettings().autoplay ||
+    sleepMode() === 'endOfTrack'
+  ) {
     return;
   }
   // Claimed BEFORE the first await, and everything that can return early moved
@@ -1198,7 +1292,7 @@ function cancelScheduledFade(): void {
  * stop, where the user is choosing the next track rather than letting the queue
  * flow into it. Restores full volume so the chosen track isn't left quiet.
  */
-function cancelCrossfade(): void {
+export function cancelCrossfade(): void {
   cfActive = false;
   cancelScheduledFade();
   cfPreparedFor = '';
@@ -1320,6 +1414,17 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       }
       const remaining = duration - position;
 
+      // ── 0. The end-of-track sleep stop, on the boundary ────────────────
+      //
+      // This tick already computes the one number the sleep timer needs, and
+      // already knows how to put a one-shot on a precise moment. Arming it two
+      // seconds out lands the stop ON the boundary instead of one to two
+      // seconds into the next song, which is where the track-change event —
+      // still in place as the backstop — necessarily lands.
+      if (remaining <= 2) {
+        scheduleEndOfTrackStop(remaining);
+      }
+
       // ── 1. Buffer the incoming track, well before it is needed ────────
       //
       // Silent, and not a commitment: if the fade never happens the prepared
@@ -1329,6 +1434,12 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       if (
         crossfadeSupported &&
         !cfActive &&
+        // A crossfade into a track that is never going to play is just the next
+        // song starting early. End-of-track means "this song, then silence",
+        // and with a twelve-second fade the overlap would begin twelve seconds
+        // BEFORE the boundary — mixing a song nobody asked for into the last
+        // seconds of the one they meant to fall asleep to.
+        sleepMode() !== 'endOfTrack' &&
         active != null &&
         // Twenty seconds of lead, or span + 8 on a long fade, whichever is
         // more. Preparing is silent and free to abandon; the only thing that
@@ -1364,7 +1475,12 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       }
 
       // ── 2. Start it AT the boundary, not on the next tick ──────────────
-      if (remaining <= span + 1 && fadedFor !== key && !cfStartTimer) {
+      if (
+        remaining <= span + 1 &&
+        sleepMode() !== 'endOfTrack' &&
+        fadedFor !== key &&
+        !cfStartTimer
+      ) {
         fadedFor = key;
         const ms = Math.round(span * 1000);
         // remaining - span is how long until the fade should begin. Usually a

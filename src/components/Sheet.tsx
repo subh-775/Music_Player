@@ -138,6 +138,26 @@ const OUT = {duration: 160, easing: Easing.in(Easing.cubic)};
 /** The strip at the top of a sheet where a drag is always a sheet drag. */
 const HANDLE_GRAB = 44;
 
+/**
+ * "The list is at its top", with a tolerance rather than an exact zero.
+ *
+ * The offset is reported from JS, not from a worklet, so the last value
+ * delivered before a fling comes to rest can be a sub-pixel remainder rather
+ * than a clean 0. Compared exactly, that leaves the sheet permanently
+ * undraggable over its own list — it could only be moved by the handle. Four
+ * pixels is inside the distance the list could scroll anyway, so nothing is
+ * taken from it.
+ */
+const AT_TOP = 4;
+
+/**
+ * How far down before the sheet takes the gesture. Only ever consulted when
+ * the list is already at its top and therefore has nothing to scroll, so the
+ * distance is buying nothing but delay; it exists to separate a pull from a
+ * tap, and six pixels does that.
+ */
+const HANDOFF_DY = 6;
+
 /** How far down you have to drag (or how fast you have to flick) to dismiss. */
 const DISMISS_DISTANCE = 90;
 const DISMISS_VELOCITY = 800;
@@ -159,9 +179,10 @@ export function Sheet({
    * Turn the drag-to-dismiss off while something inside owns the vertical
    * axis — a lifted, reorderable row, specifically.
    *
-   * This gesture activates at 12px of downward travel and
-   * DraggableFlatList's activationDistance is also 12: a genuine tie, and one
-   * the sheet has no business winning. Whoever holds the row says so.
+   * This gesture activates at HANDOFF_DY of downward travel, which is now
+   * BELOW DraggableFlatList's activationDistance of 12 — so the sheet would
+   * win outright, and it has no business winning against a row somebody is
+   * holding. Whoever holds the row says so.
    */
   dragEnabled?: boolean;
   /**
@@ -208,8 +229,16 @@ export function Sheet({
   useEffect(() => {
     if (open) {
       setPresent(true);
+      // A sheet that has just opened has its list at the top, by definition.
+      // Saying so here rather than at each call site matters because the sheet
+      // is never unmounted (see above), so the offset from the LAST time it was
+      // open is still sitting in the shared value — and if that was a
+      // scrolled-away position, the sheet opens undraggable over its own list.
+      if (scrollY) {
+        scrollY.value = 0;
+      }
     }
-  }, [open]);
+  }, [open, scrollY]);
 
   useEffect(() => {
     if (!present) {
@@ -290,7 +319,7 @@ export function Sheet({
       const dy = t.absoluteY - startY.value;
       if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
         state.fail();
-      } else if (dy > 12 && (onHandle.value || scrollY.value <= 0)) {
+      } else if (dy > HANDOFF_DY && (onHandle.value || scrollY.value <= AT_TOP)) {
         state.activate();
       }
     })

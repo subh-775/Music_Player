@@ -12,7 +12,7 @@ Four entries, and this is the list — if you are looking for something that is 
 | --- | --- |
 | **Equalizer** | Eight bands and eleven presets. See [Equalizer](/guide/equalizer) |
 | **Your sound** | What you have been listening to, and the audio-effect switches |
-| **Help** | This documentation, in your browser |
+| **Read docs** | This documentation, in your browser |
 | **Settings** | Everything below |
 
 The **sleep timer** is not in the drawer. It is the timer glyph at the bottom left of the full player — a thing you reach for with the phone already face-down, which is two gestures too far from the music.
@@ -43,7 +43,9 @@ A **ceiling, not a promise**. A source that has no 320 kbps stream still gives y
 
 The **timer glyph at the bottom left of the full player**. 15, 30, 45 or 60 minutes, or the end of this track.
 
-The glyph turns green while one is running. It fires from the playback engine's own events rather than a timer, so it still works with the screen off — which is the only time anybody uses it.
+The glyph turns green while one is running. Music **fades out** over a couple of seconds rather than stopping dead, which is a better way to be left than a cut.
+
+"End of this track" stops on the boundary, not a second or two into the next song. It is scheduled precisely and also checked against the playback engine's own events, so it still works with the screen off — which is the only time anybody uses it. Pressing next with one armed does **not** stop the music: the timer means "this song, then silence", and it waits for the song you chose to actually end.
 
 ## Downloads
 

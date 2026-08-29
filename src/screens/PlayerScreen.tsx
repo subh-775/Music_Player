@@ -39,10 +39,8 @@ import {
   Check,
   ChevronDown,
   CircleArrowDown,
-  CirclePlus,
   Disc3,
   Headphones,
-  Heart,
   Pause,
   Play,
   Quote,
@@ -82,7 +80,6 @@ import {
   useIsPlaying,
   useProgress,
 } from '../player';
-import {useLike} from '../store';
 import {useAudioOutput} from '../audioOutput';
 import {toward, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
@@ -90,6 +87,7 @@ import {Seekbar} from '../components/Seekbar';
 import {SeekPeek} from '../components/SeekPeek';
 import {QueuePane} from './QueueScreen';
 import {Sheet} from '../components/Sheet';
+import {AddButton} from '../components/AddButton';
 import {SleepSheet} from '../components/SleepSheet';
 import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {toast} from '../toast';
@@ -193,10 +191,12 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    *  though the bar's state now lives inside <ProgressArea>. */
   const progressApi = useRef<ProgressHandle>(null);
 
-  // The engine's queue item is a reduced shape; the badges, download and like
-  // all need the real backend Track behind it.
+  // The engine's queue item is a reduced shape; the badges and the download
+  // both need the real backend Track behind it.
   const track = useMemo(() => sourceTrackFor(active), [active]);
-  const {liked, toggle: toggleLike} = useLike(track);
+  // No useLike here any more: the liked state lives inside <AddButton>, which
+  // is the only thing on this screen that reads it. One subscription fewer on
+  // a screen that already has several.
 
   // The screen takes on the song's colour, darkened hard enough that every
   // label keeps contrast. Falls back to plain black when unknown.
@@ -847,42 +847,36 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             </View>
 
             <View style={styles.actionCol}>
+              {/* Two glyphs, not three: ⬇ download on the left, + on the
+                  right. The heart is gone from here — the + does what it did
+                  on the first press and more on the second, and a heart beside
+                  a control that also means "save" is two words for one thing.
+                  It stays on albums and artists, where liking a COLLECTION is
+                  a different verb, and as a labelled row in the ⋮ menu, where
+                  the word removes the ambiguity a bare glyph carries. */}
               <View style={styles.actions}>
-                {/* Circled glyphs, matching the reference: ⊕ add, ♥ like,
-                  ⬇-in-circle download. */}
-                <TouchableOpacity
-                  onPress={() => track && onAddToPlaylist(track)}
-                  hitSlop={8}
-                  style={styles.actionBtn}>
-                  <CirclePlus size={23} color={C.sub} strokeWidth={1.8} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={toggleLike}
-                  hitSlop={8}
-                  style={styles.actionBtn}>
-                  <Heart
-                    size={22}
-                    color={liked ? C.accent : C.sub}
-                    fill={liked ? C.accent : 'transparent'}
-                  />
-                </TouchableOpacity>
-
                 <TouchableOpacity
                   onPress={download}
                   disabled={downloading || downloaded}
                   hitSlop={8}
                   style={styles.actionBtn}>
                   {downloaded || downloading ? (
-                    <Check size={22} color={C.accent} strokeWidth={2.6} />
+                    <Check size={24} color={C.accent} strokeWidth={2.6} />
                   ) : (
                     <CircleArrowDown
-                      size={23}
+                      size={25}
                       color={C.sub}
                       strokeWidth={1.8}
                     />
                   )}
                 </TouchableOpacity>
+
+                <AddButton
+                  track={track}
+                  onOpenSheet={onAddToPlaylist}
+                  size={25}
+                  style={styles.actionBtn}
+                />
               </View>
 
               {/* Under the actions, right-aligned, and absent entirely when
@@ -1550,7 +1544,9 @@ const styles = StyleSheet.create({
   badgeRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4},
   actionCol: {alignItems: 'flex-end', gap: 6},
   actions: {flexDirection: 'row', alignItems: 'center', gap: 2, paddingTop: 2},
-  actionBtn: {padding: 7},
+  // 9, not 7: dropping the heart freed about thirty pixels in this row, and
+  // the honest use for them is a bigger touch target rather than more air.
+  actionBtn: {padding: 9},
 
   // Capped, because this column shares the row with the title: an unbounded
   // device name would take the width the song name needs.

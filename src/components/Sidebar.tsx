@@ -35,12 +35,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import {
   ArrowUpRight,
+  AudioLines,
   BookOpen,
   ChevronRight,
   Clock,
   Settings as SettingsIcon,
   SlidersHorizontal,
-  Sparkles,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
@@ -75,8 +75,11 @@ export type SidebarDest = 'settings' | 'help' | 'stats' | 'equalizer';
 // lives beside the queue in the player, where the thing it acts on is.
 const ITEMS: {id: SidebarDest; label: string; Icon: typeof Clock}[] = [
   {id: 'equalizer', label: 'Equalizer', Icon: SlidersHorizontal},
-  {id: 'stats', label: 'Your sound', Icon: Sparkles},
-  {id: 'help', label: 'Help', Icon: BookOpen},
+  // AudioLines, not Sparkles: a sparkle says "AI" to most people now, and it
+  // is also the badge on the update popup — the same glyph meaning two
+  // unrelated things. A waveform reads as "your listening" with no caption.
+  {id: 'stats', label: 'Your sound', Icon: AudioLines},
+  {id: 'help', label: 'Read docs', Icon: BookOpen},
   {id: 'settings', label: 'Settings', Icon: SettingsIcon},
 ];
 
