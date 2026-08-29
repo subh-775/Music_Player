@@ -10,7 +10,7 @@
  */
 import TrackPlayer, {Event, State} from 'react-native-track-player';
 import {setPausedByDuck, wasPausedByDuck} from './duckState';
-import {topUpFromRadio} from './player';
+import {markManualTrackChange, playWithFade, topUpFromRadio} from './player';
 
 /**
  * Did WE pause because we lost audio focus, or did the user?
@@ -28,7 +28,10 @@ module.exports = async function playbackService() {
   // (or their headset) just asked for outranks anything ducking remembered.
   TrackPlayer.addEventListener(Event.RemotePlay, () => {
     setPausedByDuck(false);
-    TrackPlayer.play();
+    // Faded, like every other route into playback. A headset click resuming a
+    // track that is already seeked is the harshest start of the lot: the output
+    // opens on a waveform mid-cycle, with a Bluetooth codec still negotiating.
+    playWithFade().catch(() => {});
   });
   TrackPlayer.addEventListener(Event.RemotePause, () => {
     setPausedByDuck(false);
@@ -60,7 +63,7 @@ module.exports = async function playbackService() {
       // Only if the top-up actually appended something past where we stopped.
       if (queue.length && index != null && index < queue.length - 1) {
         await TrackPlayer.skipToNext();
-        await TrackPlayer.play();
+        await playWithFade();
       }
     } catch {
       /* nothing to continue with — leave playback stopped */
@@ -69,6 +72,9 @@ module.exports = async function playbackService() {
 
   TrackPlayer.addEventListener(Event.RemoteNext, async () => {
     try {
+      // The user pressed a button, so this is not a song ending — an armed
+      // end-of-track timer must not be consumed by it.
+      markManualTrackChange();
       await TrackPlayer.skipToNext();
     } catch {
       /* end of queue — nothing to skip to */
@@ -84,6 +90,7 @@ module.exports = async function playbackService() {
       if (position > 3) {
         await TrackPlayer.seekTo(0);
       } else {
+        markManualTrackChange();
         await TrackPlayer.skipToPrevious();
       }
     } catch {
@@ -119,7 +126,7 @@ module.exports = async function playbackService() {
       // Focus regained: resume ONLY what ducking paused.
       if (wasPausedByDuck()) {
         setPausedByDuck(false);
-        await TrackPlayer.play();
+        await playWithFade();
       }
     },
   );

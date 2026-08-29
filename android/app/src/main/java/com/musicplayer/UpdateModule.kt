@@ -40,7 +40,13 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
 
     private var pending: Release? = null
 
-    data class Release(val version: String, val apkUrl: String, val notes: String)
+    data class Release(
+        val version: String,
+        val apkUrl: String,
+        val notes: String,
+        /** Bytes, straight off the asset. 0 when GitHub did not report it. */
+        val sizeBytes: Long,
+    )
 
     private fun emit(event: String, data: Any?) {
         try {
@@ -71,6 +77,11 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 putBoolean("available", rel != null)
                 putString("version", rel?.version ?: "")
                 putString("notes", rel?.notes ?: "")
+                // Double, not Int: an APK is comfortably inside Int range today
+                // at 47MB, but the bridge marshals numbers as doubles anyway
+                // and a size field that overflows silently is not worth the
+                // two bytes saved.
+                putDouble("sizeBytes", (rel?.sizeBytes ?: 0L).toDouble())
                 putString("error", error)
                 putString("installed", installedVersion())
             }
@@ -156,11 +167,16 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
             val tag = json.optString("tag_name").removePrefix("v")
             val assets = json.optJSONArray("assets")
             var apkUrl = ""
+            var apkSize = 0L
             if (assets != null) {
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
                     if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
                         apkUrl = a.optString("browser_download_url")
+                        // Free: the asset we already picked carries it. It is
+                        // the one fact that decides whether someone taps Update
+                        // while on mobile data.
+                        apkSize = a.optLong("size", 0L)
                         break
                     }
                 }
@@ -176,7 +192,7 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 // returning "" — which is why the popup read "null" as if it
                 // were real release notes. isNull() catches that case first.
                 val notes = if (json.isNull("body")) "" else json.optString("body")
-                Release(tag, apkUrl, notes)
+                Release(tag, apkUrl, notes, apkSize)
             } else {
                 null // genuinely up to date — NOT an error
             }

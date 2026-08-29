@@ -97,6 +97,8 @@ jest.mock('../src/audioEffects', () => ({
 jest.mock('../src/duckState', () => ({setPausedByDuck: () => undefined}));
 jest.mock('../src/sleepTimer', () => ({
   sleepTimerOnTrackChange: () => undefined,
+  scheduleEndOfTrackStop: () => undefined,
+  sleepMode: () => 'off',
 }));
 jest.mock('../src/recentlyPlayed', () => ({remember: () => undefined}));
 jest.mock('../src/resume', () => ({

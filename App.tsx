@@ -726,7 +726,9 @@ function Shell() {
       */}
       <View style={styles.bottomStack} pointerEvents="box-none">
         <BodyFade />
-        {engine && <PlayerBar onExpand={expandPlayer} />}
+        {engine && (
+          <PlayerBar onExpand={expandPlayer} onAddToPlaylist={setAddTo} />
+        )}
         <BottomNav active={tab} onChange={switchTab} />
       </View>
 

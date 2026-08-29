@@ -1536,6 +1536,85 @@ Nothing outside `styles.css`, `index.html` and the README badges changed, so
 there is no new release: the application is byte-identical and tagging one
 would offer every user an update to the same build.
 
+## Round 14 — audit round 9: three bugs, and the + replaces the heart
+
+**The ramp was on one path out of seven.** `fadeInPlayer` appeared exactly once
+in the codebase, inside `playTrack` — so tapping a song was smooth and every
+other way audio starts was raw: resuming a restored session, the play button,
+the notification, a headset click, a queue row, both skips. The transient it
+hides belongs to ExoPlayer opening its output, so it now lives in
+`playWithFade()`, which is the only place playback resumes from silence.
+Skips get a tenth of it (40ms, not 130) because a skip is a button press
+waiting on a response and a rise on top of the engine's own latency reads as
+the button being slow. `restoreSession` also awaits `applyAudioEffects()` now
+— a restored session sits paused, so there is time, and a chain that attaches
+after audio is already out is exactly what the step change sounded like.
+
+**"End of track" was triggered by an event that fires after the boundary.**
+`PlaybackActiveTrackChanged` arrives once the next track is already active and
+playing; then cancel, then pause, each an await. That was the one-to-two
+seconds. The stop is now scheduled precisely, armed two seconds out by the
+watcher tick that already computes `remaining` — and the track-change event
+stays exactly as it was, as the backstop, so a frozen JS thread means late
+rather than never. Crossfade and the radio top-up are both gated on the mode:
+a twelve-second fade would otherwise begin twelve seconds BEFORE the boundary,
+mixing a song nobody asked for into the last seconds of the one you meant to
+fall asleep to, and the top-up would append eight more tracks to a queue that
+is about to stop. And the stop fades over 2.5s rather than cutting — every
+other pause in the app is a button press and stays instant.
+
+**The audit's preferred fix for the queue sheet would not have worked.**
+It proposed passing `onScroll` to `DraggableFlatList` so the offset reaches the
+sheet on the UI thread, as the playlist sheet does. But the library sets its
+OWN `onScroll` on the inner animated list AFTER spreading incoming props, so
+ours would have been silently dropped; and its internal `scrollOffset` shared
+value is not re-exported from the package index, so reaching it means a deep
+import into `lib/commonjs/context`. What the library DOES forward is
+`onScrollEndDrag` and `onMomentumScrollEnd` — which fire at rest and carry the
+authoritative offset, which is precisely where the staleness bit. Late is
+harmless mid-scroll; what matters is the value the scroll stops on, because
+that is what the next gesture reads. Plus a 4px tolerance instead of an exact
+zero, and a reset when the sheet opens — put in `Sheet` itself rather than at
+each call site, because the sheet is never unmounted and the offset from the
+last time it was open is still sitting in the shared value.
+
+**The + has two levels and the heart is a collection verb now.** First press
+likes and the glyph fills — immediately and visibly, or the second press reads
+as the first one having failed. Second press opens "Saved in", where every row
+is a toggle, the sheet stays open, Liked Songs is the first row driving the
+same store as the + itself, playlists are pinned-first and filterable past six.
+Long press skips straight to the sheet. One `<AddButton>` for the player and
+the mini player, because two copies of a two-level control is two chances for
+them to disagree about what the second press does. The heart stays on song
+rows, on albums and artists, and as a labelled row in the ⋮ menu — a menu item
+with a word beside it is not the ambiguity a bare glyph is.
+
+**D5 was a false alarm, and provably.** The equalizer's `blocksExternalGesture`
+takes a plain `useRef`, which the audit flagged as silently ignored. It is not:
+`createNativeWrapper` stamps `handlerTag` onto the ref through
+`useImperativeHandle` explicitly "for relations config", and RNGH's
+`convertToHandlerTag` reads exactly `ref.current?.handlerTag`. The ref points at
+RNGH's ScrollView rather than React Native's, which is the thing that actually
+matters, and the existing comment already says so.
+
+**The update prompt.** Its one piece of prose was a URL nobody can tap, because
+CI writes bodies that are literally `Full Changelog: https://…`. Stripped, and
+rendering nothing when nothing is left rather than an empty line holding space.
+`Download` instead of `Sparkles` — an update is a file arriving, and the sparkle
+was also the sidebar's glyph for "Your sound", one icon meaning two unrelated
+things. It is a `Sheet` now, like everything else in the app that asks a
+question, which also buys "Later" as a drag. And it shows the size, which the
+updater already had: it picked the asset.
+
+Sidebar: `AudioLines` for "Your sound" (a sparkle says "AI" now) and "Read docs"
+for Help, which pairs with the outbound arrow already on that row.
+
+Verified: 31 tests across six suites, six of them new and covering the sleep
+timer's manual-skip gate, the punctual stop, arming idempotence and the release-
+notes stripping. `tsc` and `eslint` clean. Every control this round renamed,
+moved or removed was grepped out of `docs/content` before merging, per the
+standing constraint — four pages described glyphs that no longer exist.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs
