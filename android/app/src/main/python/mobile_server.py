@@ -633,12 +633,26 @@ def _require_token():
 
 @app.after_request
 def _cors(resp):
-    # Same-origin in the WebView, so this is belt-and-braces — it also lets you
-    # point a desktop browser at http://127.0.0.1:8765 over `adb forward` while
-    # debugging the UI.
-    resp.headers.setdefault("Access-Control-Allow-Origin", "*")
-    resp.headers.setdefault("Access-Control-Allow-Headers", "*")
-    resp.headers.setdefault("Access-Control-Allow-Methods", "*")
+    """Permissive CORS on the DESKTOP TEST RUN ONLY.
+
+    It used to be unconditional, and on a phone that is a disclosure the app
+    gains nothing from. Loopback is reachable from the device's browser, so
+    `Access-Control-Allow-Origin: *` let any web page the user happened to open
+    fetch http://127.0.0.1:<port>/health and READ the answer — a reliable
+    "this person has Relaxify installed" fingerprint, and a port oracle for
+    whatever else is listening. /api/* was never at risk (the token gate holds,
+    and compare_digest is the right comparison), but a site should not be able
+    to enumerate the apps on the phone either.
+
+    The RN client is not a browser and never performs a preflight, so it does
+    not need these headers at all. The one caller that does is a desktop
+    browser pointed at the dev server over `adb forward`, and that run is
+    exactly the one with no token set.
+    """
+    if not _API_TOKEN:
+        resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+        resp.headers.setdefault("Access-Control-Allow-Headers", "*")
+        resp.headers.setdefault("Access-Control-Allow-Methods", "*")
     return resp
 
 

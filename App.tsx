@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
+  AppState,
   BackHandler,
   Linking,
   PermissionsAndroid,
@@ -67,6 +68,7 @@ import {
   startCrossfadeWatcher,
 } from './src/player';
 import {hydrate, readSettings, useLikes} from './src/store';
+import {flushAll} from './src/storage';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
 import {applyAudioEffects} from './src/audioEffects';
@@ -189,9 +191,18 @@ function Shell() {
     // …and again on every return to the foreground, because a process kept
     // alive by the playback service may not launch again for days.
     watchForegroundUpdates();
+    // Store writes are debounced (see storage.ts). Leaving the foreground is
+    // the last moment we are reliably given before Android may reclaim the
+    // process, so anything still pending goes out now.
+    const bg = AppState.addEventListener('change', next => {
+      if (next !== 'active') {
+        flushAll();
+      }
+    });
     return () => {
       clearTimeout(u);
       clearTimeout(bootCap);
+      bg.remove();
     };
   }, [liftSplash]);
 

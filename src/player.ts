@@ -1255,6 +1255,8 @@ async function prefetchNext(): Promise<void> {
  * audio, and re-arms per track via `fadedFor`.
  */
 let fadeTimer: ReturnType<typeof setInterval> | null = null;
+/** Whether the previous watcher tick saw audio running — see the idle gate. */
+let wasPlaying = false;
 let fadedFor = '';
 // True while the native overlap player is running toward a handoff — a REAL
 // crossfade (two songs audible at once) rather than the fade-down/up fallback.
@@ -1376,6 +1378,59 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     return;
   }
   fadeTimer = setInterval(async () => {
+    // ── The idle gate ─────────────────────────────────────────────────────
+    //
+    // Nothing below this point means anything when no audio is running, and
+    // this timer is started at boot and never cleared — so without the gate it
+    // was the most expensive thing in the app by a wide margin.
+    //
+    // Every tick, once a second, for the whole life of the process (which is
+    // DAYS: the mediaPlayback foreground service keeps it resident long after
+    // the last song), it ran topUpFromRadio (getQueue — marshalling the entire
+    // queue across the bridge), prefetchNext (getProgress +
+    // getActiveTrackIndex), then getProgress + getActiveTrackIndex +
+    // getActiveTrack again. Seven bridge round trips a second, one of them
+    // O(queue length), while the user was reading a book with the app closed.
+    //
+    // One cheap state read replaces all of it. Paused, stopped or idle, the
+    // tick now costs a single call and returns; playing, nothing changes.
+    let playing = false;
+    try {
+      const {state} = await TrackPlayer.getPlaybackState();
+      playing =
+        state === State.Playing ||
+        state === State.Buffering ||
+        state === State.Loading;
+    } catch {
+      return; // engine not up — there is nothing to do either way
+    }
+    if (!playing) {
+      // The falling edge is the one tick that still has work: a pause must
+      // record the position it actually stopped at. Under the old always-on
+      // tick that happened by accident, on whichever tick next passed
+      // saveResume's 4s throttle; forcing it here writes the exact position
+      // once and then goes quiet, which is both more accurate and one write
+      // instead of a tick a second forever.
+      if (wasPlaying) {
+        wasPlaying = false;
+        try {
+          const {position} = await TrackPlayer.getProgress();
+          const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+          const src = sourceTrackFor(
+            (await TrackPlayer.getActiveTrack()) ?? null,
+          );
+          if (src) {
+            saveResume(
+              {track: src, position, queue: queueSource, index: idx},
+              true,
+            );
+          }
+        } catch {}
+      }
+      return;
+    }
+    wasPlaying = true;
+
     // Piggybacked on this tick: keep the queue topped up with similar songs.
     topUpFromRadio().catch(() => {});
 

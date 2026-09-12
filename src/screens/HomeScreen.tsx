@@ -52,9 +52,28 @@ import {BOTTOM_INSET} from '../layout';
  * what replaces the "Starting the music engine…" wait with actual content —
  * the backend still warms up behind them and the fresh rows swap in when
  * ready, but the user never stares at a spinner.
+ *
+ * CAPPED, on the way in as well as on the way out. Uncapped, this grew with
+ * whatever the backend chose to return — every row, every item, each carrying
+ * a full `artwork_urls` map — and the whole blob was JSON.parse'd on the JS
+ * thread during every cold start, before the first frame, getting slower as
+ * the catalogue behind it got richer. It is a render cache for the top of one
+ * screen: it does not need to be the whole payload, and everything below the
+ * fold has been replaced by fresh data before anyone can scroll to it.
+ *
+ * Only what is PERSISTED is trimmed. What is on screen stays whole.
  */
+const CACHE_ROWS = 4;
+const CACHE_ITEMS_PER_ROW = 12;
+
+const trimForCache = (rows: HomeRow[]): HomeRow[] =>
+  rows
+    .filter(r => r && Array.isArray(r.items))
+    .slice(0, CACHE_ROWS)
+    .map(r => ({...r, items: r.items.slice(0, CACHE_ITEMS_PER_ROW)}));
+
 const homeCache = createStore<HomeRow[]>('mp.homeRows.v1', [], raw =>
-  asArray<HomeRow>(raw).filter(r => r && Array.isArray(r.items)),
+  trimForCache(asArray<HomeRow>(raw)),
 );
 
 /** What a quick-access tile points at. Home doesn't own the tracklists — the
@@ -222,7 +241,7 @@ export const HomeScreen = React.memo(function HomeScreen({
       const data = await getHome();
       if (data.length) {
         setFresh(data);
-        homeCache.set(data); // seed the next launch
+        homeCache.set(trimForCache(data)); // seed the next launch
       }
     } catch (e) {
       // Only surface the error if there's nothing on screen — a failed refresh

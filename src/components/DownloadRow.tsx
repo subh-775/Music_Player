@@ -8,11 +8,11 @@
 import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {C, S, T} from '../theme';
-import {cleanText, getBestArtworkUrl} from '../tracks';
+import {cleanText, getBestArtworkUrl, thumbArtwork} from '../tracks';
 import type {DownloadJob} from '../downloads';
 
 export function DownloadRow({job}: {job: DownloadJob}) {
-  const artwork = getBestArtworkUrl(job.track);
+  const artwork = thumbArtwork(getBestArtworkUrl(job.track));
   const pct = job.progress ?? 0;
   const indeterminate = job.progress === null;
   const failed = job.status === 'error';

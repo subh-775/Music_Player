@@ -160,10 +160,16 @@ chaquopy {
             // set; SoundCloud/YouTube via NewPipeExtractor come later with their
             // native dependency, and are lazily imported so their absence here
             // does not stop the backend from booting.
+            // PINNED, all four. Two of these were floors (">="), which meant
+            // no two CI builds resolved the same tree: the APK's contents and
+            // size drifted release to release, a broken upstream publish
+            // shipped straight to users with no change on our side, and a
+            // field report could not be tied to a known set of bytes. Bump
+            // these deliberately, in a commit, where the diff is reviewable.
             install "flask==3.0.3"
-            install "requests>=2.31.0"
+            install "requests==2.32.3"
             install "mutagen==1.47.0"
-            install "yt-dlp>=2026.7.4"
+            install "yt-dlp==2026.7.4"
         }
 
         // Precompile to .pyc at BUILD time, not on the phone.

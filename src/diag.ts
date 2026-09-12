@@ -27,6 +27,8 @@ export type DiagEntry = {at: number; tag: string; msg: string};
 const entries: DiagEntry[] = [];
 const listeners = new Set<() => void>();
 let snapshot: DiagEntry[] = [];
+/** Set by diag(), cleared by readDiag() — see the note there. */
+let stale = false;
 
 /** Record an event. Keep `msg` short — this is a log line, not a report. */
 export function diag(tag: string, msg: string): void {
@@ -41,8 +43,19 @@ export function diag(tag: string, msg: string): void {
   if (entries.length > MAX) {
     entries.splice(0, entries.length - MAX);
   }
-  snapshot = [...entries].reverse(); // newest first, new identity for React
-  listeners.forEach(l => l());
+  // Mark the snapshot stale rather than rebuilding it here.
+  //
+  // This module claims to cost nothing when nobody is looking at Diagnostics,
+  // and it did not: every diag() call allocated a 200-element copy and
+  // reversed it, whether or not a single component was subscribed. diag() is
+  // called from the play path, the update path and the boot path, so that was
+  // real work on the JS thread in exchange for a screen almost nobody opens.
+  // readDiag() rebuilds on demand instead, which is the only moment the order
+  // and the fresh identity actually matter.
+  stale = true;
+  if (listeners.size) {
+    listeners.forEach(l => l());
+  }
 }
 
 export function subscribeDiag(l: () => void): () => void {
@@ -51,12 +64,16 @@ export function subscribeDiag(l: () => void): () => void {
 }
 
 export function readDiag(): DiagEntry[] {
+  if (stale) {
+    stale = false;
+    snapshot = [...entries].reverse(); // newest first, new identity for React
+  }
   return snapshot;
 }
 
 /** The whole log as text, for the "Copy" button. */
 export function diagText(): string {
-  return snapshot
+  return readDiag()
     .map(e => {
       const t = new Date(e.at).toISOString().slice(11, 23);
       return `${t}  [${e.tag}] ${e.msg}`;
