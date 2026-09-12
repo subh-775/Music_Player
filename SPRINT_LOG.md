@@ -1615,6 +1615,88 @@ notes stripping. `tsc` and `eslint` clean. Every control this round renamed,
 moved or removed was grepped out of `docs/content` before merging, per the
 standing constraint — four pages described glyphs that no longer exist.
 
+## Round 15 — audit round 10: what the app costs when nobody is listening
+
+Shipped as **v1.2.1**. Nine audit rounds went into behaviour — what the app does
+wrong. This one is about cost: what it spends while idle, what it reads before it
+can draw, and what it will accept from the network. Twenty-one findings, ten
+fixed here, eleven written up in `AUDIT.md` because each needs a decision, a
+device, or both.
+
+**The watcher never idled, and this is the one that mattered.**
+`startCrossfadeWatcher` is started at boot and never cleared, and the process
+outlives the UI *by days* behind the mediaPlayback foreground service. Every
+tick, once a second, for that whole lifetime, regardless of whether anything was
+playing: `topUpFromRadio` (getQueue — the WHOLE queue, marshalled across the
+bridge), `prefetchNext` (getProgress + getActiveTrackIndex), then getProgress +
+getActiveTrackIndex + getActiveTrack again. Seven bridge round trips a second,
+one of them O(queue length), while the phone was in a pocket. The `AppState`
+check that might have stopped it came *after* all of it.
+
+One playback-state read now gates the lot. The falling edge keeps the one thing
+that tick was silently providing — a resume position at the moment of the pause —
+and writes it exactly, rather than within four seconds of it by luck of
+`saveResume`'s throttle. That was not in the original diagnosis; it turned up on
+re-reading the call sites and the first version of the gate would have quietly
+regressed it.
+
+**Cold start, and why it got worse over time.** `hydrateAll` was sixteen
+`getItem`s — sixteen bridge crossings and sixteen SQLite queries before the first
+frame, all queued behind the same single-threaded module. One `multiGet` now,
+with the per-store path kept as the fallback: a slow start is bad, an empty
+library looks like data loss. And `mp.homeRows.v1` was uncapped, so the blob
+`JSON.parse`d on every launch grew with the catalogue behind it — the likeliest
+answer to the reported "startup got slower the longer I used it". Capped on the
+way in as well as the way out, because a revive-side cap alone leaves the disk
+blob exactly as large as it was.
+
+**Steady state.** Store writes are debounced rather than serialised on every
+mutation (one play rewrote the recents list AND the stats blob — 300 tracks, 200
+artists, 700 log entries — synchronously mid-render), with a flush when the app
+leaves the foreground. `diag()` was allocating and reversing a 200-element array
+on every log line whether or not anything was subscribed, from the play, update
+and boot paths; its own docstring claimed it cost nothing. List rows asked for
+the baked 500x500 cover and drew it at 52dp, so `thumbArtwork` asks both
+catalogues for the size they template. `PlayerBar` is deliberately left alone —
+its cover is already prefetched and the same URL feeds the tint, so shrinking it
+adds a fetch and risks the bar disagreeing with the full player.
+
+**Three things the network should not have been trusted with.** The updater took
+`browser_download_url` out of a JSON response and handed whatever came back to
+the package installer, with nothing checking the host: HTTPS and a GitHub host
+now, re-checked after redirects because redirects are followed, plus the asset
+size GitHub already reported — which is really the check that catches the
+download that died at 90% and reaches the user as "App not installed" with no
+reason. CORS was `Access-Control-Allow-Origin: *` unconditionally, so any page
+the user opened could read `/health` and learn the app was installed; scoped to
+the desktop test run that actually needs it. And two of the four Python pins were
+floors, so no two CI builds resolved the same tree.
+
+**On the keystore.** The standing constraint below already treated debug-key
+signing as a known, deliberate trade. The audit changes the risk, not the trade:
+that keystore is not merely *a* committed key, it is **the** Android debug key —
+SHA1 `5E:8F:16:...:F6:25`, byte-identical in every React Native project ever
+generated. So "the updater's signature chain holds" is true for an attacker too.
+Anyone can build an APK declaring `com.musicplayer`, sign it with a key they
+already have, and have Android accept it as an update that inherits the library,
+the UID and the permissions. Still not fixed here — it is a one-way door and the
+reinstall is the user's call — but it is now written up as S1 with the sequencing,
+and the constraint below is reworded to say what it actually is.
+
+Verified: `tsc` clean, 37 tests across seven suites (six new for `thumbArtwork`,
+including the `\d+` backtracking case — `200x200bb` → `200x20` — that the
+single-pass regex exists to prevent), `eslint` unchanged at 199/4, identical
+counts before and after, all pre-existing and all in `docs/`. No control was
+renamed, moved or removed this round, so the standing docs grep had nothing to
+find; the docs changes are additive — a new **Speed and battery** section in
+troubleshooting, the update verification in `updates.mdx`, and an honest note in
+`architecture.mdx` that the CORS narrowing does not fully close the
+fingerprint (`/health` is still ungated — that is S4, still open).
+
+Not measured. There is no device in this environment, so every number above is
+reasoned from the code; `AUDIT.md` closes with what to capture on a real low-end
+phone before any of it goes near release notes.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs
@@ -1622,6 +1704,12 @@ standing constraint — four pages described glyphs that no longer exist.
   confidently names a control the reader cannot find is worse than no page,
   because it makes them doubt themselves rather than the documentation.
 - No hardcoding for one device; must work across Android phones.
-- Release is **debug-keystore signed** and the keystore is committed, so the
-  in-app updater's signature chain holds. Swapping to a real keystore forces a
-  reinstall for everyone — do it deliberately, at a version boundary.
+- Release is **debug-keystore signed**, and the keystore is not merely committed
+  — it is THE Android debug key, identical in every React Native project
+  (SHA1 `5E:8F:16:...:F6:25`). The in-app updater's signature chain therefore
+  holds for anyone, not just for us: an APK declaring `com.musicplayer` and
+  signed with that key installs over Relaxify as an update and inherits its
+  data, UID and permissions. Swapping to a real keystore forces a reinstall for
+  everyone — do it deliberately, at a version boundary, and SOON, because the
+  stranded population only grows. Written up as **S1** in `AUDIT.md` with the
+  sequencing.
