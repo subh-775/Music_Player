@@ -33,6 +33,19 @@ jobs:
           # The default shallow clone has none.
           fetch-depth: 0
 
+      # v1.2.1 was pushed from a stale local tag sitting on the v1.2.0 commit:
+      # CI went green and published old code under a new number, and users on
+      # it can't be offered the real build under that number again. A commit
+      # carrying another release tag is always that mistake.
+      - name: Refuse a commit that is already released
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          OTHER="$(git tag --points-at HEAD 'v*' | grep -vx "$GITHUB_REF_NAME" || true)"
+          if [ -n "$OTHER" ]; then
+            echo "::error::$GITHUB_REF_NAME is on $(git rev-parse --short HEAD), already released as: $OTHER. Delete the tag and re-tag the intended commit."
+            exit 1
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:

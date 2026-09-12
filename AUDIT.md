@@ -7,12 +7,12 @@ Nine previous audit rounds went into **behaviour** — what the app does wrong.
 This one is about **cost**: what the app spends while nobody is listening, what
 it reads before it can draw a frame, and what it will accept from the network.
 
-Everything marked **Fixed** is in `ff5e23f` and **shipped in v1.2.1**, verified
+Everything marked **Fixed** is in `ff5e23f` and **shipped in v1.2.2**, verified
 (tsc clean, 37 tests pass, eslint unchanged at 199 problems / 4 errors — all
 pre-existing, all in `docs/`). Everything marked **Proposed** needs a decision, a
 device, or both, and is deliberately left uncommitted.
 
-> **S1 is not in v1.2.1.** That release is still signed with the debug key, like
+> **S1 is not in v1.2.2.** That release is still signed with the debug key, like
 > every one before it. See below for why it is a release-planning decision rather
 > than a patch.
 
@@ -316,12 +316,14 @@ not a crash.
 
 ## Suggested release plan
 
-**v1.2.1 — shipped.** The ten fixes above (S2, S3, S7, P1, P2, P6, P7, P8, P9,
+**v1.2.2 — shipped.** The ten fixes above (S2, S3, S7, P1, P2, P6, P7, P8, P9,
 W1). No signing change, so it installs over an existing app in the normal way.
+(`v1.2.1` was pushed on `a839945`, the round-9 commit, so that release is a
+rebuild of v1.2.0 under a new number and contains none of these.)
 
 **Next release — the cutover.** S1, with the release notes and the in-app notice.
-If a library export is wanted ahead of the cutover, v1.2.1 was the release to put
-it in — so it now has to ship in a v1.2.2 *before* the cutover, or the cutover
+If a library export is wanted ahead of the cutover, v1.2.2 was the release to put
+it in — so it now has to ship in a v1.2.3 *before* the cutover, or the cutover
 goes out without one.
 
 **The release after.** P3 and P12 — the two biggest remaining numbers, both

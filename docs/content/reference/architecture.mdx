@@ -8,7 +8,7 @@ Searching, ranking results, resolving a stream, downloading — all of it runs o
 
 The engine that does this work is a small server running **inside the app, on your phone only**. It is not reachable from your network. It is guarded by a password the app generates fresh on every launch and shares with nothing, because on Android "only on this device" is not by itself a boundary — other apps on the same phone can reach it, and so, in a limited way, can a web page open in your browser.
 
-**v1.2.1** narrows the browser case. The engine used to let any web page *read* its replies, which meant a site you visited could ask "are you there?" and be told. It no longer sends the permission that made those replies readable, so a page gets nothing back.
+**v1.2.2** narrows the browser case. The engine used to let any web page *read* its replies, which meant a site you visited could ask "are you there?" and be told. It no longer sends the permission that made those replies readable, so a page gets nothing back.
 
 To be exact about what that does and does not fix: a determined page can still infer the app is installed from whether the request succeeds at all, and closing that completely is a change still to come. Nothing of yours was reachable in either case — the password guards every route that touches your library, and that has always held. This is about not confirming the app exists to sites with no business knowing.
 
