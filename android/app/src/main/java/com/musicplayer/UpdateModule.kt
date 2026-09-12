@@ -172,7 +172,19 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
                     if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
-                        apkUrl = a.optString("browser_download_url")
+                        val candidate = a.optString("browser_download_url")
+                        // The download URL is taken from a network response, so
+                        // it is input, not configuration. Nothing downstream
+                        // checks what it points at: downloadAndInstall fetches
+                        // whatever it is handed and passes the result to the
+                        // package installer. A release signed with a stable key
+                        // makes a swapped APK unusable, but the check costs one
+                        // comparison and does not depend on that holding.
+                        if (!isTrustedApkUrl(candidate)) {
+                            Log.w(TAG, "ignoring release asset on untrusted host")
+                            continue
+                        }
+                        apkUrl = candidate
                         // Free: the asset we already picked carries it. It is
                         // the one fact that decides whether someone taps Update
                         // while on mobile data.
@@ -203,6 +215,26 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
         null
     }
 
+    /**
+     * Is this a URL we are willing to download an APK from?
+     *
+     * HTTPS only (so a redirect down to cleartext cannot be followed into a
+     * MITM), and only the hosts GitHub actually serves release assets from.
+     * Checked on the asset URL AND again on whatever URL the connection
+     * finally settled on, because redirects are followed.
+     */
+    private fun isTrustedApkUrl(raw: String): Boolean = try {
+        val u = URL(raw)
+        val host = u.host.lowercase()
+        u.protocol.equals("https", ignoreCase = true) &&
+            (host == "github.com" ||
+                host == "api.github.com" ||
+                host == "objects.githubusercontent.com" ||
+                host.endsWith(".githubusercontent.com"))
+    } catch (e: Exception) {
+        false
+    }
+
     /** "1.10.0" must beat "1.9.0", so compare numerically part-by-part. */
     private fun isNewer(remote: String, installed: String): Boolean {
         fun parts(v: String) = v.trim().split(".", "-")
@@ -218,13 +250,27 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
     }
 
     private fun downloadAndInstall(release: Release) {
+        val out = File(ctx.cacheDir, "update.apk")
         try {
-            val out = File(ctx.cacheDir, "update.apk")
+            // Always start from nothing. A download that died half way left its
+            // partial file sitting here, and the only thing that ever removed
+            // it was the next attempt — so a user who tried once on a bad
+            // connection carried tens of megabytes of dead cache indefinitely.
             if (out.exists()) out.delete()
             val conn = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000
                 readTimeout = 30000
                 instanceFollowRedirects = true
+            }
+            // Redirects are followed, so where we ASKED to go is not necessarily
+            // where the bytes came from. GitHub bounces release assets to its
+            // object store, which is legitimate and on the allowlist; anything
+            // else is not, and must not reach the installer.
+            if (!isTrustedApkUrl(conn.url.toString())) {
+                Log.e(TAG, "update redirected to an untrusted host")
+                conn.disconnect()
+                emit("mp.update.progress", -1)
+                return
             }
             val total = conn.contentLength.toLong()
             var read = 0L
@@ -248,6 +294,18 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 }
             }
             conn.disconnect()
+
+            // The size GitHub reported for the asset is a free integrity check,
+            // and it is the one that catches the case the user actually hits: a
+            // connection that dropped at 90% wrote a truncated APK, and a
+            // truncated APK reaches the installer as "App not installed" with
+            // no reason given. Checked only when the API reported a size.
+            if (release.sizeBytes > 0 && read != release.sizeBytes) {
+                Log.e(TAG, "update size mismatch: got $read, expected ${release.sizeBytes}")
+                out.delete()
+                emit("mp.update.progress", -1)
+                return
+            }
             emit("mp.update.progress", 100)
 
             val uri: Uri = FileProvider.getUriForFile(
@@ -261,6 +319,8 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
             ctx.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "update download failed: ${e.message}")
+            // Do not leave the partial download behind on the way out.
+            try { out.delete() } catch (_: Exception) {}
             emit("mp.update.progress", -1)
         }
     }

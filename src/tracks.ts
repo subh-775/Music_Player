@@ -212,6 +212,40 @@ export function upgradeArtwork(url?: string): string {
     );
 }
 
+/**
+ * The same cover, asked for at LIST size instead of player size.
+ *
+ * `normalizeTrack` bakes a 500x500 (or iTunes 600x600bb) URL into every track,
+ * because that is the right size for the player and for a Home card. A library
+ * row renders it at 52dp. Even at 3x density that is ~156px, so the row was
+ * downloading, decoding and holding roughly ten times the pixels it draws —
+ * per row, for every row on screen and every row the virtualiser keeps warm.
+ * On a long list that is the difference between a few megabytes of bitmap
+ * cache and tens of them, and it is paid again over the network every time.
+ *
+ * Both catalogues encode the size in the path, so asking smaller is free and
+ * needs no new request pattern. A URL that carries no size template is
+ * returned untouched — it was never resizable and there is nothing to do.
+ */
+export function thumbArtwork(url?: string): string {
+  if (!url) {
+    return '';
+  }
+  // ONE pass, with the iTunes "bb" suffix captured rather than matched by a
+  // lookahead. Two chained replaces needed a negative lookahead to stop the
+  // second one eating the first one's output, and `\d+` backtracks: on
+  // "200x200bb" the engine happily settles for "200x20" once the lookahead
+  // rejects the full match. Capturing the suffix removes the ambiguity.
+  return url.replace(/(\d+)x(\d+)(bb)?/g, (m, w, h, bb) => {
+    const width = parseInt(w, 10);
+    const height = parseInt(h, 10);
+    if (bb) {
+      return width > 200 ? '200x200bb' : m;
+    }
+    return width > 150 && height > 150 ? '150x150' : m;
+  });
+}
+
 /** Best available cover, upgraded to a usable resolution where the URL allows. */
 export function getBestArtworkUrl(track: Track | null | undefined): string {
   const urls = track?.artwork_urls || {};

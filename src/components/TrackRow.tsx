@@ -23,7 +23,7 @@ import {
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {formatDuration, type Track} from '../backend';
-import {cleanText, getBestArtworkUrl} from '../tracks';
+import {cleanText, getBestArtworkUrl, thumbArtwork} from '../tracks';
 import {useLike} from '../store';
 import {addToQueue, useIsActiveTrack} from '../player';
 import {useIsDownloaded} from '../downloads';
@@ -80,7 +80,9 @@ export const TrackRow = React.memo(function TrackRow({
   showActions?: boolean;
 }) {
   const dur = formatDuration(track.duration_ms);
-  const artwork = getBestArtworkUrl(track);
+  // thumbArtwork, not the baked 500x500: this draws at 52dp, and a list is
+  // where the difference is multiplied by every row the virtualiser holds.
+  const artwork = thumbArtwork(getBestArtworkUrl(track));
   const {liked, toggle} = useLike(track);
   // A small green tick marks anything already on disk — permanent until the
   // file is deleted (a disk scan drops the id).

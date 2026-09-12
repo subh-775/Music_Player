@@ -24,8 +24,20 @@ The fifteen-minute window exists only to absorb a burst of opening and closing. 
 ## Installing
 
 1. **Download** — runs on its own thread. Leaving the Settings screen does not cancel it; the progress survives navigation.
-2. **Install** — Android's package installer takes over and asks for confirmation. The first time it will also ask permission to install packages from this app.
-3. The app restarts on the new version.
+2. **Check** — the download is verified before it is offered to the installer. See below.
+3. **Install** — Android's package installer takes over and asks for confirmation. The first time it will also ask permission to install packages from this app.
+4. The app restarts on the new version.
+
+### What is checked before anything is installed
+
+Two things, both added in **v1.2.1**:
+
+- **Where it came from.** The download address is read out of GitHub's own reply, so it is something the app is *told* rather than something it knows. It must be HTTPS and a GitHub address — and that is checked again after any redirect, because redirects are followed and the address the bytes actually arrive from is the one that matters.
+- **That all of it arrived.** GitHub reports the exact size of the file it is offering, and the app compares what it received against that number. A download that was cut short is deleted rather than handed on.
+
+The second check is the one you are more likely to meet. A connection that drops at 90% used to produce a file that reached the installer and was refused with Android's **"App not installed"** and no explanation. Now it reports a failed download, which is what actually happened, and you can simply try again.
+
+A failed or interrupted download no longer leaves the partial file behind either — it used to sit in the cache until the next attempt overwrote it.
 
 <Danger title="Install over the top, never uninstall first">
   The in-app updater always installs over the existing app, which keeps your playlists, liked songs, history and settings.
