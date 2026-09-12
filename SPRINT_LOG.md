@@ -1617,7 +1617,7 @@ standing constraint — four pages described glyphs that no longer exist.
 
 ## Round 15 — audit round 10: what the app costs when nobody is listening
 
-Shipped as **v1.2.1**. Nine audit rounds went into behaviour — what the app does
+Shipped as **v1.2.2** (the v1.2.1 tag was pushed on the round-9 commit, so that APK carries none of this). Nine audit rounds went into behaviour — what the app does
 wrong. This one is about cost: what it spends while idle, what it reads before it
 can draw, and what it will accept from the network. Twenty-one findings, ten
 fixed here, eleven written up in `AUDIT.md` because each needs a decision, a

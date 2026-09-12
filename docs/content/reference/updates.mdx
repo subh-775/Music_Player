@@ -30,7 +30,7 @@ The fifteen-minute window exists only to absorb a burst of opening and closing. 
 
 ### What is checked before anything is installed
 
-Two things, both added in **v1.2.1**:
+Two things, both added in **v1.2.2**:
 
 - **Where it came from.** The download address is read out of GitHub's own reply, so it is something the app is *told* rather than something it knows. It must be HTTPS and a GitHub address — and that is checked again after any redirect, because redirects are followed and the address the bytes actually arrive from is the one that matters.
 - **That all of it arrived.** GitHub reports the exact size of the file it is offering, and the app compares what it received against that number. A download that was cut short is deleted rather than handed on.

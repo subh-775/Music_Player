@@ -68,7 +68,7 @@ Storage permission was declined, or the chosen folder is on removable media that
 
 ### The app drained the battery while I was not using it
 
-Fixed in **v1.2.1**, and it was the app's fault rather than your phone's.
+Fixed in **v1.2.2**, and it was the app's fault rather than your phone's.
 
 A one-second timer that exists to run crossfades never stopped running. Because playback keeps the process alive — deliberately, so music survives the screen going off — that timer kept ticking for as long as the process lived, which can be **days**. Every tick it asked the audio engine seven separate questions, one of which copied the entire queue across, whether or not anything was playing.
 
@@ -76,7 +76,7 @@ It now checks one thing first: is audio actually running. When nothing is playin
 
 ### The app got slower to start the longer I used it
 
-Fixed in **v1.2.1**. Two causes, both of which grew with use, which is why a fresh install always felt fine.
+Fixed in **v1.2.2**. Two causes, both of which grew with use, which is why a fresh install always felt fine.
 
 The home screen kept a copy of its last contents so it would have something to show instantly on the next launch. Nothing ever trimmed that copy, so it grew with the catalogue behind it — and all of it had to be read and parsed before the first frame could be drawn. It is now capped at what the screen actually shows.
 
@@ -84,11 +84,11 @@ Separately, the app read its saved data — playlists, likes, history, settings 
 
 ### Long lists felt heavy to scroll
 
-Improved in **v1.2.1**. Every row was fetching album art at 500×500 and drawing it at roughly a fifth of that, so each row downloaded and held about ten times the image it needed. Both catalogues can serve a smaller cover from the same address, so rows now ask for one.
+Improved in **v1.2.2**. Every row was fetching album art at 500×500 and drawing it at roughly a fifth of that, so each row downloaded and held about ten times the image it needed. Both catalogues can serve a smaller cover from the same address, so rows now ask for one.
 
 The full player still uses the large artwork — that is the one place where it is the right size.
 
-<Note title="If it still drains after v1.2.1">
+<Note title="If it still drains after v1.2.2">
   Check whether something is genuinely playing. A paused song still holds the playback service, which is normal and deliberate, but a song that is *playing* to a screen you are not looking at is not. **Settings → Diagnostics** shows what the app has been doing.
 </Note>
 
