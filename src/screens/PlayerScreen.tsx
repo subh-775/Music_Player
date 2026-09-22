@@ -38,6 +38,7 @@ import {
   Check,
   ChevronDown,
   CircleArrowDown,
+  Gauge,
   Disc3,
   Headphones,
   Pause,
@@ -81,6 +82,7 @@ import {
   useProgress,
 } from '../player';
 import {useAudioOutput} from '../audioOutput';
+import {useSettings} from '../store';
 import {
   bigArt,
   miniArt,
@@ -100,6 +102,8 @@ import {QueuePane} from './QueueScreen';
 import {Sheet} from '../components/Sheet';
 import {AddButton} from '../components/AddButton';
 import {SleepSheet} from '../components/SleepSheet';
+import {SpeedSheet} from '../components/SpeedSheet';
+import {clampRate, isRate, rateLabel} from '../playbackRate';
 import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {toast} from '../toast';
 
@@ -233,8 +237,13 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   const [pane, setPane] = useState<Pane>('song');
   const [queueOpen, setQueueOpen] = useState(false);
   const [sleepOpen, setSleepOpen] = useState(false);
+  const [speedOpen, setSpeedOpen] = useState(false);
   /** Non-empty while a timer is running — 'in 24 min', 'end of track'. */
   const sleepArmed = sleepLabel(useSleepTimer());
+  // The number replaces the glyph when it is not 1x, so the row shows the
+  // actual speed rather than just "speed is a thing you can change".
+  const rate = clampRate(useSettings().playbackRate);
+  const fastRate = !isRate(rate, 1);
   /** True while a queue row is lifted — the sheet's own drag stands down, or it
    *  wins a 12px-vs-12px tie it has no business winning. */
   const [rowDragging, setRowDragging] = useState(false);
@@ -1136,6 +1145,25 @@ export const PlayerScreen = React.memo(function PlayerScreen({
                 lyricsDead={!lyricsState.available}
               />
               <View style={styles.bottomRight}>
+                {/* Speed, then sleep, then queue — in increasing distance from
+                    the song playing right now. Tinted when it is not 1x, for
+                    the same reason the sleep timer is when armed: a setting
+                    that carries across songs has to say so, or the next track
+                    sounding wrong is a mystery. */}
+                <TouchableOpacity
+                  onPress={() => setSpeedOpen(true)}
+                  hitSlop={14}
+                  activeOpacity={1}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Playback speed: ${rateLabel(rate)}`}
+                  style={styles.queueBtn}>
+                  {fastRate ? (
+                    <Text style={styles.rateBadge}>{rateLabel(rate)}</Text>
+                  ) : (
+                    <Gauge size={21} color={C.text} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+
                 {/* Sleep timer, next to the thing it will stop. It was in the
                     drawer, which is two gestures away from the music and the
                     wrong place for something you reach for with the phone
@@ -1179,6 +1207,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           inside the player's own animated transform and its display:none pane
           stack — it sits in a sheet of its own, mounted only once opened.
         */}
+        <SpeedSheet open={speedOpen} onClose={() => setSpeedOpen(false)} />
         <SleepSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
 
         <Sheet
@@ -1649,6 +1678,14 @@ const styles = StyleSheet.create({
   // No ring, no fill, no press state: the capsule at the other end of this row
   // is the only lit thing down here, and two lit things is a competition.
   queueBtn: {padding: 6},
+  // Tabular-ish: a fixed min width so 1.25x and 2x do not shuffle the row.
+  rateBadge: {
+    color: C.accent,
+    fontSize: 13,
+    fontWeight: '800',
+    minWidth: 34,
+    textAlign: 'center',
+  },
   bottomRight: {flexDirection: 'row', alignItems: 'center', gap: 2},
   /**
    * A DEFINITE height, not a maxHeight — and this is what makes the queue

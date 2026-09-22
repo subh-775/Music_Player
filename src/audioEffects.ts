@@ -15,7 +15,7 @@ type AudioNative = {
   getCapabilities?: () => Promise<EqCapabilities>;
   setEqualizer?: (enabled: boolean, gainsDb: number[]) => Promise<boolean>;
   setNormalize?: (enabled: boolean) => Promise<boolean>;
-  prepareCrossfade?: (url: string) => Promise<boolean>;
+  prepareCrossfade?: (url: string, rate: number) => Promise<boolean>;
   startCrossfade?: (durationMs: number) => Promise<boolean>;
   crossfadePosition?: () => Promise<number>;
   stopCrossfade?: () => Promise<boolean>;
@@ -70,9 +70,14 @@ export const crossfadeSupported =
  * Open the incoming track's stream and buffer it. Silent, and no commitment —
  * call it seconds before the boundary and decide later whether to use it.
  */
-export async function prepareCrossfade(url: string): Promise<boolean> {
+export async function prepareCrossfade(
+  url: string,
+  /** The speed the MAIN player is running at — the overlap has to match, or the
+   *  two tracks are audibly at different tempos for the length of the fade. */
+  rate: number,
+): Promise<boolean> {
   try {
-    return (await native.prepareCrossfade?.(url)) ?? false;
+    return (await native.prepareCrossfade?.(url, rate)) ?? false;
   } catch {
     return false;
   }

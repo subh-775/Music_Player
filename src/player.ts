@@ -24,7 +24,7 @@ import TrackPlayer, {
   type Track as RNTPTrack,
 } from 'react-native-track-player';
 import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
-import {currentQuality, readSettings} from './store';
+import {currentQuality, readSettings, writeSetting} from './store';
 import {
   cleanText,
   getDownloadKey,
@@ -444,6 +444,7 @@ export async function restoreSession(): Promise<boolean> {
     // chain properly — and an effects chain that attaches after audio is
     // already out is exactly what the step change on resume sounds like.
     await applyAudioEffects();
+    await applyPlaybackRate();
     // Seed the now-playing mirror. A restored session is left PAUSED, so no
     // track-change event fires — without this the mini player would sit blank
     // until the user pressed play (RNTP's own hook self-seeded on mount; ours
@@ -667,8 +668,10 @@ export async function playTrack(
 
   // Android destroys audio effects along with the audio session, so the EQ has
   // to be re-attached each time playback starts — otherwise the setting works
-  // for exactly one song and then silently stops.
+  // for exactly one song and then silently stops. Speed rides along for the
+  // same reason: reset() clears it.
   applyAudioEffects();
+  applyPlaybackRate();
 }
 
 /**
@@ -1120,6 +1123,37 @@ export async function setRepeat(mode: RepeatMode): Promise<void> {
   await TrackPlayer.setRepeatMode(mode);
 }
 
+/**
+ * Playback speed.
+ *
+ * ExoPlayer pitch-corrects, so 1.5x is faster and not higher — which is the
+ * only reason a speed control is usable on music at all.
+ *
+ * Re-applied after every fresh queue for the same reason applyAudioEffects is:
+ * TrackPlayer.reset() tears the player's state down, and a rate that survived
+ * one song and then quietly went back to normal would be worse than no control.
+ */
+export async function applyPlaybackRate(): Promise<void> {
+  try {
+    await TrackPlayer.setRate(playbackRate());
+  } catch {
+    /* engine not up — the next play applies it */
+  }
+}
+
+/** The current speed, clamped to the range the UI offers. Read in the
+ *  crossfade watcher too, where it converts media seconds to real ones. */
+export function playbackRate(): number {
+  const r = readSettings().playbackRate;
+  return Number.isFinite(r) && r > 0 ? Math.min(2, Math.max(0.25, r)) : 1;
+}
+
+/** Change the speed and make it take effect now. */
+export async function setPlaybackRate(rate: number): Promise<void> {
+  writeSetting('playbackRate', Math.min(2, Math.max(0.25, rate)));
+  await applyPlaybackRate();
+}
+
 export async function togglePlay(): Promise<void> {
   const {state} = await TrackPlayer.getPlaybackState();
   const active =
@@ -1544,7 +1578,18 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       if (duration <= 0 || position <= 0) {
         return;
       }
-      const remaining = duration - position;
+      /**
+       * Seconds of AUDIO left, and seconds of CLOCK left, which stop being the
+       * same number the moment the speed control leaves 1x.
+       *
+       * Everything below is scheduling against a wall clock — a setTimeout for
+       * the fade, another for the sleep stop — so every one of them needs the
+       * second figure. At 1.5x a track with 12s of audio left has 8s of real
+       * time left, and a crossfade armed off the raw number would start half
+       * again too early and the sleep stop would land after the song had ended.
+       */
+      const rate = playbackRate();
+      const remaining = (duration - position) / rate;
 
       // ── 0. The end-of-track sleep stop, on the boundary ────────────────
       //
@@ -1599,7 +1644,7 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
             ? `file://${nextSource.file_path}`
             : q[active + 1]?.url;
           if (!repeatOne && nextUrl) {
-            await prepareCrossfade(String(nextUrl));
+            await prepareCrossfade(String(nextUrl), rate);
           }
         } catch {
           /* nothing to prepare — the plain path below still works */

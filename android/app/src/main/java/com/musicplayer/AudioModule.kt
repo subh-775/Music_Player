@@ -489,8 +489,14 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      *
      * Prepared early and started at the boundary, neither can happen.
      */
+    /**
+     * @param rate the speed the MAIN player is running at. The overlap has to
+     *   match it: at 1.5x the outgoing track is fast and an overlap left at
+     *   normal speed would be audibly out of step with it for the whole fade —
+     *   two tempos at once, which is worse than no crossfade.
+     */
     @ReactMethod
-    fun prepareCrossfade(url: String, promise: Promise) {
+    fun prepareCrossfade(url: String, rate: Double, promise: Promise) {
         cfHandler.post {
             try {
                 stopCfInternal()
@@ -503,7 +509,23 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     )
                     setDataSource(url)
                     setVolume(0f, 0f)
-                    setOnPreparedListener { cfReady = true }
+                    setOnPreparedListener {
+                        // Applied on the PREPARED player, not before: setting
+                        // playback params on an idle MediaPlayer throws, and
+                        // setPlaybackParams on a paused one starts it playing.
+                        // It is muted here (volume 0) and started by
+                        // beginCrossfade, so a start we did not ask for would
+                        // be silent and then double up at the boundary.
+                        if (rate > 0 && Math.abs(rate - 1.0) > 0.001) {
+                            try {
+                                playbackParams = playbackParams.setSpeed(rate.toFloat())
+                                pause()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "overlap rate ${'$'}rate rejected: ${'$'}{e.message}")
+                            }
+                        }
+                        cfReady = true
+                    }
                     // A dead stream must not crash — just abandon the overlap;
                     // the outgoing track still ends and RNTP advances normally.
                     setOnErrorListener { _, _, _ ->
