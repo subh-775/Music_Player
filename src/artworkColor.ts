@@ -5,12 +5,21 @@
  * artwork, blends it toward black so text stays readable, and caches per URL —
  * a song's colour never changes, so one lookup a track is the ceiling.
  *
+ * The THUMB, never the player-size cover. `artworkColor` on the native side is
+ * a raw HttpURLConnection — a second, separate download of an image Fresco is
+ * already fetching for the <Image> beside it, competing for the same link as
+ * the audio stream trying to start. Palette samples the bitmap down to ~112px
+ * before it looks at a single pixel, so the other 400 lines were being decoded
+ * and thrown away. The 150x150 is also the exact URL every track row has
+ * already pulled, so on a list it is usually free twice over.
+ *
  * Everything degrades to `null` (plain dark background): an old APK without
  * the native method, a bad URL, an unreadable image — none of them may cost
  * more than the tint.
  */
 import {useEffect, useState} from 'react';
 import {NativeModules} from 'react-native';
+import {thumbArtwork} from './tracks';
 
 type AudioNative = {artworkColor?: (url: string) => Promise<string | null>};
 
@@ -33,7 +42,8 @@ export function toward(hex: string, t: number): string {
   /* eslint-enable no-bitwise */
 }
 
-export async function getArtworkColor(url: string): Promise<string | null> {
+export async function getArtworkColor(raw: string): Promise<string | null> {
+  const url = thumbArtwork(raw);
   if (!url || typeof native.artworkColor !== 'function') {
     return null;
   }
@@ -60,8 +70,12 @@ export async function getArtworkColor(url: string): Promise<string | null> {
 
 /** The artwork's colour, or null while unknown / unavailable. */
 export function useArtworkColor(url?: string): string | null {
+  // Seeded through thumbArtwork too, or the synchronous hit would always miss:
+  // getArtworkColor keys the cache by the THUMB, and the player-size URL is
+  // what every caller passes in. A miss here is only a wasted frame of plain
+  // background, which is exactly the flicker this seed exists to prevent.
   const [color, setColor] = useState<string | null>(
-    url ? cache.get(url) ?? null : null,
+    url ? cache.get(thumbArtwork(url)) ?? null : null,
   );
 
   useEffect(() => {

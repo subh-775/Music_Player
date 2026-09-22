@@ -24,7 +24,7 @@
  *     heavier than the bar it lives on, and it made the three controls read as
  *     three different KINDS of control rather than one row.
  */
-import React, {useCallback, useMemo} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef} from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Animated, {
@@ -50,15 +50,25 @@ import {
   useProgress,
 } from '../player';
 import {useAudioOutput} from '../audioOutput';
+import {
+  EXPAND_GRAB,
+  MINI_ART_RADIUS,
+  bigArt,
+  miniArt,
+  sheetY,
+  spanBetween,
+} from '../playerSheet';
 import type {Track} from '../backend';
 import {AddButton} from './AddButton';
 import {toward, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
 
-/** Concentric corners: PAD + ART_R = BAR_R, so the two curves are parallel. */
+/** Concentric corners: PAD + ART_R = BAR_R, so the two curves are parallel.
+ *  ART_R comes from playerSheet because the full player's cover has to round
+ *  DOWN to exactly this value as it morphs into the slot below. */
 const PAD = 5;
-const ART_R = 6;
+const ART_R = MINI_ART_RADIUS;
 const BAR_R = PAD + ART_R;
 
 /**
@@ -87,9 +97,16 @@ const MiniProgress = React.memo(function MiniProgress() {
  */
 export const PlayerBar = React.memo(function PlayerBar({
   onExpand,
+  onBeginExpandDrag,
+  onEndExpandDrag,
   onAddToPlaylist,
 }: {
   onExpand: () => void;
+  /** A pull UP has started: mount the full player without animating it, so the
+   *  finger can drive it the rest of the way. Mirrors the drawer's own
+   *  begin/end pair. */
+  onBeginExpandDrag: () => void;
+  onEndExpandDrag: (open: boolean, velocity: number) => void;
   onAddToPlaylist: (t: Track) => void;
 }) {
   const active = useActiveTrack();
@@ -144,6 +161,97 @@ export const PlayerBar = React.memo(function PlayerBar({
     [commit],
   );
 
+  /**
+   * Pull UP to open the full player, under the finger.
+   *
+   * The tap still works and is still the common case — this is for the drag,
+   * which used to do nothing at all, so the panel could only ever appear on its
+   * own schedule after the gesture had finished. Writing `sheetY` directly is
+   * what makes the cover grow out of this slot as the thumb travels: the full
+   * player's whole morph is a function of that one value, so the two are the
+   * same motion rather than two animations that happen to agree.
+   *
+   * UPWARD only, and it fails on horizontal travel so the skip swipe above
+   * keeps its claim. The two are raced rather than nested: whichever the finger
+   * commits to first wins outright, at the same threshold on both axes.
+   *
+   * ## Why the drag starts at the SPAN and not at HIDE_Y
+   *
+   * The sheet's closed position is a whole screen height down; the distance
+   * over which the cover actually changes size is the shorter `spanBetween`.
+   * Starting the drag at HIDE_Y meant the first ~390px of an upward pull moved
+   * the panel while changing nothing anyone could see — the backdrop is still
+   * fully transparent up there and the cover is still parked on top of the real
+   * mini player — so the gesture felt dead until it suddenly committed.
+   *
+   * Starting at the span looks identical at rest (everything above it is
+   * invisible anyway) and maps the whole pull onto the part that is visible:
+   * the cover begins growing on the first pixel of travel.
+   */
+  const pullUp = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-EXPAND_GRAB, 1000])
+        .failOffsetX([-EXPAND_GRAB, EXPAND_GRAB])
+        .onStart(() => {
+          sheetY.value = spanBetween(miniArt.value, bigArt.value);
+          runOnJS(onBeginExpandDrag)();
+        })
+        .onUpdate(e => {
+          // translationY is negative going up, so adding it walks the sheet
+          // toward 0 — fully open. Clamped at both ends so pushing past the
+          // top does not overshoot into a gap above the panel.
+          const from = spanBetween(miniArt.value, bigArt.value);
+          sheetY.value = Math.min(from, Math.max(0, from + e.translationY));
+        })
+        .onEnd((e, success) => {
+          // A third of the way, or a firm flick. Anything less goes back — a
+          // gesture you abandoned must not commit.
+          const from = spanBetween(miniArt.value, bigArt.value);
+          const open =
+            success && (-e.translationY > from * 0.3 || e.velocityY < -700);
+          runOnJS(onEndExpandDrag)(open, e.velocityY);
+        }),
+    [onBeginExpandDrag, onEndExpandDrag],
+  );
+
+  const barGesture = useMemo(
+    () => Gesture.Race(pullUp, swipe),
+    [pullUp, swipe],
+  );
+
+  /**
+   * Publish where this cover sits, in window coordinates, for the morph to aim
+   * at. Measured rather than computed: the bar floats over the page at a height
+   * that depends on the navigation bar, so there is no constant for it.
+   */
+  const artRef = useRef<View>(null);
+  const measureMiniArt = useCallback(() => {
+    artRef.current?.measureInWindow((x, y, w) => {
+      if (w > 0) {
+        miniArt.value = {x, y, size: w};
+      }
+    });
+  }, []);
+
+  /**
+   * Measure again once the bar has finished ARRIVING.
+   *
+   * onLayout alone is not enough here: the bar enters with SlideInDown, so the
+   * first layout is reported while it is still travelling up from below the
+   * screen, and `measureInWindow` reports the transform. That would aim the
+   * morph at a point off the bottom of the display, and nothing would ever fire
+   * onLayout again to correct it — the bar's layout does not change for the
+   * rest of the session.
+   *
+   * 300 clears the 240ms entrance with room to spare. One timer, once, when the
+   * first song starts.
+   */
+  useEffect(() => {
+    const t = setTimeout(measureMiniArt, 300);
+    return () => clearTimeout(t);
+  }, [measureMiniArt]);
+
   const titleStyle = useAnimatedStyle(() => ({
     transform: [{translateX: titleSlide.value}],
   }));
@@ -175,7 +283,7 @@ export const PlayerBar = React.memo(function PlayerBar({
     <Animated.View
       entering={SlideInDown.duration(240)}
       exiting={SlideOutDown.duration(180)}>
-      <GestureDetector gesture={swipe}>
+      <GestureDetector gesture={barGesture}>
         <Animated.View style={[styles.wrap, barStyle]}>
           {/* A vertical gradient, not a flat fill: lighter at the top where the
             light would be. Falls back to the flat surface when the artwork's
@@ -207,16 +315,32 @@ export const PlayerBar = React.memo(function PlayerBar({
                 press.value = withTiming(0, {duration: 160});
               }}
               onPress={onExpand}>
-              {artwork ? (
-                <Image
-                  key={artwork}
-                  source={{uri: artwork}}
-                  style={styles.art}
-                  fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.art, styles.artFallback]} />
-              )}
+              {/* The wrapper is what the morph aims at — one rect whether
+                  there is a cover or a placeholder, and a plain View so
+                  measureInWindow has something stable to report.
+
+                  The URL here is deliberately the PLAYER-size cover, not the
+                  thumb a 54dp square would otherwise want. Sharing one URL
+                  with the full player is what lets the morph hand over a
+                  decoded bitmap instead of starting a fetch at the exact
+                  moment the panel opens — so this is load-bearing, not an
+                  oversight to tidy up later. */}
+              <View
+                ref={artRef}
+                onLayout={measureMiniArt}
+                style={styles.art}
+                collapsable={false}>
+                {artwork ? (
+                  <Image
+                    key={artwork}
+                    source={{uri: artwork}}
+                    style={styles.artFill}
+                    fadeDuration={0}
+                  />
+                ) : (
+                  <View style={[styles.artFill, styles.artFallback]} />
+                )}
+              </View>
 
               <Animated.View style={[styles.text, titleStyle]}>
                 <Marquee
@@ -329,7 +453,9 @@ const styles = StyleSheet.create({
     // Stops a cover with a light background from bleeding into the bar.
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.09)',
+    overflow: 'hidden',
   },
+  artFill: {width: '100%', height: '100%'},
   artFallback: {backgroundColor: C.bg},
   text: {flex: 1, minWidth: 0},
   // 14/600 over 11.5/400-at-62%. The old pair was 13/700 and 12/400 — one pixel

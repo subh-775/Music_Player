@@ -18,6 +18,16 @@ export type Playlist = {
   /** A data: URI, never a file path — a path breaks the moment the user moves
    *  or deletes the picture, and the cover has to outlive that. */
   image?: string;
+  /**
+   * When this playlist last CHANGED — a song added or removed, a rename, a new
+   * cover. The library sorts unpinned rows by it, so the list you are actually
+   * filling rises to the top instead of sitting wherever creation order left it.
+   *
+   * Optional because playlists stored before this existed have none. Readers
+   * fall back to `createdAt`, which is the honest answer for a list nobody has
+   * touched since, and keeps an existing library from scrambling on upgrade.
+   */
+  updatedAt?: number;
 };
 
 const store = createStore<Playlist[]>('mp.playlists.v1', [], raw =>
@@ -37,6 +47,7 @@ export function createPlaylist(name: string): Playlist | null {
     name: clean,
     tracks: [],
     createdAt: Date.now(),
+    updatedAt: Date.now(),
   };
   store.update(list => [playlist, ...list]);
   return playlist;
@@ -51,13 +62,19 @@ export function renamePlaylist(id: string, name: string): void {
   if (!clean) {
     return;
   }
-  store.update(list => list.map(p => (p.id === id ? {...p, name: clean} : p)));
+  store.update(list =>
+    list.map(p => (p.id === id ? {...p, name: clean, updatedAt: Date.now()} : p)),
+  );
 }
 
 /** Pass null to clear, falling the cover back to the artwork mosaic. */
 export function setPlaylistImage(id: string, image: string | null): void {
   store.update(list =>
-    list.map(p => (p.id === id ? {...p, image: image || undefined} : p)),
+    list.map(p =>
+      p.id === id
+        ? {...p, image: image || undefined, updatedAt: Date.now()}
+        : p,
+    ),
   );
 }
 
@@ -75,7 +92,7 @@ export function addTrackToPlaylist(id: string, track: Track): boolean {
         return p;
       }
       added = true;
-      return {...p, tracks: [...(p.tracks || []), t]};
+      return {...p, tracks: [...(p.tracks || []), t], updatedAt: Date.now()};
     }),
   );
   return added;
@@ -105,7 +122,13 @@ export function addTracksToPlaylist(id: string, tracks: Track[]): number {
         fresh.push(t);
       }
       added = fresh.length;
-      return fresh.length ? {...p, tracks: [...(p.tracks || []), ...fresh]} : p;
+      return fresh.length
+        ? {
+            ...p,
+            tracks: [...(p.tracks || []), ...fresh],
+            updatedAt: Date.now(),
+          }
+        : p;
     }),
   );
   return added;
@@ -116,7 +139,11 @@ export function removeTrackFromPlaylist(id: string, track: Track): void {
   store.update(list =>
     list.map(p =>
       p.id === id
-        ? {...p, tracks: (p.tracks || []).filter(x => getTrackId(x) !== tid)}
+        ? {
+            ...p,
+            tracks: (p.tracks || []).filter(x => getTrackId(x) !== tid),
+            updatedAt: Date.now(),
+          }
         : p,
     ),
   );

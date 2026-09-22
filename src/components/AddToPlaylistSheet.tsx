@@ -109,8 +109,11 @@ export function AddToPlaylistSheet({
         return;
       }
       if (memberOf.has(id)) {
+        // No toast on the way OUT, here or on the Liked row below. The tick
+        // clears and the row leaves the list — a bar repeating what the screen
+        // just showed is noise, and removing three songs meant three of them
+        // queued up in a row.
         removeTrackFromPlaylist(id, track);
-        toast(`Removed from ${playlistName}`);
       } else {
         addTrackToPlaylist(id, track);
         toast(`Added to ${playlistName}`);
@@ -131,7 +134,9 @@ export function AddToPlaylistSheet({
 
   const onLikedRow = useCallback(() => {
     toggleLiked();
-    toast(liked ? 'Removed from Liked Songs' : 'Added to Liked Songs');
+    if (!liked) {
+      toast('Added to Liked Songs');
+    }
   }, [liked, toggleLiked]);
 
   // 0 means the list is at its top, which is when a downward pull stops

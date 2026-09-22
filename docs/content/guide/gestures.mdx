@@ -10,12 +10,25 @@ The app is built to be driven one-handed. Nothing below is the only way to do th
 | --- | --- | --- |
 | **Swipe sideways** | Mini player | Next or previous song — the same motion as the artwork |
 | **Tap** | Mini player | Opens the full player |
+| **Drag up** | Mini player | Opens the full player *under your finger* — see below |
 | **Long-press** | Any song row | Its actions: play next, add to queue, playlist, artist, album, download |
 | **Drag down** | Any sheet | Dismisses it. Where the sheet holds a list, the list scrolls to its top first, then the sheet follows your finger. Tapping the dimmed area behind it also closes it |
 | **Drag** | Equalizer band | Sets that frequency, snapping to whole decibels |
 | **Drag or tap** | Crossfade bar | Sets the overlap, snapping to whole seconds |
 | **Press and hold, then drag** | Queue row handle | Reorders it |
 | **Back** | Anywhere | Closes what is actually on top, one layer at a time |
+
+## The cover is the same cover
+
+Dragging the mini player up does not slide a new screen over the old one. The small cover **grows into** the big one, tracking your finger the whole way: let go halfway and it shrinks back; keep going and the panel is already there behind it.
+
+Dragging the full player down runs the same motion backwards. The artwork shrinks toward the bar at the bottom rather than the whole screen sliding away, and by the time it gets there it is sitting exactly where the mini player's cover is — so there is nothing to hand over.
+
+It is one motion in both directions and it is under your control at every point. A tap and the ⌄ button do the same thing at full speed.
+
+<Note>
+  Both covers are the same image at the same size on purpose, which is why the swap never flickers — the picture is already decoded before the panel opens.
+</Note>
 
 ## How two gestures share the artwork
 
@@ -24,6 +37,8 @@ The artwork carries a swipe *and* a double-tap, and they never fight, because th
 - A clearly horizontal movement is a **swipe**, claimed as soon as it is unambiguous.
 - A clearly vertical movement falls through to the **dismiss**.
 - A touch that does not move is a **tap**, and the double-tap zones get it.
+
+The mini player splits the same way, at the same threshold on both axes: fourteen pixels sideways is a skip, fourteen pixels up is an open, and a diagonal drag resolves to whichever way it is actually leaning.
 
 A swipe also needs a real push before it commits. Let go early and the cover springs back and nothing changes — that threshold is what stops a sloppy double-tap becoming an accidental skip.
 

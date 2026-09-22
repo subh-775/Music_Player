@@ -188,13 +188,20 @@ export const LibraryScreen = React.memo(function LibraryScreen({
       }
     };
     // Liked Songs and Downloaded are fixtures: always first, in that order.
-    // Pins reorder only what comes after them.
+    // Then the pins, then everything else newest-first — so the playlist you
+    // have been adding to sits directly under the pins rather than wherever
+    // the order it was created in happened to put it.
+    //
+    // A followed artist has nothing to date by, so it sorts to the bottom of
+    // the unpinned group and stays in follow order among its own kind. That is
+    // the right answer: an artist row never changes, so there is no "recent"
+    // about it.
     const list = withArtists.filter(matches);
     const fixed = list.filter(
       c => c.kind === 'liked' || c.kind === 'downloads',
     );
     const rest = list.filter(c => c.kind !== 'liked' && c.kind !== 'downloads');
-    return [...fixed, ...sortPinned(rest, pins, idOf)];
+    return [...fixed, ...sortPinned(rest, pins, idOf, c => c.updatedAt)];
   }, [withArtists, pins, filter]);
 
   /** Only playlists pin — not artists, not albums, and not the fixtures. */

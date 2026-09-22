@@ -45,6 +45,7 @@ import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
 import {resetDrawer, settleDrawer} from './src/drawer';
+import {resetPlayer, settlePlayer} from './src/playerSheet';
 import {C} from './src/theme';
 import {
   appVersion,
@@ -117,6 +118,8 @@ function Shell() {
    *  both point at the one component. */
   const [eqOpen, setEqOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
+  /** True only while a finger on the mini player owns the sheet's position. */
+  const [playerDragging, setPlayerDragging] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
@@ -572,7 +575,42 @@ function Shell() {
     [openArtist, openCollection],
   );
   const closePlayer = useCallback(() => setPlayerOpen(false), []);
-  const expandPlayer = useCallback(() => setPlayerOpen(true), []);
+  const expandPlayer = useCallback(() => {
+    // Opening by TAP: park the sheet closed, then run it open. The drag path
+    // below skips the animation entirely, because the finger IS the animation
+    // — exactly the split openDrawer/beginDrawerDrag already make.
+    resetPlayer();
+    setPlayerOpen(true);
+  }, []);
+
+  /**
+   * A pull UP on the mini player has begun.
+   *
+   * Mount the full player WITHOUT animating it: PlayerBar has already parked
+   * sheetY at HIDE_Y and is about to drive it frame by frame, and an open
+   * animation started here would fight the thumb for the same value. That is
+   * what `dragging` tells PlayerScreen.
+   */
+  const beginPlayerDrag = useCallback(() => {
+    setPlayerDragging(true);
+    setPlayerOpen(true);
+  }, []);
+
+  /** The finger lifted. Carry its speed into the settle, and unmount only once
+   *  a close has actually finished — unmounting early would snap the panel
+   *  away mid-animation. */
+  const endPlayerDrag = useCallback((open: boolean, velocity: number) => {
+    // `dragging` is cleared in the CALLBACK, not here. Clearing it now would
+    // re-run PlayerScreen's open effect while this settle is still running —
+    // and for an abandoned pull that settle is heading DOWN, so the effect
+    // would turn a cancel into an open.
+    settlePlayer(open, velocity, finished => {
+      setPlayerDragging(false);
+      if (finished && !open) {
+        setPlayerOpen(false);
+      }
+    });
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -738,7 +776,12 @@ function Shell() {
       <View style={styles.bottomStack} pointerEvents="box-none">
         <BodyFade />
         {engine && (
-          <PlayerBar onExpand={expandPlayer} onAddToPlaylist={setAddTo} />
+          <PlayerBar
+            onExpand={expandPlayer}
+            onBeginExpandDrag={beginPlayerDrag}
+            onEndExpandDrag={endPlayerDrag}
+            onAddToPlaylist={setAddTo}
+          />
         )}
         <BottomNav active={tab} onChange={switchTab} />
       </View>
@@ -771,6 +814,7 @@ function Shell() {
       {engine && (
         <PlayerScreen
           visible={playerOpen}
+          dragging={playerDragging}
           onClose={closePlayer}
           onAddToPlaylist={setAddTo}
           onOpenArtist={openArtistCredit}

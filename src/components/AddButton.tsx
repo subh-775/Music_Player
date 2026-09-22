@@ -68,17 +68,17 @@ export function AddButton({
       }
       style={style}>
       {liked ? (
-        // Stroke in the GROUND colour over an accent fill. Lucide draws the
-        // tick as a stroke, so a stroke width of 0 would leave an empty disc
-        // and colouring it with the accent would put a green tick on a green
-        // circle. The same stroke gives the disc a fine dark rim, which is
-        // what keeps it from bleeding into an accent-coloured background.
-        <CircleCheck
-          size={size}
-          color={C.bg}
-          fill={C.accent}
-          strokeWidth={2.4}
-        />
+        // The SAME glyph family as the unliked state: an outline at the same
+        // weight, no fill, no contrasting rim. Only the colour and the mark
+        // inside the circle change.
+        //
+        // It used to be an accent-filled disc stroked in C.bg, which Lucide
+        // applies to the circle as well as the tick — so the liked state wore a
+        // true-black ring that nothing else in the app has, and read as a
+        // different KIND of control sitting next to the one it replaces. The
+        // ring was there to stop a green disc bleeding into the player bar's
+        // artwork tint; an unfilled glyph has nothing to bleed.
+        <CircleCheck size={size} color={C.accent} strokeWidth={2.2} />
       ) : (
         <CirclePlus size={size} color={C.sub} strokeWidth={1.8} />
       )}

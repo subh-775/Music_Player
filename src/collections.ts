@@ -33,6 +33,9 @@ export type Collection = {
   tracks: Track[];
   /** Handle to reopen/refresh from its origin (a perma_url or album id). */
   source?: string;
+  /** When this collection last changed — see Playlist.updatedAt. Undefined on
+   *  the two fixtures (Liked, Downloads), which never sort by it. */
+  updatedAt?: number;
 };
 
 /** What the row under the title says, matching the library's own vocabulary. */
@@ -92,7 +95,10 @@ export function toggleSaved(c: Collection): boolean {
     saved.set(list.filter(x => savedId(x) !== id));
     return false;
   }
-  saved.set([...list, {...c, id, tracks: normalizeTracks(c.tracks || [])}]);
+  saved.set([
+    ...list,
+    {...c, id, tracks: normalizeTracks(c.tracks || []), updatedAt: Date.now()},
+  ]);
   return true;
 }
 
@@ -123,7 +129,7 @@ export function refreshSavedTracks(c: Collection, tracks: Track[]): void {
     return;
   }
   const next = [...list];
-  next[idx] = {...list[idx], tracks: fresh};
+  next[idx] = {...list[idx], tracks: fresh, updatedAt: Date.now()};
   saved.set(next);
 }
 
@@ -143,6 +149,10 @@ export function playlistToCollection(p: Playlist): Collection {
     name: p.name,
     image: p.image,
     tracks: p.tracks || [],
+    // Falls back to createdAt for playlists stored before the stamp existed,
+    // so an upgraded library keeps its old order instead of collapsing to one
+    // undefined heap at the bottom.
+    updatedAt: p.updatedAt ?? p.createdAt,
   };
 }
 
