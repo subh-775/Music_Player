@@ -78,3 +78,9 @@
 -keep class com.swmansion.gesturehandler.** { *; }
 -keep class com.facebook.jni.** { *; }
 -dontwarn com.swmansion.**
+
+# The launcher aliases are referenced BY NAME from IconModule (".Icon.Default",
+# ".Icon.Midnight") and never as Java types, so nothing in the bytecode points
+# at them for R8 to follow. They are manifest components rather than classes, so
+# this is really about keeping the module that names them intact.
+-keep class com.musicplayer.IconModule { *; }

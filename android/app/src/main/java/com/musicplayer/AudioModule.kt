@@ -509,19 +509,25 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     )
                     setDataSource(url)
                     setVolume(0f, 0f)
-                    setOnPreparedListener {
+                    // `mp` named rather than left implicit: inside an apply
+                    // block a bare `playbackParams` resolves against the outer
+                    // receiver, which happens to be the same object here — but
+                    // "happens to be" is not something to leave in a callback
+                    // that sets playback state.
+                    setOnPreparedListener { mp ->
                         // Applied on the PREPARED player, not before: setting
                         // playback params on an idle MediaPlayer throws, and
-                        // setPlaybackParams on a paused one starts it playing.
-                        // It is muted here (volume 0) and started by
-                        // beginCrossfade, so a start we did not ask for would
-                        // be silent and then double up at the boundary.
+                        // setPlaybackParams on a paused one STARTS it playing.
+                        // It is muted here (volume 0) and started properly by
+                        // beginCrossfade, so an unasked-for start would be
+                        // silent now and doubled at the boundary — hence the
+                        // pause straight after.
                         if (rate > 0 && Math.abs(rate - 1.0) > 0.001) {
                             try {
-                                playbackParams = playbackParams.setSpeed(rate.toFloat())
-                                pause()
+                                mp.playbackParams = mp.playbackParams.setSpeed(rate.toFloat())
+                                mp.pause()
                             } catch (e: Exception) {
-                                Log.w(TAG, "overlap rate ${'$'}rate rejected: ${'$'}{e.message}")
+                                Log.w(TAG, "overlap rate " + rate + " rejected: " + e.message)
                             }
                         }
                         cfReady = true
