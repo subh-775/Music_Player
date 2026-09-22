@@ -64,7 +64,7 @@ import {
 } from '../playerSheet';
 import type {Track} from '../backend';
 import {AddButton} from './AddButton';
-import {toward, useArtworkColor} from '../artworkColor';
+import {surfaceTint, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
 
@@ -359,11 +359,12 @@ export const PlayerBar = React.memo(function PlayerBar({
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
               <Defs>
                 <LinearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                  {/* Darker than it was: the bar is translucent now and sits
-                      over live content, so the tint has to hold its own
-                      surface rather than glow. */}
-                  <Stop offset="0" stopColor={toward(tint, 0.52)} />
-                  <Stop offset="1" stopColor={toward(tint, 0.7)} />
+                  {/* The song's HUE at this app's own saturation and
+                      lightness — see surfaceTint. Darkening alone kept a neon
+                      cover neon, and the bar became a green slab that matched
+                      nothing else on screen. */}
+                  <Stop offset="0" stopColor={surfaceTint(tint, 0.145)} />
+                  <Stop offset="1" stopColor={surfaceTint(tint, 0.095)} />
                 </LinearGradient>
               </Defs>
               <Rect width="100%" height="100%" fill="url(#barFill)" />

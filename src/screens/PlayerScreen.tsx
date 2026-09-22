@@ -92,7 +92,7 @@ import {
   sheetY,
   surfaceRect,
 } from '../playerSheet';
-import {toward, useArtworkColor} from '../artworkColor';
+import {surfaceTint, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
 import {Seekbar} from '../components/Seekbar';
 import {SeekPeek} from '../components/SeekPeek';
@@ -860,17 +860,17 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             wrap above — so it can fade out during the morph while the artwork,
             which is also a child of the wrap, stays at full strength.
 
-            0.86 toward black, not 0.72. A bright cover left the sheet sitting
-            at a lightness where the eye reads it as a translucent panel rather
-            than a surface — it looks like the page behind is showing through,
-            because a surface that colour usually means exactly that. Nothing
-            was ever transparent; the tint just needed to be a background
+            The song's hue at this app's own saturation and lightness. A
+            bright cover used to leave the panel at a lightness where the eye
+            reads it as translucent — it looks like the page behind is showing
+            through, because a surface that colour usually means exactly that.
+            Nothing was ever transparent; the tint just had to be a background
             rather than a wash. */}
         <Animated.View
           pointerEvents="none"
           style={[
             styles.backdrop,
-            !!tint && {backgroundColor: toward(tint, 0.86)},
+            !!tint && {backgroundColor: surfaceTint(tint, 0.075)},
             backdropStyle,
           ]}
         />
