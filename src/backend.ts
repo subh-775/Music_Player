@@ -115,7 +115,6 @@ export async function waitForBackend(timeoutMs = 30_000): Promise<boolean> {
   return false;
 }
 
-export const backendPort = PORT;
 export const appVersion = version ?? '';
 
 // ─── Domain types + calls ────────────────────────────────────────────────────
@@ -382,31 +381,6 @@ export async function getRadio(
     )}&limit=${limit}`,
   );
   return Array.isArray(data.tracks) ? data.tracks : [];
-}
-
-export type SourceStatus = {
-  status: string;
-  type: string;
-  quality: string;
-  error?: string;
-};
-
-/**
- * Per-source availability.
- *
- * The endpoint wraps its payload: {"sources": {...}}. Reading the top level
- * instead gave a single "sources" key whose value has no `type`, so the
- * Settings filter matched nothing and the Sources section rendered EMPTY —
- * which in turn meant the YouTube toggle was never reachable, which is why
- * YouTube never appeared in search results.
- */
-export async function getSourcesStatus(): Promise<
-  Record<string, SourceStatus>
-> {
-  const data = await apiGet<{sources?: Record<string, SourceStatus>}>(
-    '/sources/status',
-  );
-  return data.sources ?? {};
 }
 
 export type YouTubeExperimental = {supported: boolean; enabled: boolean};

@@ -18,8 +18,6 @@ const store = createStore<string[]>('mp.pins.v1', [], raw =>
     .slice(0, MAX_PINS),
 );
 
-export const hydratePins = store.hydrate;
-
 export function isPinned(id: string): boolean {
   return !!id && store.get().includes(id);
 }

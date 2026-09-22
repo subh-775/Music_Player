@@ -58,25 +58,10 @@ export function diag(tag: string, msg: string): void {
   }
 }
 
-export function subscribeDiag(l: () => void): () => void {
-  listeners.add(l);
-  return () => listeners.delete(l);
-}
-
 export function readDiag(): DiagEntry[] {
   if (stale) {
     stale = false;
     snapshot = [...entries].reverse(); // newest first, new identity for React
   }
   return snapshot;
-}
-
-/** The whole log as text, for the "Copy" button. */
-export function diagText(): string {
-  return readDiag()
-    .map(e => {
-      const t = new Date(e.at).toISOString().slice(11, 23);
-      return `${t}  [${e.tag}] ${e.msg}`;
-    })
-    .join('\n');
 }

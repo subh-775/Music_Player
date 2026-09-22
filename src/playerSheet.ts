@@ -145,17 +145,28 @@ export function spanBetween(mini: Rect, big: Rect): number {
  */
 export function morphTransform(mini: Rect, big: Rect, y: number) {
   'worklet';
-  // Nothing measured yet — the first frame after mount, or an old layout
-  // mid-rotation. The identity, so the panel degrades to a plain slide rather
-  // than shrinking the cover toward a square it does not know the size of.
+  // `p` is computed FIRST, and before any guard, because it is not geometry —
+  // it is simply how far down the sheet is sitting, and it is meaningful
+  // whether or not the two covers have been measured.
   //
-  // The guard lives HERE rather than at the call site because every reader of
-  // this function needs it and only one of them had it.
-  if (!mini.size || !big.size) {
-    return {p: 0, scale: 1, dx: 0, dy: 0, radius: BIG_ART_RADIUS};
-  }
+  // Getting that wrong shipped a genuinely broken build. The unmeasured case
+  // used to return `p: 0` along with the identity transform, reading "no morph"
+  // as "fully open". But `bigArt` is only measured once the full player has
+  // laid itself out, which never happens until the player is opened — and the
+  // mini player fades itself in on `p`. So on a fresh launch the bar computed
+  // an opacity of 0 and disappeared, taking with it the only way to open the
+  // panel that would have measured it. Music played to an empty screen.
+  //
+  // spanBetween falls back to HIDE_Y when nothing is measured, so a closed
+  // sheet gives p = 1 — bar fully visible — which is the honest answer.
   const span = spanBetween(mini, big);
   const p = Math.min(1, Math.max(0, y / span));
+  // Only the GEOMETRY degrades: no scaling and no travel toward a square whose
+  // size we do not know. The panel falls back to a plain slide, which is what
+  // it did before the morph existed.
+  if (!mini.size || !big.size) {
+    return {p, scale: 1, dx: 0, dy: 0, radius: BIG_ART_RADIUS};
+  }
   const scale = 1 + (mini.size / big.size - 1) * p;
   return {
     p,
@@ -164,6 +175,36 @@ export function morphTransform(mini: Rect, big: Rect, y: number) {
     dy: -Math.max(0, y - span),
     radius: (BIG_ART_RADIUS + (MINI_ART_RADIUS - BIG_ART_RADIUS) * p) / scale,
   };
+}
+
+/**
+ * How visible the mini player is, for a given sheet position.
+ *
+ * The bar fades in on the TAIL of the morph. Without that it sat at full
+ * strength behind a panel that was itself fading out, so half way through a
+ * dismissal there were two players on screen — the cover shrinking toward a bar
+ * that was already drawn underneath it. Held at zero until the morph is three
+ * quarters done, then brought in over the last quarter, by which point the
+ * shrinking cover is nearly on top of this one.
+ *
+ * ## The guard is not optional
+ *
+ * An unmeasured `bigArt` returns 1, not 0, and it is checked here rather than
+ * left to the arithmetic. This function decides whether the ONLY control that
+ * opens the full player is on screen at all: if it ever returns 0 while the
+ * player is closed, the app plays music to a screen with no transport on it and
+ * no way to get one back. A rule that important should not be an emergent
+ * property of a division — it should be a line you can read.
+ *
+ * Pure and exported, so the test can pin exactly that.
+ */
+export function miniBarOpacity(mini: Rect, big: Rect, y: number): number {
+  'worklet';
+  if (!big.size) {
+    return 1;
+  }
+  const p = morphTransform(mini, big, y).p;
+  return Math.min(1, Math.max(0, (p - 0.75) / 0.25));
 }
 
 /**

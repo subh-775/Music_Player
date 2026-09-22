@@ -89,10 +89,6 @@ export function resolveGains(settings: EqSettings): number[] {
   return shapedGains(settings);
 }
 
-export function isFlat(gains: number[]): boolean {
-  return (gains || []).every(g => Math.abs(g) < 0.01);
-}
-
 /** Short axis label: 60, 400, 1k, 16k. */
 export function bandLabel(hz: number): string {
   return hz >= 1000 ? `${hz / 1000}k` : String(hz);

@@ -152,10 +152,6 @@ export function recordPlay(track: Track): void {
   });
 }
 
-export function clearStats(): void {
-  store.set(EMPTY);
-}
-
 function byCount<T extends {count: number; last: number}>(a: T, b: T): number {
   return b.count - a.count || b.last - a.last;
 }

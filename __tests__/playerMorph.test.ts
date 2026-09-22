@@ -28,7 +28,9 @@ jest.mock('react-native-reanimated', () => ({
 // NB: this import must stay below the mocks above — jest hoists jest.mock().
 import {
   BIG_ART_RADIUS,
+  HIDE_Y,
   MINI_ART_RADIUS,
+  miniBarOpacity,
   morphTransform,
   spanBetween,
 } from '../src/playerSheet';
@@ -92,6 +94,49 @@ test('an unmeasured cover morphs not at all', () => {
   expect(m.scale).toBe(1);
   expect(m.dx).toBe(0);
   expect(Number.isFinite(m.p)).toBe(true);
+});
+
+/**
+ * The regression that shipped as v1.2.4, and the reason `p` is computed before
+ * the geometry guard rather than after it.
+ *
+ * `bigArt` is only measured once the full player has laid itself out, which
+ * never happens until the player is opened. The unmeasured branch used to
+ * return `p: 0` — "no morph" read as "fully open" — and the mini player fades
+ * itself in on `p`. So on a fresh launch the bar computed an opacity of zero
+ * and vanished, taking with it the only control that opens the panel that
+ * would have measured it. Music played to an empty screen.
+ *
+ * The old test asserted `scale` and `dx` for this case and never `p`, which is
+ * exactly the gap it fell through.
+ */
+test('a closed sheet reads as fully closed even before anything is measured', () => {
+  const none = {x: 0, y: 0, size: 0};
+  expect(morphTransform(none, none, HIDE_Y).p).toBe(1);
+  expect(morphTransform(none, big, HIDE_Y).p).toBe(1);
+  expect(morphTransform(mini, none, HIDE_Y).p).toBe(1);
+});
+
+test('the mini player is never invisible while the player is closed', () => {
+  const none = {x: 0, y: 0, size: 0};
+  // Nothing measured, at rest: the bar MUST be on screen — it is the only way
+  // to open the panel whose layout would measure it.
+  expect(miniBarOpacity(none, none, HIDE_Y)).toBe(1);
+  expect(miniBarOpacity(mini, none, HIDE_Y)).toBe(1);
+  // Measured, parked closed.
+  expect(miniBarOpacity(mini, big, spanBetween(mini, big))).toBe(1);
+  // …and anywhere past the end of the travel.
+  expect(miniBarOpacity(mini, big, HIDE_Y)).toBe(1);
+});
+
+test('the mini player is hidden only while the full player is actually up', () => {
+  const span = spanBetween(mini, big);
+  expect(miniBarOpacity(mini, big, 0)).toBe(0); // fully open
+  expect(miniBarOpacity(mini, big, span * 0.5)).toBe(0); // mid-morph
+  // Fading in over the last quarter, and never outside 0..1.
+  const tail = miniBarOpacity(mini, big, span * 0.875);
+  expect(tail).toBeGreaterThan(0);
+  expect(tail).toBeLessThan(1);
 });
 
 test('a negative sheet position (overscroll past open) clamps to open', () => {

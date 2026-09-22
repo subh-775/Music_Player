@@ -127,19 +127,19 @@ function patchRemote(p: Partial<RemoteCache>): void {
  *
  * Each lands INDEPENDENTLY. They used to be awaited together through
  * Promise.allSettled, which means nothing appeared until the slowest returned —
- * and they are not remotely comparable: getSourcesStatus() probes every source's
- * reachability over the network while getCacheSize() is a local directory walk.
- * The three fast answers were waiting on the one slow one for no reason.
+ * and they are not remotely comparable: a source-reachability probe is a round
+ * trip to every catalogue, while getCacheSize() is a local directory walk. The
+ * fast answers were waiting on the slow one for no reason.
  *
  * Exported so the drawer can start them the moment it opens: by the time the
  * "Settings" row is tapped the answers are usually already back, and the screen
  * opens finished rather than filling in.
  */
 export function prefetchSettingsRemote(): void {
-  // getSourcesStatus() is deliberately NOT here any more. It probed every
-  // source's reachability over the network — the slowest of the four by a wide
-  // margin — purely to decide which rows to render, and those rows are known at
-  // build time. Nothing else in the app reads it.
+  // The source-reachability probe is deliberately gone. It cost a network
+  // round trip to every catalogue — the slowest answer here by a wide margin —
+  // purely to decide which rows to render, and those rows are known at build
+  // time. Its client was deleted with it; nothing else read it.
   getDownloadsInfo()
     .then(v => patchRemote({downloads: v}))
     .catch(() => {});

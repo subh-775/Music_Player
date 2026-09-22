@@ -162,10 +162,6 @@ function setPlaybackOrigin(id: string): void {
   originListeners.forEach(l => l());
 }
 
-export function getPlaybackOrigin(): string {
-  return playbackOrigin;
-}
-
 /** Subscribe to the origin. A string snapshot, so useSyncExternalStore bails
  *  out on an unchanged value and nothing re-renders. */
 export function usePlaybackOrigin(): string {
@@ -405,11 +401,6 @@ export async function setupPlayer(): Promise<boolean> {
     available = false;
     return false;
   }
-}
-
-/** True once the engine has initialised; null until setup has been attempted. */
-export function engineAvailable(): boolean | null {
-  return available;
 }
 
 /**
@@ -1127,25 +1118,6 @@ export async function dropQueuedRadio(): Promise<void> {
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {
   await TrackPlayer.setRepeatMode(mode);
-}
-
-/**
- * Pause/resume from the engine's own state, so the UI, the notification and a
- * headset button can never disagree about what a press should do.
- *
- * Buffering/Loading count as "already going" — otherwise tapping during the
- * spin-up between tracks would start a SECOND play and leave the button
- * showing the opposite of reality.
- */
-/** Stop playback outright — used by the sleep timer. */
-export async function pausePlayback(): Promise<void> {
-  cancelCrossfade(); // silence any overlap too, or it keeps sounding alone
-  setPausedByDuck(false);
-  try {
-    await TrackPlayer.pause();
-  } catch {
-    /* engine already gone */
-  }
 }
 
 export async function togglePlay(): Promise<void> {

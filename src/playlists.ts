@@ -34,7 +34,6 @@ const store = createStore<Playlist[]>('mp.playlists.v1', [], raw =>
   asArray<Playlist>(raw).filter(p => p && typeof p.id === 'string'),
 );
 
-export const hydratePlaylists = store.hydrate;
 export const readPlaylists = store.get;
 
 export function createPlaylist(name: string): Playlist | null {

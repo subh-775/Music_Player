@@ -53,9 +53,9 @@ export const listWindowing = {
 /**
  * Memoised, and every store it reads is a BOOLEAN subscription.
  *
- * It was a plain component reading whole collections — useActiveTrack(),
- * useDownloadedIds(), useLike() — so every parent re-render re-rendered every
- * visible row, and one track change re-rendered all twenty of them. Now a row
+ * It was a plain component reading whole collections — the active track, the
+ * whole downloaded-id array, the whole likes array — so every parent re-render
+ * re-rendered every visible row, and one track change re-rendered all twenty. Now a row
  * re-renders when its own props change, or when its own highlight / liked /
  * downloaded answer actually flips.
  */

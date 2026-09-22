@@ -57,7 +57,7 @@ import {
   bigArt,
   closedY,
   miniArt,
-  morphTransform,
+  miniBarOpacity,
   sheetY,
 } from '../playerSheet';
 import type {Track} from '../backend';
@@ -298,24 +298,17 @@ export const PlayerBar = React.memo(function PlayerBar({
   }));
 
   /**
-   * The bar itself, fading in on the tail of the morph.
+   * The bar fades in on the tail of the morph — see `miniBarOpacity`, which
+   * owns the rule and the guard that stops this bar ever vanishing outright.
    *
-   * This is the "the mini player keeps appearing at its place" report. The full
-   * player's backdrop fades as it shrinks, and this bar sat at full strength
-   * behind it the whole way — so half way through a dismissal there were two
-   * players on screen: the cover shrinking toward the bar, and the bar already
-   * drawn underneath it.
-   *
-   * Held at zero until the morph is three quarters done, then brought in over
-   * the last quarter — by which point the shrinking cover is nearly on top of
-   * this one, so what arrives underneath it is the rest of the bar rather than
-   * a duplicate of what is already there. At rest (`p` is 1 whenever the full
-   * player is closed or has never been opened) it is simply fully visible.
+   * All three shared values are read HERE, in the style's own body, because
+   * that is the only place Reanimated looks when deciding what this style
+   * depends on. Reading them inside the helper instead would leave the opacity
+   * computed once and never updated again.
    */
-  const barFade = useAnimatedStyle(() => {
-    const p = morphTransform(miniArt.value, bigArt.value, sheetY.value).p;
-    return {opacity: Math.min(1, Math.max(0, (p - 0.75) / 0.25))};
-  });
+  const barFade = useAnimatedStyle(() => ({
+    opacity: miniBarOpacity(miniArt.value, bigArt.value, sheetY.value),
+  }));
   const barStyle = useAnimatedStyle(() => ({
     transform: [{scale: 1 - press.value * 0.015}],
   }));
