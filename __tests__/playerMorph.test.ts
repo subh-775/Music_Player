@@ -30,9 +30,11 @@ import {
   BIG_ART_RADIUS,
   HIDE_Y,
   MINI_ART_RADIUS,
+  MINI_BAR_RADIUS,
   miniBarOpacity,
   morphTransform,
   spanBetween,
+  surfaceRect,
 } from '../src/playerSheet';
 
 /** A 400x880 phone: a 376px cover in the player, a 54px one in the bar. */
@@ -133,14 +135,85 @@ test('the mini player is hidden only while the full player is actually up', () =
   const span = spanBetween(mini, big);
   expect(miniBarOpacity(mini, big, 0)).toBe(0); // fully open
   expect(miniBarOpacity(mini, big, span * 0.5)).toBe(0); // mid-morph
-  // Fading in over the last quarter, and never outside 0..1.
-  const tail = miniBarOpacity(mini, big, span * 0.875);
+  // Still hidden while the panel's surface is larger than the bar — that
+  // overlap is what used to read as two players on screen at once.
+  expect(miniBarOpacity(mini, big, span * 0.8)).toBe(0);
+  // Fades in over the last 12%, once the surface has become bar-shaped, and
+  // never leaves 0..1.
+  const tail = miniBarOpacity(mini, big, span * 0.94);
   expect(tail).toBeGreaterThan(0);
   expect(tail).toBeLessThan(1);
+  expect(miniBarOpacity(mini, big, span)).toBe(1);
 });
 
 test('a negative sheet position (overscroll past open) clamps to open', () => {
   const m = morphTransform(mini, big, -80);
   expect(m.p).toBe(0);
   expect(m.scale).toBe(1);
+});
+
+// ── The surface: the panel's boundary becoming the bar's ───────────────────
+//
+// Fading a full-screen surface out leaves a large dark shape to dispose of at
+// the end of the gesture, and disposing of it reads as a flash however smoothly
+// it is done. Shrinking it means there is never a large shape to get rid of.
+// These pin the two ends and, most importantly, the fallback — a surface that
+// collapses to zero width is an invisible player.
+
+/** The panel fills the window; the bar floats above the tab strip. */
+const sheet = {x: 0, y: 0, w: 400, h: 880};
+const bar = {x: 10, y: 748, w: 380, h: 67};
+
+test('fully open, the surface is the whole panel', () => {
+  const r = surfaceRect(sheet, bar, 0, 0);
+  expect(r.left).toBeCloseTo(0, 5);
+  expect(r.top).toBeCloseTo(0, 5);
+  expect(r.width).toBeCloseTo(sheet.w, 5);
+  expect(r.height).toBeCloseTo(sheet.h, 5);
+  expect(r.radius).toBeCloseTo(0, 5);
+});
+
+test('at the end of the travel the surface IS the bar, in window space', () => {
+  const span = spanBetween(mini, big);
+  const r = surfaceRect(sheet, bar, span, 1);
+  // The panel is translated down by `span`, so add it back to get where this
+  // rectangle actually lands on screen.
+  expect(r.left + sheet.x).toBeCloseTo(bar.x, 5);
+  expect(r.top + sheet.y + span).toBeCloseTo(bar.y, 5);
+  expect(r.width).toBeCloseTo(bar.w, 5);
+  expect(r.height).toBeCloseTo(bar.h, 5);
+  expect(r.radius).toBeCloseTo(MINI_BAR_RADIUS, 5);
+});
+
+test('the surface tracks the panel rather than sliding away with it', () => {
+  // Half way: whatever the panel's own offset is, the surface's window
+  // position must be the half-way point between the two rectangles — not the
+  // panel's position, which is what it would be without the -y correction.
+  const span = spanBetween(mini, big);
+  const r = surfaceRect(sheet, bar, span / 2, 0.5);
+  expect(r.top + sheet.y + span / 2).toBeCloseTo((sheet.y + bar.y) / 2, 5);
+  expect(r.height).toBeCloseTo((sheet.h + bar.h) / 2, 5);
+});
+
+test('an unmeasured surface fills the window, never zero', () => {
+  // The regression shape from v1.2.4 again, in a different costume: falling
+  // back to `sheet.w` would be falling back to 0, and a zero-width background
+  // is a player with no surface at all.
+  for (const r of [
+    surfaceRect({x: 0, y: 0, w: 0, h: 0}, bar, 0, 0),
+    surfaceRect(sheet, {x: 0, y: 0, w: 0, h: 0}, 0, 0),
+    surfaceRect({x: 0, y: 0, w: 0, h: 0}, {x: 0, y: 0, w: 0, h: 0}, 300, 0.5),
+  ]) {
+    expect(r.width).toBeGreaterThan(0);
+    expect(r.height).toBeGreaterThan(0);
+  }
+});
+
+test('the bar and the panel agree on their final corner', () => {
+  // PlayerBar builds its own corner from MINI_BAR_RADIUS for exactly this
+  // reason: the surface interpolates to that number, and a bar rounded
+  // differently would finish the morph with a visible step.
+  expect(MINI_BAR_RADIUS).toBe(11);
+  // Concentric with the artwork inside it: PAD (5) + the cover's own radius.
+  expect(MINI_BAR_RADIUS).toBe(5 + MINI_ART_RADIUS);
 });

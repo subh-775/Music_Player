@@ -46,6 +46,10 @@ export const HIDE_Y = (({width, height}) => Math.max(width, height))(
   Dimensions.get('window'),
 );
 
+/** The window, for the one case where the panel's own frame has not been
+ *  measured yet. The panel fills the window, so this is not an estimate. */
+const SCREEN = Dimensions.get('window');
+
 /** 0 = fully open; `closedY()` = fully dismissed. Seeded at HIDE_Y, which is
  *  what `closedY()` also returns until the two covers have been measured. */
 export const sheetY: SharedValue<number> = makeMutable(HIDE_Y);
@@ -65,6 +69,10 @@ export const EXPAND_GRAB = 14;
 /** A square on screen, in window coordinates. */
 export type Rect = {x: number; y: number; size: number};
 
+/** A rectangle on screen, in window coordinates. Used for the two surfaces —
+ *  the full panel and the mini player's bar — that morph into each other. */
+export type Box = {x: number; y: number; w: number; h: number};
+
 /**
  * Where each artwork is right now.
  *
@@ -79,6 +87,21 @@ export type Rect = {x: number; y: number; size: number};
  */
 export const miniArt: SharedValue<Rect> = makeMutable({x: 0, y: 0, size: 0});
 export const bigArt: SharedValue<Rect> = makeMutable({x: 0, y: 0, size: 0});
+
+/**
+ * The two SURFACES, as opposed to the two covers.
+ *
+ * `miniBar` is the floating bar's own frame; `sheetRect` is the full panel's,
+ * measured with its current offset taken back out so it describes where the
+ * panel sits when open. Between them they let the panel's boundary travel to
+ * the bar's boundary instead of dissolving on the spot — see `surfaceRect`.
+ */
+export const miniBar: SharedValue<Box> = makeMutable({x: 0, y: 0, w: 0, h: 0});
+export const sheetRect: SharedValue<Box> = makeMutable({x: 0, y: 0, w: 0, h: 0});
+
+/** The mini bar's corner radius — PAD + MINI_ART_RADIUS, concentric with its
+ *  artwork. The panel's corners interpolate to exactly this. */
+export const MINI_BAR_RADIUS = 11;
 
 /**
  * The mini player's cover radius, and the value the morph rounds down to.
@@ -204,7 +227,64 @@ export function miniBarOpacity(mini: Rect, big: Rect, y: number): number {
     return 1;
   }
   const p = morphTransform(mini, big, y).p;
-  return Math.min(1, Math.max(0, (p - 0.75) / 0.25));
+  // The last 12%. The panel's own surface has by then shrunk to this bar's
+  // exact rectangle and is fading out over it, so what crosses here is two
+  // views of the same size in the same place — which is not a visible change
+  // at all. It used to start at 75%, while a still-large translucent panel was
+  // draped over the bar, and the pair read as a flash.
+  return Math.min(1, Math.max(0, (p - 0.88) / 0.12));
+}
+
+/**
+ * The panel's surface, on its way to becoming the bar.
+ *
+ * This is the difference between a panel that VANISHES and one that BECOMES
+ * something. Fading a full-screen surface out leaves a large dark shape to
+ * dispose of at the end of the gesture, and disposing of it — however smoothly
+ * — reads as a flash, because a third of the screen changes brightness in under
+ * a tenth of a second. Shrinking it instead means there is never a large shape
+ * to get rid of: by the time it disappears it is already bar-sized, bar-shaped
+ * and in the bar's place, and the real bar is fading up underneath it.
+ *
+ * Returned in the panel's OWN coordinates, because that is where the view
+ * lives. The panel is itself translated down by `y`, so the target has to have
+ * that subtracted back out or the surface would chase the panel downward
+ * instead of staying put over the bar.
+ *
+ * Both rectangles are measured. With either one missing this returns the full
+ * panel unchanged, so the transition degrades to the plain fade rather than
+ * collapsing the surface to a point.
+ */
+export function surfaceRect(
+  sheet: Box,
+  bar: Box,
+  y: number,
+  p: number,
+): {left: number; top: number; width: number; height: number; radius: number} {
+  'worklet';
+  // Not measured yet — one frame at mount, or mid-rotation. Fall back to the
+  // whole window rather than to `sheet.w`, which is ZERO until the measurement
+  // lands: a zero-width surface is an invisible panel, and this function must
+  // never be the reason the player has no background.
+  if (!sheet.w || !bar.w) {
+    return {
+      left: 0,
+      top: 0,
+      width: SCREEN.width,
+      height: SCREEN.height,
+      radius: 0,
+    };
+  }
+  const lerp = (a: number, b: number) => a + (b - a) * p;
+  return {
+    // Interpolated in WINDOW space, then converted to the panel's own frame by
+    // removing the panel's origin and its current offset.
+    left: lerp(sheet.x, bar.x) - sheet.x,
+    top: lerp(sheet.y, bar.y) - sheet.y - y,
+    width: lerp(sheet.w, bar.w),
+    height: lerp(sheet.h, bar.h),
+    radius: lerp(0, MINI_BAR_RADIUS),
+  };
 }
 
 /**
@@ -255,7 +335,13 @@ export function settlePlayer(
   sheetY.value = withTiming(
     open ? 0 : closedY(),
     {
-      duration: Math.abs(velocity) > 1500 ? 190 : open ? 260 : 280,
+      // Slower than it was (260/280), and deliberately.
+      //
+      // The morph is the thing being watched now, not just a panel getting out
+      // of the way, and at a quarter of a second the eye reads the end state
+      // rather than the change. These are close to the upper limit before a
+      // transition starts to feel like something you are waiting for.
+      duration: Math.abs(velocity) > 1500 ? 300 : open ? 420 : 440,
       easing: Easing.out(Easing.cubic),
     },
     finished => {

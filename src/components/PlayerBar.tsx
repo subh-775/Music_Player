@@ -54,9 +54,11 @@ import {useAudioOutput} from '../audioOutput';
 import {
   EXPAND_GRAB,
   MINI_ART_RADIUS,
+  MINI_BAR_RADIUS,
   bigArt,
   closedY,
   miniArt,
+  miniBar,
   miniBarOpacity,
   sheetY,
 } from '../playerSheet';
@@ -71,7 +73,10 @@ const SWIPE_COMMIT = 56;
  *  DOWN to exactly this value as it morphs into the slot below. */
 const PAD = 5;
 const ART_R = MINI_ART_RADIUS;
-const BAR_R = PAD + ART_R;
+/** Asserted against MINI_BAR_RADIUS by the test: the full player's surface
+ *  interpolates its corners to that constant, and a bar whose own corner
+ *  disagreed would finish the morph with a visible step. */
+const BAR_R = MINI_BAR_RADIUS;
 
 /**
  * The hairline under the mini player, and the only part of it on a clock.
@@ -253,6 +258,7 @@ export const PlayerBar = React.memo(function PlayerBar({
    * at. Measured rather than computed: the bar floats over the page at a height
    * that depends on the navigation bar, so there is no constant for it.
    */
+  const wrapRef = useRef<View>(null);
   const artRef = useRef<View>(null);
   const measureMiniArt = useCallback(() => {
     // The swipe offset is subtracted back out for the same reason the player
@@ -263,6 +269,13 @@ export const PlayerBar = React.memo(function PlayerBar({
     artRef.current?.measureInWindow((x, y, w) => {
       if (w > 0) {
         miniArt.value = {x: x - at, y, size: w};
+      }
+    });
+    // …and the bar's own frame, which is what the full player's surface
+    // shrinks INTO. The bar does not slide, so no correction is needed here.
+    wrapRef.current?.measureInWindow((x, y, w, h) => {
+      if (w > 0 && h > 0) {
+        miniBar.value = {x, y, w, h};
       }
     });
   }, [dragX]);
@@ -338,7 +351,7 @@ export const PlayerBar = React.memo(function PlayerBar({
       entering={SlideInDown.duration(240)}
       exiting={SlideOutDown.duration(180)}>
       <GestureDetector gesture={barGesture}>
-        <Animated.View style={[styles.wrap, barStyle, barFade]}>
+        <Animated.View ref={wrapRef} style={[styles.wrap, barStyle, barFade]}>
           {/* A vertical gradient, not a flat fill: lighter at the top where the
             light would be. Falls back to the flat surface when the artwork's
             colour isn't known yet, which is a beat at most. */}

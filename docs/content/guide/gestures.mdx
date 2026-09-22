@@ -18,16 +18,18 @@ The app is built to be driven one-handed. Nothing below is the only way to do th
 | **Press and hold, then drag** | Queue row handle | Reorders it |
 | **Back** | Anywhere | Closes what is actually on top, one layer at a time |
 
-## The cover is the same cover
+## The player becomes the bar
 
-Dragging the mini player up does not slide a new screen over the old one. The small cover **grows into** the big one, tracking your finger the whole way: let go halfway and it shrinks back; keep going and the panel is already there behind it.
+Dragging the mini player up does not slide a new screen over the old one, and dragging the full player down does not slide it away. The panel and the bar are the same surface at two sizes.
 
-Dragging the full player down runs the same motion backwards. The artwork shrinks toward the bar at the bottom rather than the whole screen sliding away, and by the time it gets there it is sitting exactly where the mini player's cover is — so there is nothing to hand over.
+Pull down on the big player and its **boundary** travels to the bar's: the panel narrows, shortens and rounds its corners until it is exactly the bar's rectangle, in the bar's place. The artwork rides along on top, shrinking to the size of the small cover and landing precisely where it sits. The words and the controls clear out early, so what you are watching is a picture in a shrinking frame rather than a screen being dismantled.
 
-It is one motion in both directions and it is under your control at every point. A tap and the ⌄ button do the same thing at full speed.
+Pull up on the mini player and the same thing runs backwards, tracking your finger the whole way. Let go halfway and it returns; keep going and the panel is already open.
+
+Nothing fades out from full size, which is the point — a large surface disappearing at the end of a gesture reads as a flash, whereas one that is already bar-sized by the time it goes reads as an arrival. A tap and the ⌄ button run the same transition at the same speed.
 
 <Note>
-  Both covers are the same image at the same size on purpose, which is why the swap never flickers — the picture is already decoded before the panel opens.
+  Both covers are the same image at the same size on purpose, which is why the swap never flickers — the picture is already decoded before the panel opens. The transition is deliberately unhurried: fast enough not to wait for, slow enough to actually see.
 </Note>
 
 ## How two gestures share the artwork
