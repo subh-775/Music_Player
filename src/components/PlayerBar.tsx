@@ -33,6 +33,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
@@ -54,9 +55,10 @@ import {
   EXPAND_GRAB,
   MINI_ART_RADIUS,
   bigArt,
+  closedY,
   miniArt,
+  morphTransform,
   sheetY,
-  spanBetween,
 } from '../playerSheet';
 import type {Track} from '../backend';
 import {AddButton} from './AddButton';
@@ -115,10 +117,17 @@ export const PlayerBar = React.memo(function PlayerBar({
 
   const track = useMemo(() => sourceTrackFor(active), [active]);
 
-  // Only the TITLE slides — the artwork just swaps to the new song, per the
-  // request. And the skip is fired IMMEDIATELY, not behind the animation, so
-  // the new song appears at once instead of a beat later.
-  const titleSlide = useSharedValue(0);
+  /**
+   * How far the bar's contents are dragged, in pixels.
+   *
+   * It follows the FINGER now. This used to be written only on commit, so the
+   * bar sat perfectly still through the whole swipe and then flicked to the new
+   * song once the finger lifted — which is why a gesture had to be completed
+   * blind before anything acknowledged it. The same value carries the settle
+   * afterwards, so the release continues the motion the drag started instead of
+   * being a second, separate animation.
+   */
+  const dragX = useSharedValue(0);
   /** Whole-bar press feedback. Tiny, and it is what connects the tap to the
    *  expansion that follows — without it the bar feels like a static strip. */
   const press = useSharedValue(0);
@@ -127,11 +136,23 @@ export const PlayerBar = React.memo(function PlayerBar({
     (dir: 1 | -1) => {
       // Fire the skip NOW — the engine advances while this animates.
       (dir === 1 ? skipNext() : skipPrevious()).catch(() => {});
-      titleSlide.value = dir * 90;
-      titleSlide.value = withTiming(0, {duration: 220});
+      // Jump to the far side with no animation, then travel back in, so the
+      // incoming song enters from the direction the finger was heading rather
+      // than springing back from where it was released.
+      dragX.value = dir * 90;
+      dragX.value = withTiming(0, {duration: 220});
     },
-    [titleSlide],
+    [dragX],
   );
+
+  /** Let go without committing: back to rest, carrying the finger's speed. */
+  const release = useCallback(() => {
+    dragX.value = withSpring(0, {
+      damping: 20,
+      stiffness: 220,
+      overshootClamping: true,
+    });
+  }, [dragX]);
 
   /**
    * Recognised natively.
@@ -148,17 +169,24 @@ export const PlayerBar = React.memo(function PlayerBar({
       Gesture.Pan()
         .activeOffsetX([-14, 14])
         .failOffsetY([-18, 18])
+        .onUpdate(e => {
+          // Damped at 0.6, the same feel as the full player's artwork: the row
+          // tracks the thumb without travelling the whole width of the screen,
+          // so a small swipe still reads as a small swipe.
+          dragX.value = e.translationX * 0.6;
+        })
         .onEnd((e, success) => {
-          if (!success) {
+          if (success && e.translationX <= -SWIPE_COMMIT) {
+            runOnJS(commit)(1);
             return;
           }
-          if (e.translationX <= -SWIPE_COMMIT) {
-            runOnJS(commit)(1);
-          } else if (e.translationX >= SWIPE_COMMIT) {
+          if (success && e.translationX >= SWIPE_COMMIT) {
             runOnJS(commit)(-1);
+            return;
           }
+          runOnJS(release)();
         }),
-    [commit],
+    [commit, release, dragX],
   );
 
   /**
@@ -175,11 +203,11 @@ export const PlayerBar = React.memo(function PlayerBar({
    * keeps its claim. The two are raced rather than nested: whichever the finger
    * commits to first wins outright, at the same threshold on both axes.
    *
-   * ## Why the drag starts at the SPAN and not at HIDE_Y
+   * ## Why the drag starts at `closedY` and not a whole screen down
    *
    * The sheet's closed position is a whole screen height down; the distance
    * over which the cover actually changes size is the shorter `spanBetween`.
-   * Starting the drag at HIDE_Y meant the first ~390px of an upward pull moved
+   * Starting the drag a full screen down meant the first ~390px of a pull moved
    * the panel while changing nothing anyone could see — the backdrop is still
    * fully transparent up there and the cover is still parked on top of the real
    * mini player — so the gesture felt dead until it suddenly committed.
@@ -194,20 +222,20 @@ export const PlayerBar = React.memo(function PlayerBar({
         .activeOffsetY([-EXPAND_GRAB, 1000])
         .failOffsetX([-EXPAND_GRAB, EXPAND_GRAB])
         .onStart(() => {
-          sheetY.value = spanBetween(miniArt.value, bigArt.value);
+          sheetY.value = closedY();
           runOnJS(onBeginExpandDrag)();
         })
         .onUpdate(e => {
           // translationY is negative going up, so adding it walks the sheet
           // toward 0 — fully open. Clamped at both ends so pushing past the
           // top does not overshoot into a gap above the panel.
-          const from = spanBetween(miniArt.value, bigArt.value);
+          const from = closedY();
           sheetY.value = Math.min(from, Math.max(0, from + e.translationY));
         })
         .onEnd((e, success) => {
           // A third of the way, or a firm flick. Anything less goes back — a
           // gesture you abandoned must not commit.
-          const from = spanBetween(miniArt.value, bigArt.value);
+          const from = closedY();
           const open =
             success && (-e.translationY > from * 0.3 || e.velocityY < -700);
           runOnJS(onEndExpandDrag)(open, e.velocityY);
@@ -227,12 +255,17 @@ export const PlayerBar = React.memo(function PlayerBar({
    */
   const artRef = useRef<View>(null);
   const measureMiniArt = useCallback(() => {
+    // The swipe offset is subtracted back out for the same reason the player
+    // subtracts its sheet offset: measureInWindow reports the view WITH its
+    // transform, and what the morph needs to aim at is where this square sits
+    // at REST, not where a half-finished swipe has pushed it.
+    const at = dragX.value;
     artRef.current?.measureInWindow((x, y, w) => {
       if (w > 0) {
-        miniArt.value = {x, y, size: w};
+        miniArt.value = {x: x - at, y, size: w};
       }
     });
-  }, []);
+  }, [dragX]);
 
   /**
    * Measure again once the bar has finished ARRIVING.
@@ -252,9 +285,37 @@ export const PlayerBar = React.memo(function PlayerBar({
     return () => clearTimeout(t);
   }, [measureMiniArt]);
 
-  const titleStyle = useAnimatedStyle(() => ({
-    transform: [{translateX: titleSlide.value}],
+  /**
+   * The whole row travels, not just the title.
+   *
+   * The artwork used to stay nailed in place while the words moved, which reads
+   * as two unrelated things rather than as one song being dragged aside. It
+   * stays put during the MORPH — that is a different motion with a different
+   * job — but a sideways swipe moves the cover with everything else.
+   */
+  const slideStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: dragX.value}],
   }));
+
+  /**
+   * The bar itself, fading in on the tail of the morph.
+   *
+   * This is the "the mini player keeps appearing at its place" report. The full
+   * player's backdrop fades as it shrinks, and this bar sat at full strength
+   * behind it the whole way — so half way through a dismissal there were two
+   * players on screen: the cover shrinking toward the bar, and the bar already
+   * drawn underneath it.
+   *
+   * Held at zero until the morph is three quarters done, then brought in over
+   * the last quarter — by which point the shrinking cover is nearly on top of
+   * this one, so what arrives underneath it is the rest of the bar rather than
+   * a duplicate of what is already there. At rest (`p` is 1 whenever the full
+   * player is closed or has never been opened) it is simply fully visible.
+   */
+  const barFade = useAnimatedStyle(() => {
+    const p = morphTransform(miniArt.value, bigArt.value, sheetY.value).p;
+    return {opacity: Math.min(1, Math.max(0, (p - 0.75) / 0.25))};
+  });
   const barStyle = useAnimatedStyle(() => ({
     transform: [{scale: 1 - press.value * 0.015}],
   }));
@@ -284,7 +345,7 @@ export const PlayerBar = React.memo(function PlayerBar({
       entering={SlideInDown.duration(240)}
       exiting={SlideOutDown.duration(180)}>
       <GestureDetector gesture={barGesture}>
-        <Animated.View style={[styles.wrap, barStyle]}>
+        <Animated.View style={[styles.wrap, barStyle, barFade]}>
           {/* A vertical gradient, not a flat fill: lighter at the top where the
             light would be. Falls back to the flat surface when the artwork's
             colour isn't known yet, which is a beat at most. */}
@@ -303,8 +364,8 @@ export const PlayerBar = React.memo(function PlayerBar({
             </Svg>
           )}
 
-          {/* The BAR and ARTWORK stay put; only the title travels. */}
-          <View style={styles.slider}>
+          {/* Artwork and text travel together under the finger. */}
+          <Animated.View style={[styles.slider, slideStyle]}>
             <TouchableOpacity
               style={styles.main}
               activeOpacity={1}
@@ -342,7 +403,7 @@ export const PlayerBar = React.memo(function PlayerBar({
                 )}
               </View>
 
-              <Animated.View style={[styles.text, titleStyle]}>
+              <View style={styles.text}>
                 <Marquee
                   text={cleanText(String(active.title ?? ''))}
                   style={styles.title}
@@ -359,9 +420,9 @@ export const PlayerBar = React.memo(function PlayerBar({
                     {cleanText(String(active.artist ?? ''))}
                   </Text>
                 )}
-              </Animated.View>
+              </View>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
           {/* Output, like, play — three identical 38x38 slots, so the row reads
             as one rhythm instead of three different shapes. The headphones are

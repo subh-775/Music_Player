@@ -120,6 +120,41 @@ On a cold start that request is competing with the backend still unpacking itsel
 
 If you still see it *during* use rather than at launch, the notice is correct: your phone's battery manager killed the backend. Close the app fully and open it again, then exempt Relaxify from battery optimisation.
 
+### Shuffle seemed to reorder the queue every time I pressed it
+
+Fixed in **v1.2.4**, and turning it *off* was the broken half.
+
+Shuffle reorders what is coming up and remembers the old order so that switching
+it off can put it back. But the queue keeps moving while shuffle is on — songs
+play, autoplay appends more — so putting that remembered list back was adding
+songs you had already heard and dropping ones queued since. The result looked
+just as random as switching shuffle on, so both directions appeared to reshuffle
+and neither ever restored anything.
+
+It now keeps the *order* it remembered but only the songs genuinely still ahead
+of you, so off means off.
+
+### The song that was playing crossfaded, but the next one did not
+
+Fixed in **v1.2.4**. Each boundary is marked as faded so it cannot be faded
+twice — but the mark used the track's **position** in the queue rather than its
+identity. Start a different playlist and the numbering begins again, so a
+leftover mark from the previous queue silently vetoed the fade on whichever song
+landed on the same number. Repeat and previous hit it the same way.
+
+Crossfade still only runs while the app is on screen; that is deliberate and
+explained in [Sound](/reference/sound).
+
+### I turned Autoplay off and it kept playing
+
+Fixed in **v1.2.4**. Autoplay tops the queue up a few songs *before* you reach
+the end, so by the time you switch it off there are usually already eight
+suggested songs sitting in the queue. Switching it off only stopped it adding
+more — the ones already there still played, which made the setting look ignored.
+
+Switching it off now also clears the suggestions still waiting. The song playing
+right now is left alone, and anything you queued yourself is untouched.
+
 ### Back closes the wrong thing
 
 It should close whatever is visually on top, one layer per press. If it does not on your build, that is a bug worth reporting with the exact sequence of screens — the ordering is explicit in the code and a wrong order is fixable.

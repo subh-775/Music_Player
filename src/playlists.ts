@@ -92,7 +92,12 @@ export function addTrackToPlaylist(id: string, track: Track): boolean {
         return p;
       }
       added = true;
-      return {...p, tracks: [...(p.tracks || []), t], updatedAt: Date.now()};
+      // PREPENDED. A playlist is a stack of what you have been finding, so the
+      // song you just added is the one you want to see when you open it — at
+      // the bottom of forty others it may as well not have been added at all.
+      // Matches the library's own ordering, where the list you last touched
+      // rises to the top.
+      return {...p, tracks: [t, ...(p.tracks || [])], updatedAt: Date.now()};
     }),
   );
   return added;
@@ -122,10 +127,14 @@ export function addTracksToPlaylist(id: string, tracks: Track[]): number {
         fresh.push(t);
       }
       added = fresh.length;
+      // The whole batch on top, in its own order. A Spotify import is one
+      // action, so it belongs above what was already there — but the order
+      // WITHIN it is the order of the list that was imported, and reversing
+      // that would be wrong.
       return fresh.length
         ? {
             ...p,
-            tracks: [...(p.tracks || []), ...fresh],
+            tracks: [...fresh, ...(p.tracks || [])],
             updatedAt: Date.now(),
           }
         : p;

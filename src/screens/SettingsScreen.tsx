@@ -50,6 +50,7 @@ import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
 import {ConfirmModal} from '../components/ConfirmModal';
 import {applyAudioEffects} from '../audioEffects';
+import {dropQueuedRadio} from '../player';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
 import {checkUpdate, startUpdateInstall, useUpdate} from '../update';
@@ -698,7 +699,16 @@ export function SettingsScreen({
               label="Autoplay"
               hint="Keep playing similar songs when the queue ends"
               value={settings.autoplay}
-              onChange={v => writeSetting('autoplay', v)}
+              onChange={v => {
+                writeSetting('autoplay', v);
+                // Switching it OFF has to clear the picks radio already
+                // queued, or the setting reads as ignored: the top-up runs a
+                // few songs ahead, so there are normally eight of them sitting
+                // there and playback carried straight on into them.
+                if (!v) {
+                  dropQueuedRadio().catch(() => {});
+                }
+              }}
             />
             <ToggleRow
               label="Normalize volume"

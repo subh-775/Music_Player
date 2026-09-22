@@ -67,21 +67,31 @@ export function AddButton({
         liked ? 'Saved. Open the list of playlists' : 'Add to Liked Songs'
       }
       style={style}>
-      {liked ? (
-        // The SAME glyph family as the unliked state: an outline at the same
-        // weight, no fill, no contrasting rim. Only the colour and the mark
-        // inside the circle change.
-        //
-        // It used to be an accent-filled disc stroked in C.bg, which Lucide
-        // applies to the circle as well as the tick — so the liked state wore a
-        // true-black ring that nothing else in the app has, and read as a
-        // different KIND of control sitting next to the one it replaces. The
-        // ring was there to stop a green disc bleeding into the player bar's
-        // artwork tint; an unfilled glyph has nothing to bleed.
-        <CircleCheck size={size} color={C.accent} strokeWidth={2.2} />
-      ) : (
-        <CirclePlus size={size} color={C.sub} strokeWidth={1.8} />
-      )}
+      <SavedGlyph on={liked} size={size} />
     </TouchableOpacity>
+  );
+}
+
+/**
+ * "In" or "not in", as one mark — and the ONLY definition of it.
+ *
+ * There were two: this one, and a private copy inside AddToPlaylistSheet whose
+ * comment claimed it was "the same mark the + button wears". It was, until the
+ * + changed and the sheet did not, which is how a filled green disc with a
+ * true-black ring ended up sitting next to the outline version in the same
+ * screen. Two copies of one glyph is two chances for them to disagree, and the
+ * disagreement is invisible until someone screenshots both at once.
+ *
+ * The shape is the same in both states: an outline at the same weight, no fill,
+ * no contrasting rim. Only the colour and the mark inside the circle change.
+ * The fill is what forced the dark ring in the first place — Lucide applies
+ * `color` as the stroke to the circle AND the tick, so a green disc needed a
+ * dark stroke to keep its tick legible, and that stroke ringed the disc too.
+ */
+export function SavedGlyph({on, size = 25}: {on: boolean; size?: number}) {
+  return on ? (
+    <CircleCheck size={size} color={C.accent} strokeWidth={2.2} />
+  ) : (
+    <CirclePlus size={size} color={C.sub} strokeWidth={1.8} />
   );
 }

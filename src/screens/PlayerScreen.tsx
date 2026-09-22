@@ -82,10 +82,10 @@ import {
 } from '../player';
 import {useAudioOutput} from '../audioOutput';
 import {
-  HIDE_Y,
   bigArt,
   miniArt,
   morphTransform,
+  resetPlayer,
   settlePlayer,
   sheetY,
 } from '../playerSheet';
@@ -396,7 +396,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     } else {
       // Already parked by whatever ran the dismissal; this only catches a close
       // that came from somewhere other than close() (navigating away, say).
-      sheetY.value = HIDE_Y;
+      resetPlayer();
     }
   }, [visible, everOpened, dragging, measureArt]);
 
@@ -705,7 +705,19 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   }));
   /** The panel's own surface. Separated from the root view so the cover, which
    *  is a child, does not fade with it. */
-  const backdropStyle = useAnimatedStyle(() => ({opacity: 1 - morph.value}));
+  /**
+   * The panel's surface, and it holds much longer than the rest.
+   *
+   * Squared rather than linear. A linear fade is already half transparent at
+   * the half-way point of a dismissal, which is what let the mini player show
+   * through from underneath while the cover was still visibly shrinking toward
+   * it — two players on screen at once. `1 - p²` is still 91% opaque a third of
+   * the way down and only gives way at the end, by which time the cover has
+   * nearly arrived and the bar is fading in to receive it.
+   */
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: 1 - morph.value * morph.value,
+  }));
   const lyricsChromeStyle = useAnimatedStyle(() => ({
     opacity: 1 - morph.value,
   }));
@@ -739,8 +751,12 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     setRepeat(next).catch(() => {});
   }, [repeat]);
 
-  // Guard against mashing: one shuffle + one toast per ~1.2s, so a rapid series
-  // of taps doesn't spam the notice or re-toggle the icon on every press.
+  // Guard against mashing: one shuffle per ~0.8s, so a rapid series of taps
+  // doesn't re-toggle the icon on every press.
+  //
+  // No toast. The icon IS the state, it sits under the thumb that just pressed
+  // it, and a bar announcing a change you can already see is the kind of
+  // confirmation that only gets in the way.
   const shuffleLock = useRef(0);
   const onShuffle = useCallback(() => {
     const now = Date.now();
@@ -748,11 +764,11 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       return;
     }
     shuffleLock.current = now;
-    // A real toggle: ask the engine to flip; the icon follows whatever the
-    // engine actually did (a queue with nothing upcoming can't shuffle).
-    const next = !isShuffled();
-    setShuffle(next).catch(() => {});
-    toast(next ? 'Shuffle on' : 'Shuffle off');
+    // A real toggle: ask the engine to flip. setShuffle returns what it
+    // actually did — a queue with nothing ahead of it cannot shuffle — and
+    // `useShuffle` picks that up, so the icon can never claim a reorder that
+    // did not happen.
+    setShuffle(!isShuffled()).catch(() => {});
   }, []);
 
   const download = useCallback(async () => {

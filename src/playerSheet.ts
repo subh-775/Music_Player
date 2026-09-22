@@ -46,7 +46,8 @@ export const HIDE_Y = (({width, height}) => Math.max(width, height))(
   Dimensions.get('window'),
 );
 
-/** 0 = fully open, HIDE_Y = fully dismissed. */
+/** 0 = fully open; `closedY()` = fully dismissed. Seeded at HIDE_Y, which is
+ *  what `closedY()` also returns until the two covers have been measured. */
 export const sheetY: SharedValue<number> = makeMutable(HIDE_Y);
 
 /**
@@ -178,7 +179,24 @@ export function morphTransform(mini: Rect, big: Rect, y: number) {
  * animation. Starting here gives the whole 260ms to the part you can see.
  */
 export function resetPlayer(): void {
-  sheetY.value = spanBetween(miniArt.value, bigArt.value);
+  sheetY.value = closedY();
+}
+
+/**
+ * Where the sheet rests when the player is closed.
+ *
+ * The SPAN, not a whole screen height. Everything past the span is invisible —
+ * the backdrop has faded out and the cover is parked exactly on the mini
+ * player's — so travelling it is time the animation spends showing nothing.
+ * Closing used to spend 44% of its duration down there, which is why the
+ * dismissal appeared to finish and then take a moment longer to let go.
+ *
+ * It is also where an open begins, so open and close are now the same journey
+ * in opposite directions rather than two different lengths.
+ */
+export function closedY(): number {
+  'worklet';
+  return spanBetween(miniArt.value, bigArt.value);
 }
 
 /**
@@ -194,7 +212,7 @@ export function settlePlayer(
   done?: (finished: boolean) => void,
 ): void {
   sheetY.value = withTiming(
-    open ? 0 : HIDE_Y,
+    open ? 0 : closedY(),
     {
       duration: Math.abs(velocity) > 1500 ? 190 : open ? 260 : 280,
       easing: Easing.out(Easing.cubic),

@@ -1010,37 +1010,119 @@ export function useShuffle(): boolean {
   );
 }
 
-export async function setShuffle(on: boolean): Promise<void> {
+/**
+ * The original order of whatever is STILL upcoming.
+ *
+ * This is the whole of the shuffle-off bug, and it is worth being explicit
+ * about. `preShuffleUpcoming` is a snapshot taken at the moment shuffle was
+ * turned on — but the queue keeps moving afterwards. Songs play, so they leave
+ * the upcoming list; radio appends more; a swipe skips two at once. Re-adding
+ * that snapshot wholesale put songs back that had already been heard and
+ * dropped ones added since, so turning shuffle OFF produced a queue that looked
+ * every bit as random as turning it on. From the outside both directions
+ * reshuffled, and neither ever restored anything.
+ *
+ * Filtering the snapshot by what is genuinely still ahead fixes it in one line
+ * of intent: keep the ORDER from the snapshot, keep the MEMBERSHIP from the
+ * live queue. `_qid` is the per-row identity toQueueItem already stamps — the
+ * right key here, because the same song queued twice is two rows and only one
+ * of them may still be upcoming.
+ *
+ * Exported for the test; nothing else calls it.
+ */
+export function restoreOrder<T>(snapshot: T[], liveUpcoming: T[]): T[] {
+  // RNTP's Track carries an index signature rather than a declared `_qid`, so
+  // the key is read through a cast rather than constrained on T — constraining
+  // it would stop the engine's own queue type from being passed at all.
+  const qid = (t: T) => (t as {_qid?: unknown})._qid;
+  const live = new Set(liveUpcoming.map(qid));
+  return snapshot.filter(t => qid(t) !== undefined && live.has(qid(t)));
+}
+
+/** Fisher-Yates, and it must not return the identity for a short list — a
+ *  shuffle that visibly changes nothing reads as a broken button. */
+export function shuffleUpcoming<T>(rest: T[]): T[] {
+  const out = [...rest];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Turn shuffle on or off over the UPCOMING tracks.
+ *
+ * Returns what the engine ACTUALLY did, not what was asked. A queue with
+ * nothing ahead of it cannot shuffle, and the caller needs to know that rather
+ * than lighting the icon for a shuffle that never happened.
+ */
+export async function setShuffle(on: boolean): Promise<boolean> {
   const queue = await TrackPlayer.getQueue();
   const index = await TrackPlayer.getActiveTrackIndex();
   if (index == null) {
-    return;
+    return shuffleOn;
   }
   const rest = queue.slice(index + 1);
   if (on) {
     if (rest.length < 2) {
-      // Nothing to shuffle — leave the flag alone so the icon doesn't claim a
-      // shuffle that never happened.
-      return;
+      return shuffleOn; // nothing ahead to reorder
     }
     preShuffleUpcoming = rest; // remember so OFF can restore it
-    const shuffled = [...rest];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
     await TrackPlayer.removeUpcomingTracks();
-    await TrackPlayer.add(shuffled);
+    await TrackPlayer.add(shuffleUpcoming(rest));
     setShuffleFlag(true);
   } else {
     if (preShuffleUpcoming) {
-      await TrackPlayer.removeUpcomingTracks();
-      await TrackPlayer.add(preShuffleUpcoming);
+      const restored = restoreOrder(preShuffleUpcoming, rest);
+      if (restored.length) {
+        await TrackPlayer.removeUpcomingTracks();
+        await TrackPlayer.add(restored);
+      }
       preShuffleUpcoming = null;
     }
     setShuffleFlag(false);
   }
   await refreshEngineMirror();
+  return shuffleOn;
+}
+
+/**
+ * Drop the radio picks still sitting in the queue.
+ *
+ * Turning autoplay off stops the top-up from running again, which is all it
+ * ever did — but the eight picks appended a few songs ago are already in the
+ * queue, so playback carried on into them and the setting looked like it had
+ * been ignored. Switching it off now means what it says: nothing plays after
+ * what you actually chose.
+ *
+ * Only tracks AFTER the active one, and only ones tagged `_autoplay` — the
+ * song playing right now is not taken out from under the listener even if
+ * radio is what queued it.
+ */
+export async function dropQueuedRadio(): Promise<void> {
+  try {
+    const [queue, index] = await Promise.all([
+      TrackPlayer.getQueue(),
+      TrackPlayer.getActiveTrackIndex(),
+    ]);
+    if (index == null) {
+      return;
+    }
+    const doomed = queue
+      .map((t, i) => ({t, i}))
+      .filter(({t, i}) => i > index && sourceTrackFor(t)?._autoplay)
+      .map(({i}) => i);
+    if (!doomed.length) {
+      return;
+    }
+    await TrackPlayer.remove(doomed);
+    queueSource = queueSource.filter(t => !t._autoplay);
+    await refreshEngineMirror();
+  } catch {
+    // Nothing queued, or the engine is not up — either way there is nothing
+    // to prune and no reason to surface it.
+  }
 }
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {
@@ -1463,7 +1545,30 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     try {
       const {position, duration} = await TrackPlayer.getProgress();
       const active = await TrackPlayer.getActiveTrackIndex();
-      const key = `${active}`;
+      /**
+       * The ROW's identity, not its position — and this is why crossfade
+       * "worked, but not every time".
+       *
+       * `cfPreparedFor` and `fadedFor` exist to stop one boundary being faded
+       * twice. Keyed on the queue INDEX they also stopped it being faded ever
+       * again at that index: play something else and the new queue starts at 0
+       * again, so `fadedFor` left over from the last queue silently vetoed the
+       * fade on whichever track happened to land on the same number. Repeat,
+       * previous and a re-shuffle all hit it too.
+       *
+       * `_qid` is the per-row identity toQueueItem already stamps, unique for
+       * the life of the process. Read off the warm mirror rather than a fresh
+       * bridge call, and falling back to the index on an old queue item so a
+       * missing stamp degrades to the previous behaviour instead of to no
+       * crossfade at all.
+       */
+      const key =
+        active == null
+          ? ''
+          : String(
+              (engineQueue[active] as {_qid?: unknown} | undefined)?._qid ??
+                `i${active}`,
+            );
       if (duration <= 0 || position <= 0) {
         return;
       }
