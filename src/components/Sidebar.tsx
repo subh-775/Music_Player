@@ -47,7 +47,7 @@ import {appVersion} from '../backend';
 import {useUpdateAvailable} from '../update';
 import {DRAWER_W, drawerX, settleDrawer} from '../drawer';
 
-const ICON = require('../assets/app-icon.png');
+const ICON = require('../assets/app-icon-bl.png');
 
 export type SidebarDest = 'settings' | 'help' | 'stats' | 'equalizer';
 

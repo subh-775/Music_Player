@@ -67,6 +67,23 @@ jobs:
       - name: Install JS deps
         run: npm ci
 
+      # Types, tests and lint BEFORE the 20-minute Android build, so a broken
+      # commit fails in one minute instead of paying for a full APK first.
+      #
+      # This is also the reason __tests__/ is committed rather than ignored: a
+      # test that only exists on one machine protects nothing. Several of these
+      # suites exist specifically to fail against a bug that already shipped —
+      # playerMorph pins the release where the mini player went invisible — and
+      # that is only worth anything if it runs on the commit being released.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx jest --ci
+
+      - name: Lint
+        run: npx eslint src/ App.tsx __tests__/
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 

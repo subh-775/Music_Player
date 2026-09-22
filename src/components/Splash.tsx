@@ -14,7 +14,7 @@ import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, Image, StyleSheet, View} from 'react-native';
 import {C} from '../theme';
 
-const ICON = require('../assets/app-icon.png');
+const ICON = require('../assets/app-icon-bl.png');
 
 export function Splash() {
   const enter = useRef(new Animated.Value(0)).current;
