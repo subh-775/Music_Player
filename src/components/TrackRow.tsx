@@ -17,14 +17,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import {
   ArrowDownToLine,
-  Heart,
   ListPlus,
   MoreVertical,
 } from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {formatDuration, type Track} from '../backend';
 import {cleanText, getBestArtworkUrl, thumbArtwork} from '../tracks';
-import {useLike} from '../store';
+import {AddButton} from './AddButton';
+import {openAddToPlaylist} from './AddToPlaylistSheet';
 import {addToQueue, useIsActiveTrack} from '../player';
 import {useIsDownloaded} from '../downloads';
 import {toast} from '../toast';
@@ -66,9 +66,12 @@ export const TrackRow = React.memo(function TrackRow({
   onMenu,
   index,
   active,
-  /** Show the inline heart and download buttons. On by default; the queue and
+  /** Show the inline + and download buttons. On by default; the queue and
    *  other tight lists turn them off to keep the row from getting crowded. */
   showActions = true,
+  /** Search turns this off: a results list is for picking the right song,
+   *  and the length was crowding out the artist. */
+  showDuration = true,
 }: {
   track: Track;
   onPress: () => void;
@@ -78,12 +81,12 @@ export const TrackRow = React.memo(function TrackRow({
   /** True for the track that's currently playing. */
   active?: boolean;
   showActions?: boolean;
+  showDuration?: boolean;
 }) {
-  const dur = formatDuration(track.duration_ms);
+  const dur = showDuration ? formatDuration(track.duration_ms) : '';
   // thumbArtwork, not the baked 500x500: this draws at 52dp, and a list is
   // where the difference is multiplied by every row the virtualiser holds.
   const artwork = thumbArtwork(getBestArtworkUrl(track));
-  const {liked, toggle} = useLike(track);
   // A small green tick marks anything already on disk — permanent until the
   // file is deleted (a disk scan drops the id).
   const downloaded = useIsDownloaded(track);
@@ -194,13 +197,15 @@ export const TrackRow = React.memo(function TrackRow({
             )}
 
             {showActions && (
-              <TouchableOpacity onPress={toggle} hitSlop={6} style={styles.act}>
-                <Heart
-                  size={18}
-                  color={liked ? C.accent : C.faint}
-                  fill={liked ? C.accent : 'transparent'}
-                />
-              </TouchableOpacity>
+              // The player's + and its rule: first press saves to Liked Songs,
+              // the next (or a hold) opens the playlists.
+              <AddButton
+                track={track}
+                onOpenSheet={openAddToPlaylist}
+                size={21}
+                hitSlop={6}
+                style={styles.act}
+              />
             )}
 
             {!!onMenu && (

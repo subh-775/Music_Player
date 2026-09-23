@@ -51,6 +51,28 @@ import Animated, {
 } from 'react-native-reanimated';
 import {Sheet} from './Sheet';
 
+/**
+ * Open the sheet from anywhere — a list row's + in particular. App owns the
+ * sheet's state and registers itself here, the same way toast.ts works, so
+ * the rows do not need a callback threaded through every screen.
+ */
+let opener: ((t: Track) => void) | null = null;
+
+export function openAddToPlaylist(t: Track): void {
+  opener?.(t);
+}
+
+export function useAddToPlaylistHost(open: (t: Track) => void): void {
+  useEffect(() => {
+    opener = open;
+    return () => {
+      if (opener === open) {
+        opener = null;
+      }
+    };
+  }, [open]);
+}
+
 /** Above this many, finding one by eye is a scroll rather than a glance. */
 const FILTER_FROM = 6;
 

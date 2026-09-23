@@ -512,6 +512,7 @@ export const SearchScreen = React.memo(function SearchScreen({
               track={item}
               onPress={() => onPickTrack(item, results)}
               onMenu={() => onMenu(item)}
+              showDuration={false}
             />
           )}
         />

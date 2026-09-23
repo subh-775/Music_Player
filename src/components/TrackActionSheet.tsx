@@ -19,10 +19,10 @@ import {
   View,
 } from 'react-native';
 import {
-  Check,
+  CircleCheck,
+  CirclePlus,
   Disc3,
   Download,
-  Heart,
   ListPlus,
   ListX,
   Loader,
@@ -125,7 +125,7 @@ export function TrackActionSheet({
 
   const items: Array<{
     key: string;
-    Icon: typeof Heart;
+    Icon: typeof CirclePlus;
     label: string;
     onPress: () => void;
     tint?: string;
@@ -134,7 +134,7 @@ export function TrackActionSheet({
   }> = [
     {
       key: 'like',
-      Icon: liked ? Check : Heart,
+      Icon: liked ? CircleCheck : CirclePlus,
       label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs',
       tint: liked ? C.accent : undefined,
       stay: true,

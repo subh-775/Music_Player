@@ -1736,6 +1736,36 @@ ticker in both players (Marquee `ticker`), single artists stay still.
 Not device-verified: the native crossfade compiles in CI, but the handoff timing
 is reasoned from ExoPlayer's Player contract, not measured on a phone.
 
+## Round 17 — one font on every phone, and rows that line up (v1.2.10)
+
+**Font.** No Text named a fontFamily, so each phone drew its own system face —
+Roboto on one, a maker's font on the next. Plus Jakarta Sans (OFL) is bundled
+as a res/font family (400/500/600/700/800; the two 900s resolve to 800),
+registered in MainApplication, and made the default by `src/font.ts`, which
+prepends it to the style of RN's own Text and TextInput renders, so every
+existing style still wins. It is ~8% taller and 5–10% wider than Roboto:
+single-line titles truncate a little sooner. Checked by `defaultFont.test`.
+
+**Home rows.** Flings stopped wherever momentum ran out, so rows came to rest
+with a half card or a gap at the edge. `snapToInterval = CARD + S.gap` with
+the list's gutter padding lands a card on the page margin every time.
+
+## Round 18 — the last rough edges (v1.2.11)
+
+**YouTube had no quality label.** YouTubeNP divided NewPipe's `averageBitrate`
+by 1000, but it is already kbps (itag 251 reports 160), so every YouTube
+stream reported 0 and the backend correctly treated 0 as unknown.
+
+**Rows use +, not a heart.** TrackRow now renders the player's AddButton: the
+first press likes, the next (or a hold) opens Add to playlist. Rows reach the
+sheet through `openAddToPlaylist`, a module-level opener App registers (the
+toast.ts pattern) instead of a prop threaded through every screen. The action
+sheet's like row uses the same CirclePlus / CircleCheck glyphs.
+
+**Also:** search results drop the duration (`showDuration={false}`); Settings
+loses the three source descriptions and "Reset to default location"; the mark
+sits top right on Home after the greeting.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs

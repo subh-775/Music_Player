@@ -311,6 +311,7 @@ export const HomeScreen = React.memo(function HomeScreen({
         <View style={styles.headerText}>
           <Greeting />
         </View>
+        <Image source={MARK} style={styles.mark} accessibilityIgnoresInvertColors />
       </View>
 
       {/* Quick access. The two things everyone opens most (Liked, Downloaded)
@@ -349,6 +350,7 @@ export const HomeScreen = React.memo(function HomeScreen({
             keyExtractor={t => getTrackId(t)}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.rowList}
+            {...SNAP}
             renderItem={({item}) => (
               <TouchableOpacity
                 style={styles.card}
@@ -461,6 +463,7 @@ function Row({row, onPick}: {row: HomeRow; onPick: (i: HomeItem) => void}) {
         }
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.rowList}
+        {...SNAP}
         renderItem={({item}) => <Card item={item} onPick={onPick} />}
       />
     </View>
@@ -500,6 +503,24 @@ function Card({item, onPick}: {item: HomeItem; onPick: (i: HomeItem) => void}) {
 
 const CARD = 138;
 
+/** The app's own mark, as in the menu and on the splash. */
+const MARK = require('../assets/app-icon-bl.png');
+
+/**
+ * Every row comes to rest with a card on the page margin.
+ *
+ * Without it a fling stopped wherever momentum ran out, so one row sat with a
+ * half card at the left edge and the next with a gap — the rows no longer
+ * lined up with the grid above them or with each other. One card plus one gap
+ * per step: with the list's own S.gutter padding, step k puts card k exactly
+ * at the gutter, the same line the section titles start on.
+ */
+const SNAP = {
+  snapToInterval: CARD + S.gap,
+  snapToAlignment: 'start',
+  decelerationRate: 'fast',
+} as const;
+
 const styles = StyleSheet.create({
   fill: {flex: 1},
   // The bars at the foot of the app float OVER the page now, so a list has to
@@ -515,6 +536,7 @@ const styles = StyleSheet.create({
   },
   gear: {padding: 2},
   headerText: {flex: 1, minWidth: 0},
+  mark: {width: 38, height: 38, borderRadius: 19},
   dot: {
     position: 'absolute',
     top: 0,
