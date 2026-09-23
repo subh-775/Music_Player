@@ -12,7 +12,7 @@
  */
 import {useMemo} from 'react';
 import {createStore, asArray, useStoreValue} from './storage';
-import {getTrackId, normalizeTracks} from './tracks';
+import {normalizeTracks} from './tracks';
 import type {Track} from './backend';
 import {type Playlist, usePlaylists} from './playlists';
 
@@ -33,6 +33,9 @@ export type Collection = {
   tracks: Track[];
   /** Handle to reopen/refresh from its origin (a perma_url or album id). */
   source?: string;
+  /** When this collection last changed — see Playlist.updatedAt. Undefined on
+   *  the two fixtures (Liked, Downloads), which never sort by it. */
+  updatedAt?: number;
 };
 
 /** What the row under the title says, matching the library's own vocabulary. */
@@ -51,11 +54,6 @@ export function collectionSubtitle(c: Collection): string {
   }
 }
 
-/** True when songs can be removed from this collection in place. */
-export function isEditable(c: Collection): boolean {
-  return c.kind === 'userPlaylist';
-}
-
 // ─── Saved collections (albums / source playlists added to the library) ──────
 
 /**
@@ -67,8 +65,6 @@ export function isEditable(c: Collection): boolean {
 const saved = createStore<Collection[]>('mp.savedCollections.v1', [], raw =>
   asArray<Collection>(raw).filter(c => c && typeof c.id === 'string'),
 );
-
-export const hydrateSavedCollections = saved.hydrate;
 
 /** Stable identity for something saved from a source. */
 export function savedId(c: {
@@ -92,39 +88,11 @@ export function toggleSaved(c: Collection): boolean {
     saved.set(list.filter(x => savedId(x) !== id));
     return false;
   }
-  saved.set([...list, {...c, id, tracks: normalizeTracks(c.tracks || [])}]);
+  saved.set([
+    ...list,
+    {...c, id, tracks: normalizeTracks(c.tracks || []), updatedAt: Date.now()},
+  ]);
   return true;
-}
-
-/**
- * Refresh a saved collection's snapshot from freshly-fetched tracks, so the
- * library stays in step with the source playlist without a manual re-save.
- *
- * No-op when it isn't saved, when the fetch came back empty, or when nothing
- * changed — the last one matters, because writing an identical value still
- * costs a disk write and a re-render of every subscriber.
- */
-export function refreshSavedTracks(c: Collection, tracks: Track[]): void {
-  const id = savedId(c);
-  const list = saved.get();
-  const idx = list.findIndex(x => savedId(x) === id);
-  if (idx < 0) {
-    return;
-  }
-  const fresh = normalizeTracks(tracks || []);
-  if (!fresh.length) {
-    return;
-  }
-  const prev = list[idx].tracks || [];
-  const unchanged =
-    prev.length === fresh.length &&
-    fresh.every((t, i) => getTrackId(t) === getTrackId(prev[i]));
-  if (unchanged) {
-    return;
-  }
-  const next = [...list];
-  next[idx] = {...list[idx], tracks: fresh};
-  saved.set(next);
 }
 
 export function useSavedCollections(): Collection[] {
@@ -143,6 +111,10 @@ export function playlistToCollection(p: Playlist): Collection {
     name: p.name,
     image: p.image,
     tracks: p.tracks || [],
+    // Falls back to createdAt for playlists stored before the stamp existed,
+    // so an upgraded library keeps its old order instead of collapsing to one
+    // undefined heap at the bottom.
+    updatedAt: p.updatedAt ?? p.createdAt,
   };
 }
 

@@ -27,7 +27,6 @@ import React, {
 import {
   ActivityIndicator,
   BackHandler,
-  Dimensions,
   Image,
   ScrollView,
   StyleSheet,
@@ -39,6 +38,7 @@ import {
   Check,
   ChevronDown,
   CircleArrowDown,
+  Gauge,
   Disc3,
   Headphones,
   Pause,
@@ -56,6 +56,7 @@ import Animated, {
   Easing,
   runOnJS,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withSpring,
   withTiming,
@@ -81,7 +82,20 @@ import {
   useProgress,
 } from '../player';
 import {useAudioOutput} from '../audioOutput';
-import {toward, useArtworkColor} from '../artworkColor';
+import {useSettings} from '../store';
+import {
+  bigArt,
+  miniArt,
+  miniBar,
+  morphTransform,
+  resetPlayer,
+  settlePlayer,
+  sheetP,
+  sheetRect,
+  spanBetween,
+  surfaceRect,
+} from '../playerSheet';
+import {surfaceTint, useArtworkColor} from '../artworkColor';
 import {QualityBadge, SourceBadge} from '../components/Badges';
 import {Seekbar} from '../components/Seekbar';
 import {SeekPeek} from '../components/SeekPeek';
@@ -89,20 +103,11 @@ import {QueuePane} from './QueueScreen';
 import {Sheet} from '../components/Sheet';
 import {AddButton} from '../components/AddButton';
 import {SleepSheet} from '../components/SleepSheet';
+import {SpeedSheet} from '../components/SpeedSheet';
+import {clampRate, isRate, rateLabel} from '../playbackRate';
 import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {toast} from '../toast';
 
-/**
- * Full sheet travel for the open/close slide — the LONGEST edge, not the height.
- *
- * max(w, h) is the same number in both orientations; a plain `height` read is
- * not, and this activity handles rotation itself rather than being recreated.
- * A portrait height captured in landscape left "closed" only halfway down a
- * portrait screen, with the player still visible.
- */
-const HIDE_Y = (({width, height}) => Math.max(width, height))(
-  Dimensions.get('window'),
-);
 
 /**
  * How often the parked (closed) player polls progress.
@@ -152,11 +157,15 @@ const SEG_W = 40;
  */
 export const PlayerScreen = React.memo(function PlayerScreen({
   visible,
+  dragging = false,
   onClose,
   onAddToPlaylist,
   onOpenArtist,
 }: {
   visible: boolean;
+  /** True while a finger on the mini player is driving `sheetP` directly. The
+   *  open animation must not run against it — see the effect below. */
+  dragging?: boolean;
   onClose: () => void;
   onAddToPlaylist: (track: Track) => void;
   onOpenArtist: (credit: string) => void;
@@ -229,8 +238,13 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   const [pane, setPane] = useState<Pane>('song');
   const [queueOpen, setQueueOpen] = useState(false);
   const [sleepOpen, setSleepOpen] = useState(false);
+  const [speedOpen, setSpeedOpen] = useState(false);
   /** Non-empty while a timer is running — 'in 24 min', 'end of track'. */
   const sleepArmed = sleepLabel(useSleepTimer());
+  // The number replaces the glyph when it is not 1x, so the row shows the
+  // actual speed rather than just "speed is a thing you can change".
+  const rate = clampRate(useSettings().playbackRate);
+  const fastRate = !isRate(rate, 1);
   /** True while a queue row is lifted — the sheet's own drag stands down, or it
    *  wins a 12px-vs-12px tie it has no business winning. */
   const [rowDragging, setRowDragging] = useState(false);
@@ -302,36 +316,40 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   );
 
   /**
-   * Artwork position, and the sheet's own position — both on the UI thread.
+   * Artwork position, on the UI thread.
    *
-   * These were Animated.Values written with setValue() from a PanResponder,
+   * This was an Animated.Value written with setValue() from a PanResponder,
    * which meant one JS-thread write and one bridge crossing per touch event,
-   * queued behind whatever React happened to be doing. Dragging the player down
-   * is exactly when React is busiest, which is why minimising felt heavy while
-   * the drawer — already on a shared value — did not.
+   * queued behind whatever React happened to be doing. Dragging the player is
+   * exactly when React is busiest, which is why it felt heavy while the drawer
+   * — already on a shared value — did not.
+   *
+   * The sheet's OWN position is not here any more: it lives in
+   * `src/playerSheet.ts`, because the mini player has to be able to drag this
+   * panel open, and a shared value inside this component is not reachable from
+   * one inside that one.
    */
   const slide = useSharedValue(0);
-  const sheetY = useSharedValue(HIDE_Y);
   /** Which neighbour a horizontal drag is heading toward: 1 next, -1 prev, 0
    *  none. A shared value so the incoming title can track the finger without
    *  the direction having to be React state read from a worklet. */
   const dir = useSharedValue(0);
 
   /**
-   * Mounted from the first open, and never unmounted.
+   * Mounted as soon as there is a track, and never unmounted.
    *
-   * The Modal this replaces rendered nothing at all while closed, so every open
-   * paid to build a 1,100-line tree in the same frame the slide started. Parked
-   * off-screen it costs one view, and both progress subscriptions inside it are
-   * throttled to PARKED_POLL while `visible` is false, so an idle player is not
-   * on any clock.
+   * It used to wait for the first OPEN, and that was the quiet cause of the
+   * morph not completing. The panel's artwork can only be measured once it has
+   * been laid out, so until the player had been opened at least once there was
+   * no big rectangle to shrink from — the first dismissal of a session had
+   * nothing to interpolate and simply slid away.
+   *
+   * Mounting on the first track costs nothing extra: that is the same moment
+   * the mini player appears, so the tree is built while the user is looking at
+   * a song starting rather than during an animation. Both progress
+   * subscriptions inside are throttled to PARKED_POLL while `visible` is false,
+   * so a parked player is still on no clock.
    */
-  const [everOpened, setEverOpened] = useState(visible);
-  useEffect(() => {
-    if (visible) {
-      setEverOpened(true);
-    }
-  }, [visible]);
 
   // onClose is an inline arrow from the app, so it changes identity on every
   // app render. Held in a ref, the settle animation's completion callback does
@@ -340,21 +358,69 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   closeRef.current = onClose;
   const finishClose = useCallback(() => closeRef.current(), []);
 
+  /**
+   * Publish where the cover actually is, in window coordinates.
+   *
+   * Measured rather than derived: `artArea` is `flex: 1` between two rows whose
+   * heights depend on the type scale and on whether an output device is
+   * connected, so there is no constant to compute it from. `measureInWindow`
+   * reports the view WITH its transform applied, so the sheet's current offset
+   * is subtracted back out — what the morph needs is where this square sits
+   * when the panel is open, not where it happens to be mid-drag.
+   */
+  const wrapRef = useRef<View>(null);
+  const artRef = useRef<View>(null);
+  const measureArt = useCallback(() => {
+    // Captured BEFORE the call, not read inside the callback: measureInWindow
+    // is a round trip to the UI thread, and by the time it answers the sheet
+    // may have moved. The offset that belongs in the arithmetic is the one the
+    // view actually had when it was measured.
+    //
+    // ponytail: still approximate if a layout lands mid-animation. The settle
+    // below re-measures with the sheet at rest, which corrects it exactly;
+    // upgrade path if that is ever not enough is to measure in a worklet off
+    // the same frame.
+    // The panel's CURRENT pixel offset, derived from the proportion the same
+    // way the style derives it — so the measurement is corrected by exactly
+    // the transform it was taken through.
+    const at = sheetP.value * spanBetween(miniArt.value, bigArt.value);
+    artRef.current?.measureInWindow((x, y, w) => {
+      if (w > 0) {
+        bigArt.value = {x, y: y - at, size: w};
+      }
+    });
+    // The panel's own frame, for the surface morph. Same correction: what the
+    // morph interpolates from is where this panel sits when it is OPEN, not
+    // wherever the current gesture has pushed it.
+    wrapRef.current?.measureInWindow((x, y, w, h) => {
+      if (w > 0 && h > 0) {
+        sheetRect.value = {x, y: y - at, w, h};
+      }
+    });
+  }, []);
+
   useEffect(() => {
-    if (!everOpened) {
-      return;
-    }
     if (visible) {
-      sheetY.value = withTiming(0, {
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
-      });
+      // `dragging` is the mini player's pull. When the finger is already
+      // driving sheetP, animating it to 0 from here would yank the panel out
+      // from under it — the open must stay where the thumb is until it lifts.
+      //
+      // The `> 0` guard matters on the way out of a drag: clearing `dragging`
+      // re-runs this effect, and without it an abandoned pull (which is
+      // settling back DOWN) would be turned into an open.
+      if (!dragging && sheetP.value > 0) {
+        settlePlayer(true, 0, measureArt);
+      } else if (!dragging) {
+        // Already open — take the measurement the morph needs while the sheet
+        // is provably at rest.
+        measureArt();
+      }
     } else {
       // Already parked by whatever ran the dismissal; this only catches a close
       // that came from somewhere other than close() (navigating away, say).
-      sheetY.value = HIDE_Y;
+      resetPlayer();
     }
-  }, [visible, everOpened, sheetY]);
+  }, [visible, dragging, measureArt]);
 
   /**
    * Slide the rest of the way out, THEN tell the app — no restart, no jump.
@@ -364,20 +430,13 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    */
   const close = useCallback(
     (velocity = 0) => {
-      sheetY.value = withTiming(
-        HIDE_Y,
-        {
-          duration: velocity > 1500 ? 190 : 280,
-          easing: Easing.out(Easing.cubic),
-        },
-        finished => {
-          if (finished) {
-            runOnJS(finishClose)();
-          }
-        },
-      );
+      settlePlayer(false, velocity, finished => {
+        if (finished) {
+          finishClose();
+        }
+      });
     },
-    [sheetY, finishClose],
+    [finishClose],
   );
 
   // Hardware back closes the player. The Modal used to do this via
@@ -412,7 +471,10 @@ export const PlayerScreen = React.memo(function PlayerScreen({
         .activeOffsetY([-1000, 10])
         .failOffsetX([-18, 18])
         .onUpdate(e => {
-          sheetY.value = Math.max(0, e.translationY);
+          // Across the SPAN, so the proportion means the same thing whether it
+          // is a finger or an animation driving it.
+          const span = spanBetween(miniArt.value, bigArt.value);
+          sheetP.value = Math.min(1, Math.max(0, e.translationY / span));
         })
         .onEnd((e, success) => {
           if (success && (e.translationY > 120 || e.velocityY > 800)) {
@@ -420,29 +482,18 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             // onClose() outright from the artwork path, which unmounted the
             // sheet where it stood — it never covered the other 65%, which is
             // the "it doesn't completely minimize" report.
-            sheetY.value = withTiming(
-              HIDE_Y,
-              {
-                duration: e.velocityY > 1500 ? 170 : 240,
-                easing: Easing.out(Easing.cubic),
-              },
-              finished => {
-                if (finished) {
-                  runOnJS(finishClose)();
-                }
-              },
-            );
+            runOnJS(close)(e.velocityY);
           } else {
             // Firm, and clamped: the old RN spring overshot and wobbled visibly
             // on release, which read as jittery for a sheet this size.
-            sheetY.value = withSpring(0, {
+            sheetP.value = withSpring(0, {
               damping: 22,
               stiffness: 190,
               overshootClamping: true,
             });
           }
         }),
-    [sheetY, finishClose],
+    [close],
   );
 
   const headerDismiss = useMemo(() => makeDismiss(), [makeDismiss]);
@@ -585,13 +636,11 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   );
 
   const sheetStyle = useAnimatedStyle(() => {
-    // Flat at rest, rounded the moment it starts to move — off the same value
-    // that drives the slide, so the corners can never disagree with the
-    // position. A square-cornered panel sliding down over a world where every
-    // other surface that moves is rounded is what made the dismiss read as
-    // cheap. `overflow: hidden` on `wrap` is what makes the artwork and the
-    // tinted background actually clip to it.
-    const r = Math.min(1, sheetY.value / 220) * 22;
+    const y = sheetP.value * spanBetween(miniArt.value, bigArt.value);
+    // No corner radius here any more. The SURFACE owns the panel's corners now
+    // and rounds them all the way to the bar's own — a radius on this wrapper
+    // as well would clip the surface against a second, differently-timed curve
+    // for the whole of the morph.
     return {
       // Drop the transform PROPERTY entirely once the sheet has settled, rather
       // than leaving an identity translate on it.
@@ -604,14 +653,151 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       // that a settled sheet stops handing Android a matrix to compose at all,
       // which is free and correct on its own terms. The structural fix is the
       // queue moving out of this stack entirely.
-      transform: sheetY.value === 0 ? [] : [{translateY: sheetY.value}],
-      borderTopLeftRadius: r,
-      borderTopRightRadius: r,
+      // Pixels, derived from the proportion and the CURRENT measurements. The
+      // panel travels exactly `span`, which is defined as the distance that
+      // lands the big cover on the small one — so at p = 1 the cover is on the
+      // slot whatever has been re-measured since the gesture began.
+      transform: y === 0 ? [] : [{translateY: y}],
     };
   });
-  const artStyle = useAnimatedStyle(() => ({
-    transform: [{translateX: slide.value}],
+  /**
+   * The morph's progress: 0 fully open, 1 once the cover has reached the mini
+   * player's slot.
+   *
+   * Derived ONCE rather than recomputed in each of the five styles below, and
+   * every shared value it depends on — both rects and the sheet's position —
+   * is read directly in this body, which is the only way Reanimated knows to
+   * re-run it. The styles then depend on this one value.
+   */
+  const morph = useDerivedValue(() => sheetP.value);
+
+  /**
+   * The morph: the cover shrinks into the mini player's slot, and back out.
+   *
+   * Everything here is a function of `sheetP`, which is also what moves the
+   * sheet — so the two can never disagree, and both run on the UI thread under
+   * the finger. The maths reads the same in both directions, which is why
+   * opening needed no separate animation: dragging up on the mini player drives
+   * the same value down, and the cover grows out of the small square.
+   *
+   * translateY is a COUNTER-translate, and it is zero for the whole of the
+   * morph. The sheet is already carrying the artwork downward one-for-one, and
+   * `spanBetween` is defined as exactly the distance at which that lands the big
+   * cover on the small one — so during the morph the artwork simply rides
+   * along. Past that point the panel keeps going and the cover must not, so it
+   * subtracts the overshoot and parks.
+   *
+   * The scale is about the view's own centre, and RN applies a translate in the
+   * PARENT's coordinate space regardless of a scale later in the list, so the
+   * horizontal term is a plain centre-to-centre difference with no correction.
+   *
+   * `size: 0` on either rect means nothing has been measured yet — the first
+   * frame after mount, or an old layout mid-rotation. The morph collapses to
+   * the identity there rather than flinging the cover at coordinate zero.
+   */
+  const artStyle = useAnimatedStyle(() => {
+    const m = morphTransform(miniArt.value, bigArt.value, sheetP.value);
+    return {
+      borderRadius: m.radius,
+      transform: [
+        // `slide` is the swipe-to-change-song offset, which keeps working
+        // mid-morph: the two are different axes of the same view.
+        {translateX: slide.value + m.dx},
+        {translateY: m.dy},
+        {scale: m.scale},
+      ],
+    };
+  });
+
+  /**
+   * Everything that is NOT the cover fades out over the same progress.
+   *
+   * Without this the header and the transport would still be at full strength,
+   * sitting a few hundred pixels down the screen, at the moment the cover
+   * reaches the mini player — and the hand-off to the real mini player
+   * underneath would read as two players on screen at once rather than one
+   * turning into the other.
+   *
+   * Four hooks for one number, because Reanimated will not share a single
+   * animated style across views and these four are scattered through the tree:
+   * the surface, the header, the lyrics pane and the transport column.
+   */
+  /**
+   * Gone by a third of the way, not gradually over all of it.
+   *
+   * The surface is shrinking underneath this content now, so anything still
+   * drawn at full size would hang outside its own panel — a transport bar
+   * floating over the page with nothing behind it. Clearing the chrome quickly
+   * leaves the artwork alone in a shrinking frame, which is the picture the
+   * whole transition is trying to draw.
+   */
+  const fade = (p: number) => {
+    'worklet';
+    return 1 - Math.min(1, Math.max(0, p / 0.35));
+  };
+  const topChromeStyle = useAnimatedStyle(() => ({opacity: fade(morph.value)}));
+  const bottomChromeStyle = useAnimatedStyle(() => ({
+    opacity: fade(morph.value),
   }));
+  /** The panel's own surface. Separated from the root view so the cover, which
+   *  is a child, does not fade with it. */
+  /**
+   * The panel's surface — which SHRINKS INTO the bar rather than fading on the
+   * spot. See `surfaceRect` for why that is the whole difference.
+   *
+   * It stays fully opaque for almost all of the travel. There is no longer any
+   * reason to fade it: a surface that is on its way to being bar-sized is not
+   * covering anything it should not be. Only the last tenth cross-fades, and by
+   * then it and the real bar are the same rectangle in the same place, so
+   * nothing about the crossing is visible.
+   */
+  //
+  // ponytail: this animates layout props (left/top/width/height) rather than a
+  // transform, because a non-uniform scale would squash the corner radius into
+  // an ellipse — 11px across and under a pixel down by the end. The node is a
+  // childless leaf so Yoga re-measures one view per frame; upgrade path if it
+  // ever janks is a transform plus a separately-drawn corner.
+  /**
+   * When the panel is fully closed it draws NOTHING. Not a faded surface, not a
+   * cover parked on the mini player's — nothing.
+   *
+   * Every stray-artwork report has had the same shape: something ends up
+   * slightly off the value it should have settled on, and a leftover piece of
+   * the panel is left sitting somewhere near the bar. Chasing each cause one at
+   * a time is a losing game, because the panel being closed and the panel being
+   * invisible were two facts that had to agree rather than one fact. This makes
+   * them one: past 0.999 there is no transition left to show, so the whole
+   * thing is switched off and nothing it contains can be visible whatever the
+   * arithmetic inside it did.
+   *
+   * `display: none` rather than opacity, so it also stops being laid out and
+   * composited while parked — which is most of the session.
+   */
+  const hostStyle = useAnimatedStyle(() => ({
+    display: morph.value > 0.999 ? ('none' as const) : ('flex' as const),
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => {
+    const p = morph.value;
+    const r = surfaceRect(
+      sheetRect.value,
+      miniBar.value,
+      p * spanBetween(miniArt.value, bigArt.value),
+      p,
+    );
+    return {
+      left: r.left,
+      top: r.top,
+      width: r.width,
+      height: r.height,
+      borderRadius: r.radius,
+      opacity: 1 - Math.min(1, Math.max(0, (p - 0.9) / 0.1)),
+    };
+  });
+  const lyricsChromeStyle = useAnimatedStyle(() => ({
+    opacity: fade(morph.value),
+  }));
+
   // Same value as the artwork, deliberately: the title and credits travel as
   // one unit with the cover rather than sitting frozen until release. Its own
   // hook because Reanimated does not want one animated style on two views.
@@ -641,8 +827,12 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     setRepeat(next).catch(() => {});
   }, [repeat]);
 
-  // Guard against mashing: one shuffle + one toast per ~1.2s, so a rapid series
-  // of taps doesn't spam the notice or re-toggle the icon on every press.
+  // Guard against mashing: one shuffle per ~0.8s, so a rapid series of taps
+  // doesn't re-toggle the icon on every press.
+  //
+  // No toast. The icon IS the state, it sits under the thumb that just pressed
+  // it, and a bar announcing a change you can already see is the kind of
+  // confirmation that only gets in the way.
   const shuffleLock = useRef(0);
   const onShuffle = useCallback(() => {
     const now = Date.now();
@@ -650,11 +840,11 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       return;
     }
     shuffleLock.current = now;
-    // A real toggle: ask the engine to flip; the icon follows whatever the
-    // engine actually did (a queue with nothing upcoming can't shuffle).
-    const next = !isShuffled();
-    setShuffle(next).catch(() => {});
-    toast(next ? 'Shuffle on' : 'Shuffle off');
+    // A real toggle: ask the engine to flip. setShuffle returns what it
+    // actually did — a queue with nothing ahead of it cannot shuffle — and
+    // `useShuffle` picks that up, so the icon can never claim a reorder that
+    // did not happen.
+    setShuffle(!isShuffled()).catch(() => {});
   }, []);
 
   const download = useCallback(async () => {
@@ -680,7 +870,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     }
   }, [pane, lyricsState.available]);
 
-  if (!active || !everOpened) {
+  if (!active) {
     return null;
   }
 
@@ -704,28 +894,34 @@ export const PlayerScreen = React.memo(function PlayerScreen({
      * it by construction, and the app's own GestureHandlerRootView now covers
      * these gestures, so the second root view this used to need is gone too.
      */
-    <View
-      style={styles.host}
+    <Animated.View
+      style={[styles.host, hostStyle]}
       // A parked player is still in the tree; it must not eat touches meant for
       // the app behind it.
       pointerEvents={visible ? 'auto' : 'none'}>
-      <Animated.View
-        style={[
-          styles.wrap,
-          // 0.86 toward black, not 0.72.
-          //
-          // A bright cover left the sheet sitting at a lightness where the eye
-          // reads it as a translucent panel rather than a surface — it looks
-          // like the page behind is showing through, because a surface that
-          // colour usually means exactly that. Nothing was ever transparent;
-          // the tint just needed to be a background rather than a wash.
-          !!tint && {backgroundColor: toward(tint, 0.86)},
-          sheetStyle,
-        ]}>
+      <Animated.View ref={wrapRef} style={[styles.wrap, sheetStyle]}>
+        {/* The panel's SURFACE, as its own view rather than a colour on the
+            wrap above — so it can fade out during the morph while the artwork,
+            which is also a child of the wrap, stays at full strength.
+
+            The song's hue at this app's own saturation and lightness. A
+            bright cover used to leave the panel at a lightness where the eye
+            reads it as translucent — it looks like the page behind is showing
+            through, because a surface that colour usually means exactly that.
+            Nothing was ever transparent; the tint just had to be a background
+            rather than a wash. */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.backdrop,
+            !!tint && {backgroundColor: surfaceTint(tint, 0.075)},
+            backdropStyle,
+          ]}
+        />
         {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
         <GestureDetector gesture={headerDismiss}>
-          <View style={styles.topBar}>
+          <Animated.View style={[styles.topBar, topChromeStyle]}>
             <TouchableOpacity
               onPress={() => close()}
               hitSlop={14}
@@ -737,7 +933,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             </Text>
             {/* Balances the close button so the label stays centred. */}
             <View style={styles.iconBtn} />
-          </View>
+          </Animated.View>
         </GestureDetector>
 
         {/* The only flexible row: it shrinks and scrolls rather than pushing
@@ -746,16 +942,26 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           {/* Lyrics and queue stay MOUNTED and are shown/hidden — remounting
               re-ran their whole load every pane switch, which is the 1-2s
               "loading again" the pane tabs kept showing. */}
-          <View style={pane === 'lyrics' ? styles.paneFill : styles.paneOff}>
+          {/* Fades with the rest of the chrome. The artwork beside it is the
+              one thing that must NOT fade — it is being handed to the mini
+              player — but lyrics sliding down at full strength while everything
+              around them dissolves reads as a bug. */}
+          <Animated.View
+            style={[
+              pane === 'lyrics' ? styles.paneFill : styles.paneOff,
+              lyricsChromeStyle,
+            ]}>
             <LyricsPane
               state={lyricsState}
               visible={visible && pane === 'lyrics'}
             />
-          </View>
+          </Animated.View>
           {pane === 'song' && (
             <GestureDetector gesture={artGesture}>
               <View style={styles.artArea}>
                 <Animated.View
+                  ref={artRef}
+                  onLayout={measureArt}
                   style={[styles.artHolder, artStyle]}
                   pointerEvents="none">
                   {artwork ? (
@@ -795,7 +1001,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           )}
         </View>
 
-        <View style={styles.controls}>
+        <Animated.View style={[styles.controls, bottomChromeStyle]}>
           {/* Title + credits on the left, the three per-song actions right.
               The text block moves with the SAME `slide` value as the artwork
               above, so a swipe drags them as one unit instead of the title
@@ -974,6 +1180,25 @@ export const PlayerScreen = React.memo(function PlayerScreen({
                 lyricsDead={!lyricsState.available}
               />
               <View style={styles.bottomRight}>
+                {/* Speed, then sleep, then queue — in increasing distance from
+                    the song playing right now. Tinted when it is not 1x, for
+                    the same reason the sleep timer is when armed: a setting
+                    that carries across songs has to say so, or the next track
+                    sounding wrong is a mystery. */}
+                <TouchableOpacity
+                  onPress={() => setSpeedOpen(true)}
+                  hitSlop={14}
+                  activeOpacity={1}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Playback speed: ${rateLabel(rate)}`}
+                  style={styles.queueBtn}>
+                  {fastRate ? (
+                    <Text style={styles.rateBadge}>{rateLabel(rate)}</Text>
+                  ) : (
+                    <Gauge size={21} color={C.text} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+
                 {/* Sleep timer, next to the thing it will stop. It was in the
                     drawer, which is two gestures away from the music and the
                     wrong place for something you reach for with the phone
@@ -1007,7 +1232,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
               </View>
             </View>
           </GestureDetector>
-        </View>
+        </Animated.View>
 
         {/*
           The queue is a SHEET now, not a pane.
@@ -1017,6 +1242,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           inside the player's own animated transform and its display:none pane
           stack — it sits in a sheet of its own, mounted only once opened.
         */}
+        <SpeedSheet open={speedOpen} onClose={() => setSpeedOpen(false)} />
         <SleepSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
 
         <Sheet
@@ -1037,7 +1263,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           />
         </Sheet>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 });
 
@@ -1417,11 +1643,15 @@ const styles = StyleSheet.create({
   // Below the bottom sheets (40) so a sheet raised from the ⊕ in here sits on
   // top of the player, and below the drawer (45). See the note on the render.
   host: {...StyleSheet.absoluteFillObject, zIndex: 30},
+  // position + left/top/width/height ONLY — deliberately not absoluteFill.
+  // absoluteFill also pins `right` and `bottom`, and a view with left, right
+  // AND width set resolves them against each other rather than doing what the
+  // morph asked for. Every frame sets all four of these.
+  backdrop: {position: 'absolute', backgroundColor: C.bg, overflow: 'hidden'},
   // Absolutely filling the host rather than flex:1 — the host is the thing
   // being positioned now, and `wrap` is what actually slides inside it.
   wrap: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: C.bg,
     paddingTop: 8,
     // Without this the radius the dismiss interpolates rounds the CONTAINER and
     // the artwork and tinted background carry on painting square corners
@@ -1483,6 +1713,14 @@ const styles = StyleSheet.create({
   // No ring, no fill, no press state: the capsule at the other end of this row
   // is the only lit thing down here, and two lit things is a competition.
   queueBtn: {padding: 6},
+  // Tabular-ish: a fixed min width so 1.25x and 2x do not shuffle the row.
+  rateBadge: {
+    color: C.accent,
+    fontSize: 13,
+    fontWeight: '800',
+    minWidth: 34,
+    textAlign: 'center',
+  },
   bottomRight: {flexDirection: 'row', alignItems: 'center', gap: 2},
   /**
    * A DEFINITE height, not a maxHeight — and this is what makes the queue
@@ -1510,7 +1748,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
-  artHolder: {width: '100%', aspectRatio: 1, maxHeight: '100%'},
+  // overflow: hidden so the radius the morph interpolates actually clips the
+  // cover inside. The Image keeps no radius of its own — two of them disagreeing
+  // is how you get a square corner peeking out from under a rounded one.
+  artHolder: {
+    width: '100%',
+    aspectRatio: 1,
+    maxHeight: '100%',
+    overflow: 'hidden',
+    borderRadius: 10,
+  },
   art: {
     width: '100%',
     height: '100%',

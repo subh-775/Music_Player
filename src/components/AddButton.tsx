@@ -67,21 +67,31 @@ export function AddButton({
         liked ? 'Saved. Open the list of playlists' : 'Add to Liked Songs'
       }
       style={style}>
-      {liked ? (
-        // Stroke in the GROUND colour over an accent fill. Lucide draws the
-        // tick as a stroke, so a stroke width of 0 would leave an empty disc
-        // and colouring it with the accent would put a green tick on a green
-        // circle. The same stroke gives the disc a fine dark rim, which is
-        // what keeps it from bleeding into an accent-coloured background.
-        <CircleCheck
-          size={size}
-          color={C.bg}
-          fill={C.accent}
-          strokeWidth={2.4}
-        />
-      ) : (
-        <CirclePlus size={size} color={C.sub} strokeWidth={1.8} />
-      )}
+      <SavedGlyph on={liked} size={size} />
     </TouchableOpacity>
+  );
+}
+
+/**
+ * "In" or "not in", as one mark — and the ONLY definition of it.
+ *
+ * There were two: this one, and a private copy inside AddToPlaylistSheet whose
+ * comment claimed it was "the same mark the + button wears". It was, until the
+ * + changed and the sheet did not, which is how a filled green disc with a
+ * true-black ring ended up sitting next to the outline version in the same
+ * screen. Two copies of one glyph is two chances for them to disagree, and the
+ * disagreement is invisible until someone screenshots both at once.
+ *
+ * The shape is the same in both states: an outline at the same weight, no fill,
+ * no contrasting rim. Only the colour and the mark inside the circle change.
+ * The fill is what forced the dark ring in the first place — Lucide applies
+ * `color` as the stroke to the circle AND the tick, so a green disc needed a
+ * dark stroke to keep its tick legible, and that stroke ringed the disc too.
+ */
+export function SavedGlyph({on, size = 25}: {on: boolean; size?: number}) {
+  return on ? (
+    <CircleCheck size={size} color={C.accent} strokeWidth={2.2} />
+  ) : (
+    <CirclePlus size={size} color={C.sub} strokeWidth={1.8} />
   );
 }

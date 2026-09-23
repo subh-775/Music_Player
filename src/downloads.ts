@@ -13,7 +13,7 @@
 import {useSyncExternalStore} from 'react';
 import {apiUrl, getDownloadStatus, startDownload, type Track} from './backend';
 import {getBestArtworkUrl, getDownloadKey} from './tracks';
-import {createStore, asArray, useStoreSelector, useStoreValue} from './storage';
+import {createStore, asArray, useStoreSelector} from './storage';
 import {toast} from './toast';
 
 /**
@@ -126,16 +126,12 @@ export function markDownloaded(tracks: Track[]): void {
   }
 }
 
-export function useDownloadedIds(): string[] {
-  return useStoreValue(downloadedIds);
-}
-
 /**
  * Is THIS track on disk — as a boolean subscription.
  *
- * useDownloadedIds() hands back the whole id array, so any download finishing
- * re-rendered every row that called it. This re-renders a row only when that
- * row's own answer changes.
+ * Subscribing to the whole id array meant any download finishing re-rendered
+ * every row that read it. This re-renders a row only when that row's own answer
+ * changes.
  */
 export function useIsDownloaded(track: Track | null | undefined): boolean {
   const id = track ? getDownloadKey(track) : '';

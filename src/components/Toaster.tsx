@@ -7,7 +7,7 @@
 import React, {useEffect, useRef} from 'react';
 import {Animated, StyleSheet, Text} from 'react-native';
 import {useToast} from '../toast';
-import {S} from '../theme';
+import {C, S} from '../theme';
 
 export function Toaster({bottom = 96}: {bottom?: number}) {
   const item = useToast();
@@ -65,17 +65,30 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 8},
   },
   text: {color: '#000', fontSize: 13, fontWeight: '700', textAlign: 'center'},
-  // Warn: inverted from the everyday bar — dark pill with a green border —
-  // so "press back again to exit" doesn't read like a song confirmation.
+  /**
+   * Warn: a system notice like "press back again to exit", which must not read
+   * like a song confirmation.
+   *
+   * The SHAPE carries that difference — a pill only as wide as its words,
+   * against the everyday bar's full-width slab. The finish does not: this is
+   * the same translucent surface, white hairline and elevation the mini player
+   * and every sheet use.
+   *
+   * It used to be a #161616 pill with a 1px accent-green outline, a treatment
+   * that appeared nowhere else in the app. A green border means "active" on
+   * every other control here — a toggle that is on, the row that is playing —
+   * so spending it on a transient notice both misread the notice and diluted
+   * the accent.
+   */
   warnWrap: {
-    backgroundColor: '#161616',
-    borderWidth: 1,
-    borderColor: '#1db954',
+    backgroundColor: 'rgba(38,38,38,0.94)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
     alignSelf: 'center',
     left: undefined,
     right: undefined,
     paddingHorizontal: 22,
     borderRadius: 999,
   },
-  warnText: {color: '#fff'},
+  warnText: {color: C.text},
 });

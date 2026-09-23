@@ -62,9 +62,19 @@ Contributions are welcome.
 1. Fork the repository and create a feature branch.
 2. Set up the development environment (see [Building from source](#building-from-source)).
 3. Make the change, keeping to the style of the surrounding code.
-4. Run `npx tsc --noEmit`, `npx eslint src App.tsx` and `npx jest` before
-   committing.
+4. Run `npx tsc --noEmit`, `npx eslint src/ App.tsx __tests__/` and `npx jest`
+   before committing. All three must be clean.
 5. Open a pull request describing the change and why it is needed.
+
+## Repository layout
+
+| | |
+| --- | --- |
+| `App.tsx`, `src/` | The React Native app. `src/screens/` and `src/components/` are the UI; the modules directly under `src/` are the domain — playback, storage, the backend client, the library stores. |
+| `android/` | The Android project, the Kotlin native modules, and the embedded Python engine under `android/app/src/main/python/`. |
+| `__tests__/` | Jest. Deliberately small: one suite per piece of logic where a mistake would be silent rather than loud. |
+| `docs/` | The documentation site (Vite + MDX) published to GitHub Pages from `main`. |
+| `notes/` | Development history — audits, round plans, the sprint log. Not part of the app. |
 
 ## Disclaimer
 

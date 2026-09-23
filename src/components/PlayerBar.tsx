@@ -24,7 +24,7 @@
  *     heavier than the bar it lives on, and it made the three controls read as
  *     three different KINDS of control rather than one row.
  */
-import React, {useCallback, useMemo} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef} from 'react';
 import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Animated, {
@@ -33,6 +33,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
@@ -50,16 +51,32 @@ import {
   useProgress,
 } from '../player';
 import {useAudioOutput} from '../audioOutput';
+import {
+  EXPAND_GRAB,
+  MINI_ART_RADIUS,
+  MINI_BAR_RADIUS,
+  bigArt,
+  miniArt,
+  miniBar,
+  miniBarOpacity,
+  sheetP,
+  spanBetween,
+} from '../playerSheet';
 import type {Track} from '../backend';
 import {AddButton} from './AddButton';
-import {toward, useArtworkColor} from '../artworkColor';
+import {surfaceTint, useArtworkColor} from '../artworkColor';
 
 const SWIPE_COMMIT = 56;
 
-/** Concentric corners: PAD + ART_R = BAR_R, so the two curves are parallel. */
+/** Concentric corners: PAD + ART_R = BAR_R, so the two curves are parallel.
+ *  ART_R comes from playerSheet because the full player's cover has to round
+ *  DOWN to exactly this value as it morphs into the slot below. */
 const PAD = 5;
-const ART_R = 6;
-const BAR_R = PAD + ART_R;
+const ART_R = MINI_ART_RADIUS;
+/** Asserted against MINI_BAR_RADIUS by the test: the full player's surface
+ *  interpolates its corners to that constant, and a bar whose own corner
+ *  disagreed would finish the morph with a visible step. */
+const BAR_R = MINI_BAR_RADIUS;
 
 /**
  * The hairline under the mini player, and the only part of it on a clock.
@@ -87,9 +104,16 @@ const MiniProgress = React.memo(function MiniProgress() {
  */
 export const PlayerBar = React.memo(function PlayerBar({
   onExpand,
+  onBeginExpandDrag,
+  onEndExpandDrag,
   onAddToPlaylist,
 }: {
   onExpand: () => void;
+  /** A pull UP has started: mount the full player without animating it, so the
+   *  finger can drive it the rest of the way. Mirrors the drawer's own
+   *  begin/end pair. */
+  onBeginExpandDrag: () => void;
+  onEndExpandDrag: (open: boolean, velocity: number) => void;
   onAddToPlaylist: (t: Track) => void;
 }) {
   const active = useActiveTrack();
@@ -98,10 +122,17 @@ export const PlayerBar = React.memo(function PlayerBar({
 
   const track = useMemo(() => sourceTrackFor(active), [active]);
 
-  // Only the TITLE slides — the artwork just swaps to the new song, per the
-  // request. And the skip is fired IMMEDIATELY, not behind the animation, so
-  // the new song appears at once instead of a beat later.
-  const titleSlide = useSharedValue(0);
+  /**
+   * How far the bar's contents are dragged, in pixels.
+   *
+   * It follows the FINGER now. This used to be written only on commit, so the
+   * bar sat perfectly still through the whole swipe and then flicked to the new
+   * song once the finger lifted — which is why a gesture had to be completed
+   * blind before anything acknowledged it. The same value carries the settle
+   * afterwards, so the release continues the motion the drag started instead of
+   * being a second, separate animation.
+   */
+  const dragX = useSharedValue(0);
   /** Whole-bar press feedback. Tiny, and it is what connects the tap to the
    *  expansion that follows — without it the bar feels like a static strip. */
   const press = useSharedValue(0);
@@ -110,11 +141,23 @@ export const PlayerBar = React.memo(function PlayerBar({
     (dir: 1 | -1) => {
       // Fire the skip NOW — the engine advances while this animates.
       (dir === 1 ? skipNext() : skipPrevious()).catch(() => {});
-      titleSlide.value = dir * 90;
-      titleSlide.value = withTiming(0, {duration: 220});
+      // Jump to the far side with no animation, then travel back in, so the
+      // incoming song enters from the direction the finger was heading rather
+      // than springing back from where it was released.
+      dragX.value = dir * 90;
+      dragX.value = withTiming(0, {duration: 220});
     },
-    [titleSlide],
+    [dragX],
   );
+
+  /** Let go without committing: back to rest, carrying the finger's speed. */
+  const release = useCallback(() => {
+    dragX.value = withSpring(0, {
+      damping: 20,
+      stiffness: 220,
+      overshootClamping: true,
+    });
+  }, [dragX]);
 
   /**
    * Recognised natively.
@@ -131,21 +174,149 @@ export const PlayerBar = React.memo(function PlayerBar({
       Gesture.Pan()
         .activeOffsetX([-14, 14])
         .failOffsetY([-18, 18])
+        .onUpdate(e => {
+          // Damped at 0.6, the same feel as the full player's artwork: the row
+          // tracks the thumb without travelling the whole width of the screen,
+          // so a small swipe still reads as a small swipe.
+          dragX.value = e.translationX * 0.6;
+        })
         .onEnd((e, success) => {
-          if (!success) {
+          if (success && e.translationX <= -SWIPE_COMMIT) {
+            runOnJS(commit)(1);
             return;
           }
-          if (e.translationX <= -SWIPE_COMMIT) {
-            runOnJS(commit)(1);
-          } else if (e.translationX >= SWIPE_COMMIT) {
+          if (success && e.translationX >= SWIPE_COMMIT) {
             runOnJS(commit)(-1);
+            return;
           }
+          runOnJS(release)();
         }),
-    [commit],
+    [commit, release, dragX],
   );
 
-  const titleStyle = useAnimatedStyle(() => ({
-    transform: [{translateX: titleSlide.value}],
+  /**
+   * Pull UP to open the full player, under the finger.
+   *
+   * The tap still works and is still the common case — this is for the drag,
+   * which used to do nothing at all, so the panel could only ever appear on its
+   * own schedule after the gesture had finished. Writing `sheetP` directly is
+   * what makes the cover grow out of this slot as the thumb travels: the full
+   * player's whole transition is a function of that one value, so the two are
+   * the same motion rather than two animations that happen to agree.
+   *
+   * UPWARD only, and it fails on horizontal travel so the skip swipe above
+   * keeps its claim. The two are raced rather than nested: whichever the finger
+   * commits to first wins outright, at the same threshold on both axes.
+   *
+   * ## The pull is measured against the SPAN, not the screen
+   *
+   * The distance over which the cover actually changes size is shorter than the
+   * screen. Measuring the drag against the full height meant the first ~40% of
+   * an upward pull moved the panel while changing nothing anyone could see, so
+   * the gesture felt dead until it suddenly committed. Against the span, the
+   * cover begins growing on the first pixel of travel.
+   */
+  const pullUp = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-EXPAND_GRAB, 1000])
+        .failOffsetX([-EXPAND_GRAB, EXPAND_GRAB])
+        .onStart(() => {
+          sheetP.value = 1;
+          runOnJS(onBeginExpandDrag)();
+        })
+        .onUpdate(e => {
+          // translationY is negative going up, so this walks the proportion
+          // from 1 (closed) toward 0 (open) across the SPAN — the distance
+          // over which the cover actually changes size. Measuring the drag
+          // against a whole screen height meant the first 40% of a pull moved
+          // the panel while changing nothing anyone could see.
+          const span = spanBetween(miniArt.value, bigArt.value);
+          sheetP.value = Math.min(1, Math.max(0, 1 + e.translationY / span));
+        })
+        .onEnd((e, success) => {
+          // A third of the way, or a firm flick. Anything less goes back — a
+          // gesture you abandoned must not commit.
+          const open =
+            success && (sheetP.value < 0.7 || e.velocityY < -700);
+          runOnJS(onEndExpandDrag)(open, e.velocityY);
+        }),
+    [onBeginExpandDrag, onEndExpandDrag],
+  );
+
+  const barGesture = useMemo(
+    () => Gesture.Race(pullUp, swipe),
+    [pullUp, swipe],
+  );
+
+  /**
+   * Publish where this cover sits, in window coordinates, for the morph to aim
+   * at. Measured rather than computed: the bar floats over the page at a height
+   * that depends on the navigation bar, so there is no constant for it.
+   */
+  const wrapRef = useRef<View>(null);
+  const artRef = useRef<View>(null);
+  const measureMiniArt = useCallback(() => {
+    // The swipe offset is subtracted back out for the same reason the player
+    // subtracts its sheet offset: measureInWindow reports the view WITH its
+    // transform, and what the morph needs to aim at is where this square sits
+    // at REST, not where a half-finished swipe has pushed it.
+    const at = dragX.value;
+    artRef.current?.measureInWindow((x, y, w) => {
+      if (w > 0) {
+        miniArt.value = {x: x - at, y, size: w};
+      }
+    });
+    // …and the bar's own frame, which is what the full player's surface
+    // shrinks INTO. The bar does not slide, so no correction is needed here.
+    wrapRef.current?.measureInWindow((x, y, w, h) => {
+      if (w > 0 && h > 0) {
+        miniBar.value = {x, y, w, h};
+      }
+    });
+  }, [dragX]);
+
+  /**
+   * Measure again once the bar has finished ARRIVING.
+   *
+   * onLayout alone is not enough here: the bar enters with SlideInDown, so the
+   * first layout is reported while it is still travelling up from below the
+   * screen, and `measureInWindow` reports the transform. That would aim the
+   * morph at a point off the bottom of the display, and nothing would ever fire
+   * onLayout again to correct it — the bar's layout does not change for the
+   * rest of the session.
+   *
+   * 300 clears the 240ms entrance with room to spare. One timer, once, when the
+   * first song starts.
+   */
+  useEffect(() => {
+    const t = setTimeout(measureMiniArt, 300);
+    return () => clearTimeout(t);
+  }, [measureMiniArt]);
+
+  /**
+   * The whole row travels, not just the title.
+   *
+   * The artwork used to stay nailed in place while the words moved, which reads
+   * as two unrelated things rather than as one song being dragged aside. It
+   * stays put during the MORPH — that is a different motion with a different
+   * job — but a sideways swipe moves the cover with everything else.
+   */
+  const slideStyle = useAnimatedStyle(() => ({
+    transform: [{translateX: dragX.value}],
+  }));
+
+  /**
+   * The bar fades in on the tail of the morph — see `miniBarOpacity`, which
+   * owns the rule and the guard that stops this bar ever vanishing outright.
+   *
+   * All three shared values are read HERE, in the style's own body, because
+   * that is the only place Reanimated looks when deciding what this style
+   * depends on. Reading them inside the helper instead would leave the opacity
+   * computed once and never updated again.
+   */
+  const barFade = useAnimatedStyle(() => ({
+    opacity: miniBarOpacity(bigArt.value, sheetP.value),
   }));
   const barStyle = useAnimatedStyle(() => ({
     transform: [{scale: 1 - press.value * 0.015}],
@@ -175,8 +346,8 @@ export const PlayerBar = React.memo(function PlayerBar({
     <Animated.View
       entering={SlideInDown.duration(240)}
       exiting={SlideOutDown.duration(180)}>
-      <GestureDetector gesture={swipe}>
-        <Animated.View style={[styles.wrap, barStyle]}>
+      <GestureDetector gesture={barGesture}>
+        <Animated.View ref={wrapRef} style={[styles.wrap, barStyle, barFade]}>
           {/* A vertical gradient, not a flat fill: lighter at the top where the
             light would be. Falls back to the flat surface when the artwork's
             colour isn't known yet, which is a beat at most. */}
@@ -184,19 +355,20 @@ export const PlayerBar = React.memo(function PlayerBar({
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
               <Defs>
                 <LinearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
-                  {/* Darker than it was: the bar is translucent now and sits
-                      over live content, so the tint has to hold its own
-                      surface rather than glow. */}
-                  <Stop offset="0" stopColor={toward(tint, 0.52)} />
-                  <Stop offset="1" stopColor={toward(tint, 0.7)} />
+                  {/* The song's HUE at this app's own saturation and
+                      lightness — see surfaceTint. Darkening alone kept a neon
+                      cover neon, and the bar became a green slab that matched
+                      nothing else on screen. */}
+                  <Stop offset="0" stopColor={surfaceTint(tint, 0.145)} />
+                  <Stop offset="1" stopColor={surfaceTint(tint, 0.095)} />
                 </LinearGradient>
               </Defs>
               <Rect width="100%" height="100%" fill="url(#barFill)" />
             </Svg>
           )}
 
-          {/* The BAR and ARTWORK stay put; only the title travels. */}
-          <View style={styles.slider}>
+          {/* Artwork and text travel together under the finger. */}
+          <Animated.View style={[styles.slider, slideStyle]}>
             <TouchableOpacity
               style={styles.main}
               activeOpacity={1}
@@ -207,18 +379,34 @@ export const PlayerBar = React.memo(function PlayerBar({
                 press.value = withTiming(0, {duration: 160});
               }}
               onPress={onExpand}>
-              {artwork ? (
-                <Image
-                  key={artwork}
-                  source={{uri: artwork}}
-                  style={styles.art}
-                  fadeDuration={0}
-                />
-              ) : (
-                <View style={[styles.art, styles.artFallback]} />
-              )}
+              {/* The wrapper is what the morph aims at — one rect whether
+                  there is a cover or a placeholder, and a plain View so
+                  measureInWindow has something stable to report.
 
-              <Animated.View style={[styles.text, titleStyle]}>
+                  The URL here is deliberately the PLAYER-size cover, not the
+                  thumb a 54dp square would otherwise want. Sharing one URL
+                  with the full player is what lets the morph hand over a
+                  decoded bitmap instead of starting a fetch at the exact
+                  moment the panel opens — so this is load-bearing, not an
+                  oversight to tidy up later. */}
+              <View
+                ref={artRef}
+                onLayout={measureMiniArt}
+                style={styles.art}
+                collapsable={false}>
+                {artwork ? (
+                  <Image
+                    key={artwork}
+                    source={{uri: artwork}}
+                    style={styles.artFill}
+                    fadeDuration={0}
+                  />
+                ) : (
+                  <View style={[styles.artFill, styles.artFallback]} />
+                )}
+              </View>
+
+              <View style={styles.text}>
                 <Marquee
                   text={cleanText(String(active.title ?? ''))}
                   style={styles.title}
@@ -235,9 +423,9 @@ export const PlayerBar = React.memo(function PlayerBar({
                     {cleanText(String(active.artist ?? ''))}
                   </Text>
                 )}
-              </Animated.View>
+              </View>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
           {/* Output, like, play — three identical 38x38 slots, so the row reads
             as one rhythm instead of three different shapes. The headphones are
@@ -329,7 +517,9 @@ const styles = StyleSheet.create({
     // Stops a cover with a light background from bleeding into the bar.
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.09)',
+    overflow: 'hidden',
   },
+  artFill: {width: '100%', height: '100%'},
   artFallback: {backgroundColor: C.bg},
   text: {flex: 1, minWidth: 0},
   // 14/600 over 11.5/400-at-62%. The old pair was 13/700 and 12/400 — one pixel

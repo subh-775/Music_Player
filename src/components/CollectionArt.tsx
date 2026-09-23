@@ -10,7 +10,7 @@ import React from 'react';
 import {Image, StyleSheet, View} from 'react-native';
 import {ArrowDownToLine, Heart, Music2, User} from 'lucide-react-native';
 import {C} from '../theme';
-import {getBestArtworkUrl} from '../tracks';
+import {getBestArtworkUrl, thumbArtwork} from '../tracks';
 import {type Collection} from '../collections';
 
 export const LIKED_TINT = '#5b3df5';
@@ -60,8 +60,15 @@ export function CollectionArt({
 
   // Four covers make a mosaic; anything less would leave holes, so one cover
   // fills the square and none falls back to the placeholder glyph.
+  //
+  // THUMB size, and this is the worst case of the P7 finding rather than a
+  // repeat of it: the mosaic draws four covers at HALF of a 56dp square — 28dp
+  // each — and was pulling four 500x500 JPEGs to do it. A library of a dozen
+  // playlists opened forty-eight of them. `slice` before `map`, so a 200-track
+  // playlist rewrites four URLs instead of two hundred.
   const covers = collection.tracks
-    .map(getBestArtworkUrl)
+    .slice(0, 8)
+    .map(t => thumbArtwork(getBestArtworkUrl(t)))
     .filter(Boolean)
     .slice(0, 4);
 

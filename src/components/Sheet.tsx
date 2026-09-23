@@ -43,7 +43,7 @@ import Animated, {
   type SharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import {C, S} from '../theme';
+import {C} from '../theme';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -430,5 +430,3 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
 });
-
-export const sheetGutter = S.gutter;

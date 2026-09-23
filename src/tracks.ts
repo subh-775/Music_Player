@@ -166,33 +166,6 @@ export function trackStreamUrl(track: Track | null | undefined): string {
 }
 
 /**
- * True when two objects are the SAME recording.
- *
- * Compares source URL first (unique per recording), falling back to
- * title+artist+duration. This is why a 30-second preview never highlights as
- * the currently-playing full track of the same name.
- */
-export function sameTrack(
-  a: Track | null | undefined,
-  b: Track | null | undefined,
-): boolean {
-  if (!a || !b) {
-    return false;
-  }
-  const ua = trackStreamUrl(a);
-  const ub = trackStreamUrl(b);
-  if (ua && ub) {
-    return ua === ub;
-  }
-  const norm = (s?: string) => cleanText(s).toLowerCase();
-  return (
-    norm(a.title) === norm(b.title) &&
-    norm(a.artist) === norm(b.artist) &&
-    (a.duration_ms || 0) === (b.duration_ms || 0)
-  );
-}
-
-/**
  * Raise a cover URL to a usable resolution where the URL pattern allows it.
  *
  * JioSaavn and iTunes both encode the size in the path, so a 150x150 thumbnail
@@ -305,22 +278,6 @@ export function normalizeTrack(track: Track | null | undefined): Track | null {
 
 export function normalizeTracks(tracks: Track[] = []): Track[] {
   return tracks.map(normalizeTrack).filter((t): t is Track => t !== null);
-}
-
-export function playableTracks(tracks: Track[] = []): Track[] {
-  return normalizeTracks(tracks).filter(isPlayableTrack);
-}
-
-export function uniqueTracks(tracks: Track[] = []): Track[] {
-  const seen = new Set<string>();
-  return tracks.filter(t => {
-    const id = getTrackId(t);
-    if (seen.has(id)) {
-      return false;
-    }
-    seen.add(id);
-    return true;
-  });
 }
 
 /**

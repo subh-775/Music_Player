@@ -39,8 +39,23 @@ export function apiUrl(path: string): string {
  * like "couldn't load your library" — which sends people looking at their
  * network, at the source, at anything but the actual cause.
  *
- * One probe, rate limited, and it only ever says so: restarting Flask from
- * underneath a running app is not something to attempt blind.
+ * Rate limited, and it only ever says so: restarting Flask from underneath a
+ * running app is not something to attempt blind.
+ *
+ * ## Why this polls instead of probing once
+ *
+ * It used to send ONE /health and call a single unanswered probe death. That is
+ * what produced "the music engine stopped" on a cold start of an app that then
+ * worked perfectly: during launch Chaquopy is still extracting the stdlib and
+ * importing Flask while Werkzeug serves several warm-up requests at once on a
+ * phone-grade CPU, so one request timing out there is routine rather than
+ * terminal — and the app was announcing a failure while it was merely starting.
+ *
+ * waitForBackend already backs off and polls, and is what every boot path uses.
+ * Four seconds of it is the distinction that was missing: a backend that is
+ * booting or busy answers inside that window, and one that has actually been
+ * killed never will. Reusing it here fixes every caller of apiGet at once,
+ * rather than only the one path a report happened to name.
  */
 let lastEngineWarning = 0;
 
@@ -48,13 +63,8 @@ async function warnIfEngineStopped(): Promise<void> {
   if (Date.now() - lastEngineWarning < 60_000) {
     return;
   }
-  try {
-    const res = await fetch(`${BASE}/health`);
-    if (res.ok) {
-      return; // the backend is fine — that call failed for its own reasons
-    }
-  } catch {
-    // fall through: no answer at all
+  if (await waitForBackend(4000)) {
+    return; // the backend is fine — that call failed for its own reasons
   }
   lastEngineWarning = Date.now();
   toast('The music engine stopped. Close the app and open it again.');
@@ -105,7 +115,6 @@ export async function waitForBackend(timeoutMs = 30_000): Promise<boolean> {
   return false;
 }
 
-export const backendPort = PORT;
 export const appVersion = version ?? '';
 
 // ─── Domain types + calls ────────────────────────────────────────────────────
@@ -372,31 +381,6 @@ export async function getRadio(
     )}&limit=${limit}`,
   );
   return Array.isArray(data.tracks) ? data.tracks : [];
-}
-
-export type SourceStatus = {
-  status: string;
-  type: string;
-  quality: string;
-  error?: string;
-};
-
-/**
- * Per-source availability.
- *
- * The endpoint wraps its payload: {"sources": {...}}. Reading the top level
- * instead gave a single "sources" key whose value has no `type`, so the
- * Settings filter matched nothing and the Sources section rendered EMPTY —
- * which in turn meant the YouTube toggle was never reachable, which is why
- * YouTube never appeared in search results.
- */
-export async function getSourcesStatus(): Promise<
-  Record<string, SourceStatus>
-> {
-  const data = await apiGet<{sources?: Record<string, SourceStatus>}>(
-    '/sources/status',
-  );
-  return data.sources ?? {};
 }
 
 export type YouTubeExperimental = {supported: boolean; enabled: boolean};

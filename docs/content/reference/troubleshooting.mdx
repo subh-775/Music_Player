@@ -82,6 +82,14 @@ The home screen kept a copy of its last contents so it would have something to s
 
 Separately, the app read its saved data — playlists, likes, history, settings and a dozen more — as sixteen separate requests, one after another, all queued behind the same storage. It is one request now.
 
+### Artwork takes a long time to appear on a slow connection
+
+Much better from **v1.2.3**, and it was two separate wastes of the same bytes.
+
+The coloured tint behind the player is taken from the cover, and reading that colour was downloading the picture a **second** time, at full size, on its own connection with no cache — while the real cover was being fetched alongside it and the song was trying to start on the same link. It now reads the small version, and Android caches it, so a cover you have seen before costs nothing at all.
+
+Separately, a playlist row with no cover of its own draws a four-square mosaic of the songs inside it. Each of those squares is about 28 pixels across and each one was fetching a 500×500 image — four per row, for every row in your library.
+
 ### Long lists felt heavy to scroll
 
 Improved in **v1.2.2**. Every row was fetching album art at 500×500 and drawing it at roughly a fifth of that, so each row downloaded and held about ten times the image it needed. Both catalogues can serve a smaller cover from the same address, so rows now ask for one.
@@ -103,6 +111,49 @@ If your phone uses three-button navigation the conflict disappears. Either way, 
 ### No lyrics for this song
 
 The Lyrics segment goes dim when the track genuinely has none on the provider — common for SoundCloud and YouTube uploads. It is not a failed fetch; the app checked and there is nothing there. See [Lyrics](/guide/lyrics).
+
+### It said "the music engine stopped" when I opened the app, but everything works
+
+Fixed in **v1.2.3**. The app watches its own embedded backend and says so when it stops answering — but it used to ask once and treat a single unanswered request as a death.
+
+On a cold start that request is competing with the backend still unpacking itself, so it could fail while nothing was actually wrong. It now keeps asking for four seconds before it says anything, which a starting backend answers and a stopped one never does.
+
+If you still see it *during* use rather than at launch, the notice is correct: your phone's battery manager killed the backend. Close the app fully and open it again, then exempt Relaxify from battery optimisation.
+
+### Shuffle seemed to reorder the queue every time I pressed it
+
+Fixed in **v1.2.4**, and turning it *off* was the broken half.
+
+Shuffle reorders what is coming up and remembers the old order so that switching
+it off can put it back. But the queue keeps moving while shuffle is on — songs
+play, autoplay appends more — so putting that remembered list back was adding
+songs you had already heard and dropping ones queued since. The result looked
+just as random as switching shuffle on, so both directions appeared to reshuffle
+and neither ever restored anything.
+
+It now keeps the *order* it remembered but only the songs genuinely still ahead
+of you, so off means off.
+
+### The song that was playing crossfaded, but the next one did not
+
+Fixed in **v1.2.4**. Each boundary is marked as faded so it cannot be faded
+twice — but the mark used the track's **position** in the queue rather than its
+identity. Start a different playlist and the numbering begins again, so a
+leftover mark from the previous queue silently vetoed the fade on whichever song
+landed on the same number. Repeat and previous hit it the same way.
+
+Crossfade still only runs while the app is on screen; that is deliberate and
+explained in [Sound](/reference/sound).
+
+### I turned Autoplay off and it kept playing
+
+Fixed in **v1.2.4**. Autoplay tops the queue up a few songs *before* you reach
+the end, so by the time you switch it off there are usually already eight
+suggested songs sitting in the queue. Switching it off only stopped it adding
+more — the ones already there still played, which made the setting look ignored.
+
+Switching it off now also clears the suggestions still waiting. The song playing
+right now is left alone, and anything you queued yourself is untouched.
 
 ### Back closes the wrong thing
 

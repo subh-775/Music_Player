@@ -18,8 +18,6 @@ const store = createStore<string[]>('mp.pins.v1', [], raw =>
     .slice(0, MAX_PINS),
 );
 
-export const hydratePins = store.hydrate;
-
 export function isPinned(id: string): boolean {
   return !!id && store.get().includes(id);
 }
@@ -63,25 +61,48 @@ export function rowId(
   ).toLowerCase()}`;
 }
 
-/** Pinned rows to the top, each group keeping its own order otherwise. */
+/**
+ * Pins to the top in pin order; everything else below them, most recently
+ * changed first.
+ *
+ * The second half is new. Unpinned rows used to compare equal, so the list kept
+ * whatever order its store had — saved collections by when they were saved,
+ * playlists by when they were created — and adding a song to a playlist moved
+ * it nowhere. The one you are actually filling belongs directly under the pins,
+ * which is the whole point of pinning only a handful.
+ *
+ * `recencyOf` is optional: callers with nothing to date by (the playlist picker
+ * inside the add sheet, where the order is a menu rather than a library) pass
+ * nothing and get the old stable behaviour. A row with no stamp sorts LAST
+ * among the unpinned — "never touched" is older than any timestamp, and
+ * treating a missing value as 0 rather than as now is what keeps an upgraded
+ * library from shuffling itself.
+ */
 export function sortPinned<T>(
   rows: T[],
   pins: string[],
   idOf: (row: T) => string,
+  recencyOf?: (row: T) => number | undefined,
 ): T[] {
+  // Index, not indexOf-per-comparison: sort calls the comparator O(n log n)
+  // times and each indexOf walked the pin list again.
+  const rank = new Map(pins.map((id, i) => [id, i]));
   return [...rows].sort((a, b) => {
-    const pa = pins.indexOf(idOf(a));
-    const pb = pins.indexOf(idOf(b));
-    if (pa === -1 && pb === -1) {
-      return 0;
+    const pa = rank.get(idOf(a)) ?? -1;
+    const pb = rank.get(idOf(b)) ?? -1;
+    if (pa !== -1 && pb !== -1) {
+      return pa - pb; // earlier pins stay above later ones
     }
-    if (pa === -1) {
-      return 1;
-    }
-    if (pb === -1) {
+    if (pa !== -1) {
       return -1;
     }
-    return pa - pb; // earlier pins stay above later ones
+    if (pb !== -1) {
+      return 1;
+    }
+    if (!recencyOf) {
+      return 0;
+    }
+    return (recencyOf(b) ?? 0) - (recencyOf(a) ?? 0);
   });
 }
 

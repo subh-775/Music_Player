@@ -180,10 +180,11 @@ export function TrackActionSheet({
             label: `Remove from ${
               cleanText(from.playlistName) || 'this playlist'
             }`,
-            onPress: run(() => {
-              removeTrackFromPlaylist(from.playlistId as string, t);
-              toast('Removed from playlist');
-            }),
+            // Silent, like every other removal: the sheet closes onto a list
+            // the song has already left.
+            onPress: run(() =>
+              removeTrackFromPlaylist(from.playlistId as string, t),
+            ),
           },
         ]
       : []),

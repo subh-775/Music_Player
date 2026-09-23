@@ -321,6 +321,10 @@ W1). No signing change, so it installs over an existing app in the normal way.
 (`v1.2.1` was pushed on `a839945`, the round-9 commit, so that release is a
 rebuild of v1.2.0 under a new number and contains none of these.)
 
+**v1.2.3 — shipped.** Round eleven, and a different subject: the network rather
+than the device. See **`PRD.md`** — nine findings, six of them about what the app
+spends on a slow connection. No signing change there either.
+
 **Next release — the cutover.** S1, with the release notes and the in-app notice.
 If a library export is wanted ahead of the cutover, v1.2.2 was the release to put
 it in — so it now has to ship in a v1.2.3 *before* the cutover, or the cutover

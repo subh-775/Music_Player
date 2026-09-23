@@ -24,7 +24,7 @@ import TrackPlayer, {
   type Track as RNTPTrack,
 } from 'react-native-track-player';
 import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
-import {currentQuality, readSettings} from './store';
+import {currentQuality, readSettings, writeSetting} from './store';
 import {
   cleanText,
   getDownloadKey,
@@ -160,10 +160,6 @@ function setPlaybackOrigin(id: string): void {
   }
   playbackOrigin = id;
   originListeners.forEach(l => l());
-}
-
-export function getPlaybackOrigin(): string {
-  return playbackOrigin;
 }
 
 /** Subscribe to the origin. A string snapshot, so useSyncExternalStore bails
@@ -407,11 +403,6 @@ export async function setupPlayer(): Promise<boolean> {
   }
 }
 
-/** True once the engine has initialised; null until setup has been attempted. */
-export function engineAvailable(): boolean | null {
-  return available;
-}
-
 /**
  * Restore the last session: the same song, at the timestamp you left it,
  * PAUSED, with the queue intact. Returns true if something was restored, which
@@ -453,6 +444,7 @@ export async function restoreSession(): Promise<boolean> {
     // chain properly — and an effects chain that attaches after audio is
     // already out is exactly what the step change on resume sounds like.
     await applyAudioEffects();
+    await applyPlaybackRate();
     // Seed the now-playing mirror. A restored session is left PAUSED, so no
     // track-change event fires — without this the mini player would sit blank
     // until the user pressed play (RNTP's own hook self-seeded on mount; ours
@@ -676,8 +668,10 @@ export async function playTrack(
 
   // Android destroys audio effects along with the audio session, so the EQ has
   // to be re-attached each time playback starts — otherwise the setting works
-  // for exactly one song and then silently stops.
+  // for exactly one song and then silently stops. Speed rides along for the
+  // same reason: reset() clears it.
   applyAudioEffects();
+  applyPlaybackRate();
 }
 
 /**
@@ -1010,37 +1004,119 @@ export function useShuffle(): boolean {
   );
 }
 
-export async function setShuffle(on: boolean): Promise<void> {
+/**
+ * The original order of whatever is STILL upcoming.
+ *
+ * This is the whole of the shuffle-off bug, and it is worth being explicit
+ * about. `preShuffleUpcoming` is a snapshot taken at the moment shuffle was
+ * turned on — but the queue keeps moving afterwards. Songs play, so they leave
+ * the upcoming list; radio appends more; a swipe skips two at once. Re-adding
+ * that snapshot wholesale put songs back that had already been heard and
+ * dropped ones added since, so turning shuffle OFF produced a queue that looked
+ * every bit as random as turning it on. From the outside both directions
+ * reshuffled, and neither ever restored anything.
+ *
+ * Filtering the snapshot by what is genuinely still ahead fixes it in one line
+ * of intent: keep the ORDER from the snapshot, keep the MEMBERSHIP from the
+ * live queue. `_qid` is the per-row identity toQueueItem already stamps — the
+ * right key here, because the same song queued twice is two rows and only one
+ * of them may still be upcoming.
+ *
+ * Exported for the test; nothing else calls it.
+ */
+export function restoreOrder<T>(snapshot: T[], liveUpcoming: T[]): T[] {
+  // RNTP's Track carries an index signature rather than a declared `_qid`, so
+  // the key is read through a cast rather than constrained on T — constraining
+  // it would stop the engine's own queue type from being passed at all.
+  const qid = (t: T) => (t as {_qid?: unknown})._qid;
+  const live = new Set(liveUpcoming.map(qid));
+  return snapshot.filter(t => qid(t) !== undefined && live.has(qid(t)));
+}
+
+/** Fisher-Yates, and it must not return the identity for a short list — a
+ *  shuffle that visibly changes nothing reads as a broken button. */
+export function shuffleUpcoming<T>(rest: T[]): T[] {
+  const out = [...rest];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Turn shuffle on or off over the UPCOMING tracks.
+ *
+ * Returns what the engine ACTUALLY did, not what was asked. A queue with
+ * nothing ahead of it cannot shuffle, and the caller needs to know that rather
+ * than lighting the icon for a shuffle that never happened.
+ */
+export async function setShuffle(on: boolean): Promise<boolean> {
   const queue = await TrackPlayer.getQueue();
   const index = await TrackPlayer.getActiveTrackIndex();
   if (index == null) {
-    return;
+    return shuffleOn;
   }
   const rest = queue.slice(index + 1);
   if (on) {
     if (rest.length < 2) {
-      // Nothing to shuffle — leave the flag alone so the icon doesn't claim a
-      // shuffle that never happened.
-      return;
+      return shuffleOn; // nothing ahead to reorder
     }
     preShuffleUpcoming = rest; // remember so OFF can restore it
-    const shuffled = [...rest];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
     await TrackPlayer.removeUpcomingTracks();
-    await TrackPlayer.add(shuffled);
+    await TrackPlayer.add(shuffleUpcoming(rest));
     setShuffleFlag(true);
   } else {
     if (preShuffleUpcoming) {
-      await TrackPlayer.removeUpcomingTracks();
-      await TrackPlayer.add(preShuffleUpcoming);
+      const restored = restoreOrder(preShuffleUpcoming, rest);
+      if (restored.length) {
+        await TrackPlayer.removeUpcomingTracks();
+        await TrackPlayer.add(restored);
+      }
       preShuffleUpcoming = null;
     }
     setShuffleFlag(false);
   }
   await refreshEngineMirror();
+  return shuffleOn;
+}
+
+/**
+ * Drop the radio picks still sitting in the queue.
+ *
+ * Turning autoplay off stops the top-up from running again, which is all it
+ * ever did — but the eight picks appended a few songs ago are already in the
+ * queue, so playback carried on into them and the setting looked like it had
+ * been ignored. Switching it off now means what it says: nothing plays after
+ * what you actually chose.
+ *
+ * Only tracks AFTER the active one, and only ones tagged `_autoplay` — the
+ * song playing right now is not taken out from under the listener even if
+ * radio is what queued it.
+ */
+export async function dropQueuedRadio(): Promise<void> {
+  try {
+    const [queue, index] = await Promise.all([
+      TrackPlayer.getQueue(),
+      TrackPlayer.getActiveTrackIndex(),
+    ]);
+    if (index == null) {
+      return;
+    }
+    const doomed = queue
+      .map((t, i) => ({t, i}))
+      .filter(({t, i}) => i > index && sourceTrackFor(t)?._autoplay)
+      .map(({i}) => i);
+    if (!doomed.length) {
+      return;
+    }
+    await TrackPlayer.remove(doomed);
+    queueSource = queueSource.filter(t => !t._autoplay);
+    await refreshEngineMirror();
+  } catch {
+    // Nothing queued, or the engine is not up — either way there is nothing
+    // to prune and no reason to surface it.
+  }
 }
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {
@@ -1048,22 +1124,34 @@ export async function setRepeat(mode: RepeatMode): Promise<void> {
 }
 
 /**
- * Pause/resume from the engine's own state, so the UI, the notification and a
- * headset button can never disagree about what a press should do.
+ * Playback speed.
  *
- * Buffering/Loading count as "already going" — otherwise tapping during the
- * spin-up between tracks would start a SECOND play and leave the button
- * showing the opposite of reality.
+ * ExoPlayer pitch-corrects, so 1.5x is faster and not higher — which is the
+ * only reason a speed control is usable on music at all.
+ *
+ * Re-applied after every fresh queue for the same reason applyAudioEffects is:
+ * TrackPlayer.reset() tears the player's state down, and a rate that survived
+ * one song and then quietly went back to normal would be worse than no control.
  */
-/** Stop playback outright — used by the sleep timer. */
-export async function pausePlayback(): Promise<void> {
-  cancelCrossfade(); // silence any overlap too, or it keeps sounding alone
-  setPausedByDuck(false);
+export async function applyPlaybackRate(): Promise<void> {
   try {
-    await TrackPlayer.pause();
+    await TrackPlayer.setRate(playbackRate());
   } catch {
-    /* engine already gone */
+    /* engine not up — the next play applies it */
   }
+}
+
+/** The current speed, clamped to the range the UI offers. Read in the
+ *  crossfade watcher too, where it converts media seconds to real ones. */
+export function playbackRate(): number {
+  const r = readSettings().playbackRate;
+  return Number.isFinite(r) && r > 0 ? Math.min(2, Math.max(0.25, r)) : 1;
+}
+
+/** Change the speed and make it take effect now. */
+export async function setPlaybackRate(rate: number): Promise<void> {
+  writeSetting('playbackRate', Math.min(2, Math.max(0.25, rate)));
+  await applyPlaybackRate();
 }
 
 export async function togglePlay(): Promise<void> {
@@ -1463,11 +1551,45 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     try {
       const {position, duration} = await TrackPlayer.getProgress();
       const active = await TrackPlayer.getActiveTrackIndex();
-      const key = `${active}`;
+      /**
+       * The ROW's identity, not its position — and this is why crossfade
+       * "worked, but not every time".
+       *
+       * `cfPreparedFor` and `fadedFor` exist to stop one boundary being faded
+       * twice. Keyed on the queue INDEX they also stopped it being faded ever
+       * again at that index: play something else and the new queue starts at 0
+       * again, so `fadedFor` left over from the last queue silently vetoed the
+       * fade on whichever track happened to land on the same number. Repeat,
+       * previous and a re-shuffle all hit it too.
+       *
+       * `_qid` is the per-row identity toQueueItem already stamps, unique for
+       * the life of the process. Read off the warm mirror rather than a fresh
+       * bridge call, and falling back to the index on an old queue item so a
+       * missing stamp degrades to the previous behaviour instead of to no
+       * crossfade at all.
+       */
+      const key =
+        active == null
+          ? ''
+          : String(
+              (engineQueue[active] as {_qid?: unknown} | undefined)?._qid ??
+                `i${active}`,
+            );
       if (duration <= 0 || position <= 0) {
         return;
       }
-      const remaining = duration - position;
+      /**
+       * Seconds of AUDIO left, and seconds of CLOCK left, which stop being the
+       * same number the moment the speed control leaves 1x.
+       *
+       * Everything below is scheduling against a wall clock — a setTimeout for
+       * the fade, another for the sleep stop — so every one of them needs the
+       * second figure. At 1.5x a track with 12s of audio left has 8s of real
+       * time left, and a crossfade armed off the raw number would start half
+       * again too early and the sleep stop would land after the song had ended.
+       */
+      const rate = playbackRate();
+      const remaining = (duration - position) / rate;
 
       // ── 0. The end-of-track sleep stop, on the boundary ────────────────
       //
@@ -1522,7 +1644,7 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
             ? `file://${nextSource.file_path}`
             : q[active + 1]?.url;
           if (!repeatOne && nextUrl) {
-            await prepareCrossfade(String(nextUrl));
+            await prepareCrossfade(String(nextUrl), rate);
           }
         } catch {
           /* nothing to prepare — the plain path below still works */

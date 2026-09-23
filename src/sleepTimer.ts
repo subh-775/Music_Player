@@ -62,9 +62,9 @@ function clearBoundaryStop() {
 async function fire(reason: string) {
   diag('sleep', `stopping playback (${reason})`);
   cancelSleepTimer();
-  // Not pausePlayback: this is someone falling asleep, and music stopping dead
-  // is a worse way to end than music receding. Every other pause in the app is
-  // a button press and stays instant.
+  // FADED, not a plain pause: this is someone falling asleep, and music
+  // stopping dead is a worse way to end than music receding. Every other pause
+  // in the app is a button press and stays instant.
   await fadeToPause();
 }
 

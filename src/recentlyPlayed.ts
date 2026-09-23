@@ -27,10 +27,6 @@ export function remember(track: Track): void {
   recordPlay(track);
 }
 
-export function clearRecent(): void {
-  store.set([]);
-}
-
 export function useRecentlyPlayed(): Track[] {
   return useStoreValue(store);
 }

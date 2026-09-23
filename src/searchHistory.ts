@@ -15,8 +15,6 @@ const store = createStore<string[]>('mp.searchHistory.v1', [], raw =>
     .slice(0, MAX),
 );
 
-export const hydrateSearchHistory = store.hydrate;
-
 export function rememberSearch(query: string): void {
   const q = (query || '').trim();
   if (!q) {

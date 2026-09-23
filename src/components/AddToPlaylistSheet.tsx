@@ -24,8 +24,6 @@ import {
 } from 'react-native';
 import {
   Check,
-  CircleCheck,
-  CirclePlus,
   Heart,
   Plus,
   Search,
@@ -41,6 +39,7 @@ import {
   usePlaylists,
 } from '../playlists';
 import {rowId, sortPinned, usePins} from '../pins';
+import {SavedGlyph} from './AddButton';
 import {PinGlyph} from './PinGlyph';
 import {useLike} from '../store';
 import {CollectionArt} from './CollectionArt';
@@ -109,8 +108,11 @@ export function AddToPlaylistSheet({
         return;
       }
       if (memberOf.has(id)) {
+        // No toast on the way OUT, here or on the Liked row below. The tick
+        // clears and the row leaves the list — a bar repeating what the screen
+        // just showed is noise, and removing three songs meant three of them
+        // queued up in a row.
         removeTrackFromPlaylist(id, track);
-        toast(`Removed from ${playlistName}`);
       } else {
         addTrackToPlaylist(id, track);
         toast(`Added to ${playlistName}`);
@@ -131,7 +133,9 @@ export function AddToPlaylistSheet({
 
   const onLikedRow = useCallback(() => {
     toggleLiked();
-    toast(liked ? 'Removed from Liked Songs' : 'Added to Liked Songs');
+    if (!liked) {
+      toast('Added to Liked Songs');
+    }
   }, [liked, toggleLiked]);
 
   // 0 means the list is at its top, which is when a downward pull stops
@@ -167,7 +171,7 @@ export function AddToPlaylistSheet({
             Liked Songs
           </Text>
         </View>
-        <Tick on={liked} />
+        <SavedGlyph on={liked} size={26} />
       </TouchableOpacity>
 
       {playlists.length > FILTER_FROM && !creating && (
@@ -255,21 +259,12 @@ export function AddToPlaylistSheet({
                   </Text>
                 </View>
               </View>
-              <Tick on={inPlaylist} />
+              <SavedGlyph on={inPlaylist} size={26} />
             </TouchableOpacity>
           );
         }}
       />
     </Sheet>
-  );
-}
-
-/** The same mark the + button wears, so "in" looks identical everywhere. */
-function Tick({on}: {on: boolean}) {
-  return on ? (
-    <CircleCheck size={26} color={C.bg} fill={C.accent} strokeWidth={2.4} />
-  ) : (
-    <CirclePlus size={26} color={C.sub} strokeWidth={1.6} />
   );
 }
 

@@ -39,6 +39,21 @@ class MainApplication : Application(), ReactApplication {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
     }
+    // Android's own transparent cache for HttpURLConnection, which is what
+    // AudioModule.artworkColor() uses to fetch a cover for Palette. Without it
+    // that fetch re-downloaded the same image on every track change AND on
+    // every launch — a second copy of a picture Fresco already has, competing
+    // for a slow link with the audio stream trying to start. Ten megabytes of
+    // 150x150 covers is thousands of songs.
+    //
+    // Best-effort: a device with no writable cache dir just goes on as before.
+    try {
+      android.net.http.HttpResponseCache.install(
+          java.io.File(cacheDir, "http"), 10L * 1024 * 1024)
+    } catch (e: Exception) {
+      // no cache — correct, just slower
+    }
+
     // Boot the embedded Python/Flask backend on its own thread. The RN UI reaches
     // it at http://127.0.0.1:BuildConfig.BACKEND_PORT.
     PythonBackend.start(this, BuildConfig.BACKEND_PORT)

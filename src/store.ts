@@ -33,6 +33,10 @@ export type Settings = {
   autoUpdateCheck: boolean;
   autoplay: boolean;
   crossfadeDuration: number; // seconds; 0 = off
+  /** Playback speed, 1 = normal. ExoPlayer pitch-corrects, so a voice at 1.5x
+   *  is faster and not higher. Carried across songs on purpose: a speed is a
+   *  way of listening, not a property of one track. */
+  playbackRate: number;
   normalizeVolume: boolean;
   eqEnabled: boolean;
   eqPreset: string;
@@ -46,6 +50,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoUpdateCheck: true,
   autoplay: true,
   crossfadeDuration: 0,
+  playbackRate: 1,
   normalizeVolume: false,
   // Off by default: an untouched signal path is the one guaranteed to play
   // everywhere, and an effect the user didn't ask for is a bug report.

@@ -15,10 +15,6 @@ const store = createStore<SavedArtist[]>('mp.artists.v1', [], raw =>
 
 const key = (name: string) => name.trim().toLowerCase();
 
-export function isFollowing(name: string): boolean {
-  return store.get().some(a => key(a.name) === key(name));
-}
-
 /** Returns the new state (true = now following). */
 export function toggleFollow(name: string, image?: string): boolean {
   const list = store.get();
