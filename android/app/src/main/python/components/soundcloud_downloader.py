@@ -300,6 +300,14 @@ class SoundCloudClient:
         Returns None when SoundCloud has no full, progressive stream for this
         track — see pick_audio_format(). The caller falls back to another source.
         """
+        fmt = self.get_streaming_format(url, max_bitrate)
+        return fmt.get("url") if fmt else None
+
+    def get_streaming_format(
+        self, url: str, max_bitrate: int = 256
+    ) -> Optional[Dict[str, Any]]:
+        """The yt-dlp format dict get_streaming_url picks — its `abr` is the
+        bitrate actually being streamed, which the quality badge reports."""
         import yt_dlp
 
         ydl_opts = self._get_ydl_opts(quiet=True, extract_flat=False)
@@ -315,7 +323,7 @@ class SoundCloudClient:
                     "(HLS-only or preview-only) — caller should try another source"
                 )
                 return None
-            return best_format.get("url")
+            return best_format if best_format.get("url") else None
 
         except Exception as e:
             logger.error(f"Failed to get streaming URL for {url}: {e}")

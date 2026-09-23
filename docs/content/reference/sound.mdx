@@ -32,7 +32,13 @@ The overlap is a real fade on both tracks, not a cut. Near the end of a song the
 
 The next song is opened and buffered about twenty seconds before it is needed. If it is still not ready when the boundary arrives — a slow connection, a source having a bad day — **the tracks change plainly instead**, with no fade at all.
 
-That is deliberate, and it is the better of the two failures: fading a song down into a silence nothing is filling is an audible dip, and a dip sounds broken in a way a clean cut does not. **Settings → Diagnostics** records which happened on each boundary if you want to know.
+That is deliberate, and it is the better of the two failures: fading a song down into a silence nothing is filling is an audible dip, and a dip sounds broken in a way a clean cut does not.
+
+### Screen off, other apps in front
+
+From **v1.2.9** crossfade runs with the screen off and with the app in the background — every automatic change from one song to the next, whether it came from an album, a playlist, search or Autoplay. Before that it only ran while the app was on screen, because it was scheduled with JavaScript timers and Android stops those the moment the screen goes off. It is scheduled natively now, alongside the audio engine itself.
+
+Pressing **next** or **previous** is still a plain change — that is you choosing the song, not the queue flowing into it. The sleep timer's **end of this track** also switches crossfade off for that boundary, so the next song does not start underneath the one you meant to fall asleep to.
 
 A downloaded next track never has this problem — the file opens instantly.
 

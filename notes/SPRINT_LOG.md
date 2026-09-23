@@ -1697,6 +1697,45 @@ Not measured. There is no device in this environment, so every number above is
 reasoned from the code; `AUDIT.md` closes with what to capture on a real low-end
 phone before any of it goes near release notes.
 
+## Round 16 — crossfade goes native, and the badge stops guessing (v1.2.9)
+
+**The cold-launch morph.** PlayerBar's settle re-measure was a 300ms timer keyed
+on the component MOUNTING, which is when the engine comes up — but a restored
+session publishes its track well after that, so the timer fired at a null ref
+and the only measurement left was onLayout's, taken mid-SlideInDown with the bar
+still below the screen. The morph aimed there. Playing from a list happened to
+be fine because by then something had re-measured. Now the timer keys on the
+bar existing, and every open (tap or pull) measures on touch-down, when the bar
+is provably at rest.
+
+**Crossfade, every transition.** The whole schedule — notice the boundary, start
+the overlap, hand off — ran on JS timers, which RN stops on activity pause. So it
+only worked with the app on screen, and the watcher's AppState gate was belt and
+braces on a thing that could not have run anyway. It is a Handler on the main
+looper in AudioModule now (`cfStep`), reading ExoPlayer's position, next item
+and URI by reflection — the same path setVolume already used. JS pushes the span
+(0 while end-of-track sleep is armed). Also fixed on the way: the old JS prepared
+at most once per track, so a next song added by radio top-up after the prepare
+window never got an overlap; native re-prepares when the next URI changes. The
+track-change handler no longer restores volume — during a native handoff that
+would double the song.
+
+**Bitrate badge.** Fell back to the setting, then to a flat 320, so on Auto every
+source read 320. The backend now records what each source says it served
+(`_SERVED_KBPS`: NewPipe averageBitrate, the JioSaavn file rung, SoundCloud
+format abr), `stream_info` returns it — JioSaavn's pinned ladder rung first — and
+the badge shows nothing when nothing is known.
+
+**Also:** `/api/downloads/delete` confined paths with a string prefix
+(`…/Relaxify-old/` passed); now a parents check like `/api/local`. Settings'
+grey elevated header is plain black; streaming quality opens in a Sheet instead
+of an inline grey expander; JioSaavn/SoundCloud show locked-on switches instead
+of "Always on"; "Your sound" is "Your activity"; multi-artist credits drift as a
+ticker in both players (Marquee `ticker`), single artists stay still.
+
+Not device-verified: the native crossfade compiles in CI, but the handoff timing
+is reasoned from ExoPlayer's Player contract, not measured on a phone.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs

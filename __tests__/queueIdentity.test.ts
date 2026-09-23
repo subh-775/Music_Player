@@ -97,9 +97,7 @@ jest.mock('../src/store', () => ({
 }));
 jest.mock('../src/audioEffects', () => ({
   applyAudioEffects: () => undefined,
-  beginCrossfade: async () => false,
-  crossfadePosition: async () => 0,
-  crossfadeSupported: false,
+  setCrossfade: async () => undefined,
   endCrossfade: () => undefined,
   fadeInPlayer: () => undefined,
   fadeOutPlayer: () => undefined,

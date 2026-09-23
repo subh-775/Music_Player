@@ -3,7 +3,7 @@
  * data and differ only in how it's sorted:
  *
  *   Recents    — everything you've played, newest first
- *   Your sound — the same history counted: top artists, top songs, total plays
+ *   Your activity — the same history counted: top artists, top songs, total plays
  *
  * Both come from stats.ts rather than the 20-entry recently-played row, which
  * is what makes "everything" actually mean everything.
@@ -51,7 +51,7 @@ export function ActivityScreen({
           <ChevronLeft size={28} color={C.text} />
         </TouchableOpacity>
         <Text style={styles.barTitle}>
-          {mode === 'recents' ? 'Recents' : 'Your sound'}
+          {mode === 'recents' ? 'Recents' : 'Your activity'}
         </Text>
       </View>
 
@@ -88,7 +88,7 @@ function Recents({
   onMenu: (track: Track) => void;
 }) {
   // Sorted by when it last played, not by how often — that's the difference
-  // between this page and Your sound.
+  // between this page and Your activity.
   const list = [...tracks].sort((a, b) => b.last - a.last).map(x => x.track);
   return (
     <FlatList

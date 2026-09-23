@@ -15,9 +15,7 @@ type AudioNative = {
   getCapabilities?: () => Promise<EqCapabilities>;
   setEqualizer?: (enabled: boolean, gainsDb: number[]) => Promise<boolean>;
   setNormalize?: (enabled: boolean) => Promise<boolean>;
-  prepareCrossfade?: (url: string, rate: number) => Promise<boolean>;
-  startCrossfade?: (durationMs: number) => Promise<boolean>;
-  crossfadePosition?: () => Promise<number>;
+  setCrossfade?: (spanMs: number) => Promise<boolean>;
   stopCrossfade?: () => Promise<boolean>;
   fadeOutPlayer?: (durationMs: number) => Promise<boolean>;
   fadeInPlayer?: (durationMs: number) => Promise<boolean>;
@@ -61,49 +59,18 @@ const native = (NativeModules.Audio ?? {}) as AudioNative;
  *  offering sliders that quietly do nothing. */
 export const eqSupported = typeof native.setEqualizer === 'function';
 
-/** True only on a build that shipped the overlap player (the crossfade half). */
-export const crossfadeSupported =
-  typeof native.prepareCrossfade === 'function' &&
-  typeof native.startCrossfade === 'function';
-
 /**
- * Open the incoming track's stream and buffer it. Silent, and no commitment —
- * call it seconds before the boundary and decide later whether to use it.
- */
-export async function prepareCrossfade(
-  url: string,
-  /** The speed the MAIN player is running at — the overlap has to match, or the
-   *  two tracks are audibly at different tempos for the length of the fade. */
-  rate: number,
-): Promise<boolean> {
-  try {
-    return (await native.prepareCrossfade?.(url, rate)) ?? false;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Start the prepared overlap, rising over `durationMs`.
+ * The crossfade length, handed to the native scheduler (AudioModule.cfStep).
  *
- * FALSE means nothing was ready — nothing has been started, and the caller must
- * NOT fade the outgoing track, because there is nothing to fade into.
+ * That is the whole of the JS side now. The schedule used to be JS timers,
+ * which Android stops the moment the screen goes off — so crossfade only ever
+ * happened with the app open. Native, it runs on every automatic transition.
  */
-export async function beginCrossfade(durationMs: number): Promise<boolean> {
+export async function setCrossfade(spanMs: number): Promise<void> {
   try {
-    return (await native.startCrossfade?.(durationMs)) ?? false;
+    await native.setCrossfade?.(Math.max(0, Math.round(spanMs)));
   } catch {
-    return false;
-  }
-}
-
-/** How far the overlap player has reached, in seconds (-1 when idle) — used to
- *  seek RNTP to the same spot before cutting the overlap. */
-export async function crossfadePosition(): Promise<number> {
-  try {
-    return (await native.crossfadePosition?.()) ?? -1;
-  } catch {
-    return -1;
+    /* an APK without the scheduler — plain cuts, still correct */
   }
 }
 

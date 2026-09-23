@@ -1,5 +1,5 @@
 /**
- * Listening history — what "Your sound" and Search's "Your artists" are built
+ * Listening history — what "Your activity" and Search's "Your artists" are built
  * from.
  *
  * Recently-played only keeps the last 20 songs, which is enough for a row on

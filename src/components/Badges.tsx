@@ -5,12 +5,12 @@
  * so a caller can drop them in unconditionally and they simply render nothing
  * when the user hasn't asked for them.
  */
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {StyleSheet, Text} from 'react-native';
 import {C} from '../theme';
-import {useSettings} from '../store';
+import {currentQuality, useSettings} from '../store';
 import {getPlayableSource} from '../tracks';
-import type {Track} from '../backend';
+import {getStreamInfo, type Track} from '../backend';
 
 /** One palette for "which source" everywhere — the badge on a track row and
  *  the Sources list in Settings must never disagree about a colour. */
@@ -38,32 +38,53 @@ export function SourceBadge({track}: {track: Track | null}) {
 }
 
 /**
- * Live bitrate. Prefers what the backend reports is ACTUALLY streaming, then
- * the source's own metadata, then the quality setting — in that order, because
- * the setting is a ceiling, not a promise.
+ * Live bitrate — what the source says the stream it handed over carries.
+ *
+ * It used to fall back to the quality SETTING and then to a flat 320, and the
+ * setting is a ceiling, not a fact: on Auto every song from every source read
+ * "320 kbps", including YouTube streams that are ~130 and SoundCloud's 128.
+ * Now it is the backend's answer (stream_info, cached — the proxy resolved the
+ * same URL a moment earlier), then the track's own metadata for a downloaded
+ * file, and otherwise nothing at all rather than a number that only looks
+ * measured.
  */
-export function QualityBadge({
-  track,
-  kbps: measured = 0,
-}: {
-  track: Track | null;
-  kbps?: number;
-}) {
+export function QualityBadge({track}: {track: Track | null}) {
   const {showQualityBadge, audioQuality} = useSettings();
+  const source = track
+    ? track.playable_source || track.primary_source || getPlayableSource(track)
+    : '';
+  const url = source ? track?.sources?.[source]?.url ?? '' : '';
+  const [served, setServed] = useState<{key: string; kbps: number}>();
+  const key = `${source}|${url}|${audioQuality}`;
+
+  useEffect(() => {
+    if (!showQualityBadge || !track || !url || source === 'local') {
+      return;
+    }
+    let live = true;
+    getStreamInfo(track, currentQuality())
+      .then(info => {
+        if (live) {
+          setServed({key, kbps: Number(info.bitrate_kbps) || 0});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+    // `key` covers the track's identity; the object itself changes identity on
+    // every engine event without being a different song.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, showQualityBadge]);
+
   if (!showQualityBadge || !track) {
     return null;
   }
-  const source =
-    track.playable_source || track.primary_source || getPlayableSource(track);
-  const reported = Number(source ? track.sources?.[source]?.bitrate : 0) || 0;
-  const kbps =
-    measured > 0
-      ? measured
-      : reported > 0
-      ? reported
-      : audioQuality > 0
-      ? audioQuality
-      : 320;
+  let reported = Number(source ? track.sources?.[source]?.bitrate : 0) || 0;
+  if (reported > 5000) {
+    reported = Math.round(reported / 1000); // some metadata is in bits/s
+  }
+  const kbps = (served?.key === key && served.kbps) || reported;
   if (!kbps) {
     return null;
   }

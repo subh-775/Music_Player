@@ -29,7 +29,7 @@ export function UpdateModal() {
       <View style={styles.body}>
         {/* An update is a FILE ARRIVING. The sparkle that used to be here is
             the visual language of a promotional banner, and it was also the
-            sidebar's glyph for "Your sound" — one icon meaning two unrelated
+            sidebar's glyph for "Your activity" — one icon meaning two unrelated
             things. AlertTriangle stays for the failure; that one was right. */}
         <View style={[styles.badge, failed && styles.badgeWarn]}>
           {failed ? (

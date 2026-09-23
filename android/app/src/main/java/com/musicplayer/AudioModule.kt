@@ -455,19 +455,34 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         }.start()
     }
 
-    // ─── Real crossfade: a SECOND player for the overlap ────────────────────
+    // ─── Crossfade: a SECOND player for the overlap, scheduled HERE ──────────
     //
-    // react-native-track-player runs one ExoPlayer → one output, so from JS we
-    // can only fade that single stream up or down. True crossfade needs two
-    // songs audible at once. This is that second stream: a plain MediaPlayer
-    // (no new dependency, and it does NOT grab audio focus, so it won't fight
-    // RNTP) that plays the INCOMING track rising while JS fades the outgoing
-    // RNTP track down. Android's own mixer sums the two — that's the overlap.
+    // react-native-track-player runs one ExoPlayer → one output, so a real
+    // crossfade needs a second stream: a plain MediaPlayer (no new dependency,
+    // and it does NOT take audio focus, so it won't fight RNTP) plays the
+    // INCOMING track rising while the outgoing ExoPlayer track ramps down.
+    // Android's mixer sums the two — that's the overlap.
     //
-    // The handoff is driven from JS on the real track change: it reads
-    // crossfadePosition(), seeks RNTP there under cover of this player's audio,
-    // then stopCrossfade() cuts this one. Kept entirely on the main looper so
-    // MediaPlayer's state machine and its callbacks never race.
+    // ## Why the schedule lives in Kotlin
+    //
+    // It used to be JS: a 1s setInterval noticed the boundary coming, a
+    // setTimeout started the overlap, and a setTimeout poll did the handoff. RN
+    // stops running JS timers the moment the activity pauses — screen off, or
+    // any other app in front — so crossfade only ever happened while someone
+    // was looking at this app. That is "it works sometimes, not most of the
+    // time": most listening is done with the screen off.
+    //
+    // A Handler on the main looper keeps running for as long as the playback
+    // foreground service keeps the process alive, and the main looper is also
+    // the thread ExoPlayer insists on being touched from. So the whole cycle —
+    // prepare, start at the boundary, hand off, cut — happens here, off
+    // ExoPlayer's own position and queue, and JS only says how long the fade
+    // is (setCrossfade). Every automatic transition gets it: album, playlist,
+    // search, radio, background or foreground.
+    //
+    // ExoPlayer's class is not on our compile classpath (see MusicServiceRef),
+    // so it is driven through the public Player interface by reflection. Any
+    // lookup that fails reads as "no crossfade this time", never as a crash.
     private var cfPlayer: MediaPlayer? = null
     private var cfRamp: Runnable? = null
     private val cfHandler = Handler(Looper.getMainLooper())
@@ -475,133 +490,269 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     /** Set by onPrepared. Until it is true the overlap has NOTHING to play. */
     @Volatile private var cfReady = false
 
-    /**
-     * Open the incoming stream and buffer it. Does not make a sound.
-     *
-     * This used to be one call that prepared AND started, and it resolved the
-     * moment prepareAsync() was *called* — not when it finished. The URL is a
-     * live network stream through the local proxy, so preparing it takes
-     * anywhere from a couple of hundred milliseconds to several seconds, and JS
-     * took that immediate `true` as "the overlap is playing" and began fading
-     * the outgoing track down against silence. That is the dip; and when
-     * preparation finally landed after the track boundary, the overlap started
-     * from 0:00 on a song RNTP had already advanced to, which is the doubling.
-     *
-     * Prepared early and started at the boundary, neither can happen.
-     */
-    /**
-     * @param rate the speed the MAIN player is running at. The overlap has to
-     *   match it: at 1.5x the outgoing track is fast and an overlap left at
-     *   normal speed would be audibly out of step with it for the whole fade —
-     *   two tempos at once, which is worse than no crossfade.
-     */
-    @ReactMethod
-    fun prepareCrossfade(url: String, rate: Double, promise: Promise) {
-        cfHandler.post {
-            try {
-                stopCfInternal()
-                val mp = MediaPlayer().apply {
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build(),
-                    )
-                    setDataSource(url)
-                    setVolume(0f, 0f)
-                    // `mp` named rather than left implicit: inside an apply
-                    // block a bare `playbackParams` resolves against the outer
-                    // receiver, which happens to be the same object here — but
-                    // "happens to be" is not something to leave in a callback
-                    // that sets playback state.
-                    setOnPreparedListener { mp ->
-                        // Applied on the PREPARED player, not before: setting
-                        // playback params on an idle MediaPlayer throws, and
-                        // setPlaybackParams on a paused one STARTS it playing.
-                        // It is muted here (volume 0) and started properly by
-                        // beginCrossfade, so an unasked-for start would be
-                        // silent now and doubled at the boundary — hence the
-                        // pause straight after.
-                        if (rate > 0 && Math.abs(rate - 1.0) > 0.001) {
-                            try {
-                                mp.playbackParams = mp.playbackParams.setSpeed(rate.toFloat())
-                                mp.pause()
-                            } catch (e: Exception) {
-                                Log.w(TAG, "overlap rate " + rate + " rejected: " + e.message)
-                            }
-                        }
-                        cfReady = true
-                    }
-                    // A dead stream must not crash — just abandon the overlap;
-                    // the outgoing track still ends and RNTP advances normally.
-                    setOnErrorListener { _, _, _ ->
-                        stopCfInternal()
-                        true
-                    }
-                    prepareAsync()
-                }
-                cfPlayer = mp
-                promise.resolve(true)
+    /** The fade length JS asked for; 0 = off (or the sleep timer's
+     *  end-of-track stop is armed, which a crossfade would talk over). */
+    private var cfSpanMs = 0
+    /** The OUTGOING queue index the overlap was prepared for, and the URI it
+     *  holds — re-prepared if the queue changes what comes next. */
+    private var cfPreparedIdx = -1
+    private var cfPreparedUri: String? = null
+    private var cfPreparedAt = 0L
+    /** The outgoing index whose overlap is sounding; -1 = none. */
+    private var cfStartedIdx = -1
+    /** When the handoff seek was issued; 0 = not handing off. */
+    private var cfHandoffAt = 0L
+    private var cfTicking = false
+    private val cfTick = object : Runnable {
+        override fun run() {
+            val next = try {
+                cfStep()
             } catch (e: Exception) {
-                Log.w(TAG, "prepareCrossfade failed: ${e.message}")
-                stopCfInternal()
-                promise.resolve(false)
+                Log.w(TAG, "crossfade tick: ${e.message}")
+                1000L
+            }
+            if (cfSpanMs > 0 || cfStartedIdx >= 0 || cfPlayer != null) {
+                cfHandler.postDelayed(this, next)
+            } else {
+                cfTicking = false
             }
         }
     }
 
     /**
-     * Start the prepared overlap, rising over `durationMs`.
-     *
-     * Resolves FALSE when there is nothing prepared or the buffer never
-     * arrived. That answer matters: the caller then lets the tracks change
-     * plainly instead of fading into a silence it cannot fill. A clean cut is
-     * a far better sound than a dip.
+     * The crossfade length, in ms. 0 turns it off; a fade already sounding is
+     * allowed to finish rather than being cut mid-song.
      */
     @ReactMethod
-    fun startCrossfade(durationMs: Int, promise: Promise) {
-        startWhenReady(durationMs, promise, 0)
+    fun setCrossfade(spanMs: Int, promise: Promise) {
+        cfHandler.post {
+            cfSpanMs = spanMs.coerceIn(0, 30000)
+            if (cfSpanMs == 0 && cfStartedIdx < 0) {
+                stopCfInternal()
+                cfPreparedIdx = -1
+            }
+            if (!cfTicking && cfSpanMs > 0) {
+                cfTicking = true
+                cfHandler.post(cfTick)
+            }
+            promise.resolve(true)
+        }
+    }
+
+    private val exoMethods = HashMap<String, java.lang.reflect.Method>()
+
+    private fun exoGet(exo: Any, name: String): Any? = try {
+        val m = exoMethods.getOrPut(name) {
+            exo.javaClass.getMethod(name).apply { isAccessible = true }
+        }
+        m.invoke(exo)
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun exoSeek(exo: Any, ms: Long) {
+        try {
+            val m = exoMethods.getOrPut("seekTo(J)") {
+                exo.javaClass.getMethod("seekTo", Long::class.javaPrimitiveType)
+                    .apply { isAccessible = true }
+            }
+            m.invoke(exo, ms)
+        } catch (e: Exception) {
+            Log.w(TAG, "crossfade seek failed: ${e.message}")
+        }
+    }
+
+    /** The URI ExoPlayer will play at [index] — the proxy or /local URL the
+     *  queue item was built with, so the overlap opens exactly the same
+     *  stream. `playbackProperties` is the pre-2.16 name for the same field. */
+    private fun exoUri(exo: Any, index: Int): String? = try {
+        val m = exoMethods.getOrPut("getMediaItemAt(I)") {
+            exo.javaClass.getMethod("getMediaItemAt", Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+        }
+        val item = m.invoke(exo, index)
+        val cfg = item?.let {
+            listOf("localConfiguration", "playbackProperties").firstNotNullOfOrNull { n ->
+                try { it.javaClass.getField(n).get(it) } catch (_: Exception) { null }
+            }
+        }
+        cfg?.javaClass?.getField("uri")?.get(cfg)?.toString()
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun exoSpeed(exo: Any): Float {
+        val params = exoGet(exo, "getPlaybackParameters") ?: return 1f
+        return try {
+            (params.javaClass.getField("speed").get(params) as Float).takeIf { it > 0f } ?: 1f
+        } catch (_: Exception) {
+            1f
+        }
+    }
+
+    /** One pass of the schedule. Returns the delay until the next one: a
+     *  second while the boundary is far off, 100ms near it and during the
+     *  handoff, where lateness is audible. */
+    private fun cfStep(): Long {
+        val exo = PlaybackSession.exoPlayer() ?: return 1000L
+        // The *WindowIndex names are the pre-2.16 spellings of the same calls.
+        val idx = (exoGet(exo, "getCurrentMediaItemIndex") ?: exoGet(exo, "getCurrentWindowIndex"))
+            as? Int ?: return 1000L
+        val playing = exoGet(exo, "isPlaying") as? Boolean ?: false
+        val now = android.os.SystemClock.uptimeMillis()
+
+        // ── The queue advanced under a sounding overlap: hand off ──────────
+        if (cfStartedIdx >= 0 && idx != cfStartedIdx) {
+            if (cfHandoffAt == 0L) {
+                // Seek the incoming track to where the overlap has reached, under
+                // cover of the overlap's own audio, so the re-buffer is inaudible.
+                val pos = try { cfPlayer?.currentPosition ?: -1 } catch (_: Exception) { -1 }
+                if (pos > 500) exoSeek(exo, pos.toLong())
+                cfHandoffAt = now
+                return 60L
+            }
+            val state = exoGet(exo, "getPlaybackState") as? Int ?: 3
+            // READY and actually playing, or give up waiting at 900ms — a slow
+            // network must not hold two copies of the song on top of each other.
+            if ((state == 3 && playing) || now - cfHandoffAt > 900) {
+                // ORDER MATTERS: cut the overlap BEFORE bringing ExoPlayer up.
+                // Both are the same song slightly out of step, and any moment
+                // where both are loud is heard as the song doubled.
+                resetCf()
+                cancelVolWork()
+                setExoVolume(1f)
+            }
+            return 60L
+        }
+
+        // Idle — paused, stopped, nothing prepared: the cheapest possible tick.
+        // This runs for as long as crossfade is switched on, and the audit
+        // (P6) already caught one timer that was expensive while nobody was
+        // listening.
+        if (!playing && cfStartedIdx < 0 && cfPlayer == null) {
+            return 2000L
+        }
+
+        val duration = exoGet(exo, "getDuration") as? Long ?: -1L
+        val position = exoGet(exo, "getCurrentPosition") as? Long ?: -1L
+        val remaining =
+            if (duration > 0 && position >= 0) ((duration - position) / exoSpeed(exo)).toLong()
+            else Long.MAX_VALUE
+
+        // ── A sounding overlap that should not be ─────────────────────────
+        if (cfStartedIdx >= 0) {
+            val paused = exoGet(exo, "getPlayWhenReady") as? Boolean == false
+            // Paused outside JS (a headset unplugged), or seeked back out of the
+            // fade: drop the overlap and put the outgoing song back to full.
+            if (paused || remaining > cfSpanMs + 2500) {
+                resetCf()
+                cancelVolWork()
+                setExoVolume(1f)
+            }
+            return 100L
+        }
+
+        // The track changed with only a PREPARED overlap (a manual skip, or a
+        // boundary the stream was not ready for) — it was for the wrong song.
+        if (cfPreparedIdx >= 0 && cfPreparedIdx != idx) {
+            stopCfInternal()
+            cfPreparedIdx = -1
+        }
+        val span = cfSpanMs
+        if (span <= 0 || !playing || remaining == Long.MAX_VALUE) {
+            return 1000L
+        }
+        // C.INDEX_UNSET (-1) at the end of a queue; the SAME index under
+        // repeat-one, where crossfading a song into itself is just noise.
+        val next = (exoGet(exo, "getNextMediaItemIndex") ?: exoGet(exo, "getNextWindowIndex"))
+            as? Int ?: -1
+        if (next < 0 || next == idx) {
+            return 1000L
+        }
+
+        // ── Buffer the incoming track well before it is needed ────────────
+        // Twenty seconds of lead, or span + 8 on a long fade: a stream pulled
+        // through the local proxy can take several seconds to open.
+        if (remaining <= maxOf(span + 8000L, 20000L)) {
+            val uri = exoUri(exo, next)
+            val stale = cfPreparedIdx != idx || uri != cfPreparedUri
+            // A prepare that errored out (cfPlayer gone) gets another go, but
+            // not more than every four seconds.
+            val retry = cfPreparedIdx == idx && cfPlayer == null && now - cfPreparedAt > 4000
+            if (uri != null && (stale || retry) && remaining > 1500) {
+                prepareOverlap(uri, exoSpeed(exo).toDouble())
+                cfPreparedIdx = idx
+                cfPreparedUri = uri
+                cfPreparedAt = now
+            }
+        }
+
+        // ── Start it at the boundary ──────────────────────────────────────
+        // Not ready yet → no fade this tick. A late buffer still gets a
+        // (shorter) fade over what is left; one that never arrives means a
+        // plain cut, which sounds like a decision rather than a dip.
+        val mp = cfPlayer
+        if (cfPreparedIdx == idx && mp != null && cfReady && remaining in 300..span.toLong()) {
+            try {
+                mp.start()
+                val ms = remaining.toInt()
+                rampUp(mp, ms)
+                fadeExoDown(ms, failSafe = false)
+                cfStartedIdx = idx
+                Log.i(TAG, "crossfade: overlap ${ms}ms")
+            } catch (e: Exception) {
+                Log.w(TAG, "crossfade start failed: ${e.message}")
+                stopCfInternal()
+            }
+        }
+        return if (remaining > span + 25000L) 1000L else 100L
     }
 
     /**
-     * Wait a beat for the buffer rather than checking once.
+     * Open the incoming stream and buffer it. Does not make a sound.
      *
-     * A single check threw away every overlap whose stream arrived a few
-     * hundred milliseconds late — which, on a mobile connection, is most of
-     * them. Beyond about a second the fade would be visibly shorter than the
-     * one that was asked for, and a clean cut is the better answer.
+     * @param rate the speed the MAIN player is running at. The overlap has to
+     *   match it: at 1.5x the outgoing track is fast and an overlap left at
+     *   normal speed would be audibly out of step with it for the whole fade.
      */
-    private fun startWhenReady(durationMs: Int, promise: Promise, waitedMs: Int) {
-        cfHandler.post {
-            val mp = cfPlayer
-            if (mp == null) {
-                promise.resolve(false)
-                return@post
-            }
-            if (!cfReady) {
-                if (waitedMs >= 1200) {
-                    Log.w(TAG, "crossfade: buffer never arrived")
-                    promise.resolve(false)
-                } else {
-                    cfHandler.postDelayed(
-                        { startWhenReady(durationMs, promise, waitedMs + 100) },
-                        100,
-                    )
+    private fun prepareOverlap(url: String, rate: Double) {
+        try {
+            stopCfInternal()
+            val mp = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                )
+                setDataSource(url)
+                setVolume(0f, 0f)
+                setOnPreparedListener { mp ->
+                    // Applied on the PREPARED player: setting playback params on
+                    // an idle MediaPlayer throws, and on a paused one it STARTS
+                    // it playing — hence the pause straight after.
+                    if (rate > 0 && Math.abs(rate - 1.0) > 0.001) {
+                        try {
+                            mp.playbackParams = mp.playbackParams.setSpeed(rate.toFloat())
+                            mp.pause()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "overlap rate " + rate + " rejected: " + e.message)
+                        }
+                    }
+                    if (cfPlayer === mp) cfReady = true
                 }
-                return@post
+                // A dead stream must not crash — just abandon the overlap; the
+                // outgoing track still ends and ExoPlayer advances normally.
+                setOnErrorListener { mp, _, _ ->
+                    if (cfPlayer === mp) stopCfInternal()
+                    true
+                }
+                prepareAsync()
             }
-            try {
-                mp.start()
-                // Ramp over what is LEFT, not the nominal span: a late start
-                // that still rose over the full duration would still be
-                // climbing when the outgoing track ended.
-                rampUp(mp, (durationMs - waitedMs).coerceAtLeast(200))
-                promise.resolve(true)
-            } catch (e: Exception) {
-                Log.w(TAG, "startCrossfade failed: ${e.message}")
-                stopCfInternal()
-                promise.resolve(false)
-            }
+            cfPlayer = mp
+        } catch (e: Exception) {
+            Log.w(TAG, "prepareCrossfade failed: ${e.message}")
+            stopCfInternal()
         }
     }
 
@@ -626,28 +777,22 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         cfHandler.postDelayed(r, stepMs)
     }
 
-    /** Where the overlap player has reached, in seconds — so JS can seek RNTP to
-     *  the same spot for a near-seamless handoff. -1 when nothing is crossfading. */
-    @ReactMethod
-    fun crossfadePosition(promise: Promise) {
-        cfHandler.post {
-            val mp = cfPlayer
-            promise.resolve(
-                try {
-                    if (mp != null) mp.currentPosition / 1000.0 else -1.0
-                } catch (_: Exception) {
-                    -1.0
-                },
-            )
-        }
-    }
-
+    /** Cut the overlap and forget the schedule — a manual skip, a pause, a
+     *  fresh play. The caller restores the main player's volume. */
     @ReactMethod
     fun stopCrossfade(promise: Promise) {
         cfHandler.post {
-            stopCfInternal()
+            resetCf()
             promise.resolve(true)
         }
+    }
+
+    private fun resetCf() {
+        stopCfInternal()
+        cfPreparedIdx = -1
+        cfPreparedUri = null
+        cfStartedIdx = -1
+        cfHandoffAt = 0L
     }
 
     private fun stopCfInternal() {
@@ -716,46 +861,52 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     @ReactMethod
     fun fadeOutPlayer(durationMs: Int, promise: Promise) {
         volHandler.post {
-            cancelVolWork()
-            val steps = 16
-            val stepMs = (durationMs / steps).coerceAtLeast(30).toLong()
-            var i = 0
-            val ramp = object : Runnable {
-                override fun run() {
-                    i++
-                    val v = (1f - i.toFloat() / steps).coerceAtLeast(FADE_FLOOR)
-                    setExoVolume(v)
-                    if (i < steps) {
-                        volHandler.postDelayed(this, stepMs)
-                    } else {
-                        volRamp = null
-                    }
-                }
-            }
-            volRamp = ramp
-            volHandler.postDelayed(ramp, stepMs)
-
-            // Fail-safe ONLY. It must not race the crossfade handoff: while the
-            // overlap player is still sounding, snapping RNTP back to full
-            // volume plays the incoming track twice at once, slightly offset —
-            // the "I hear two sounds for a second" clash. So this waits well
-            // past any overlap, and the handoff (which cancels it via
-            // restorePlayerVolume) is what normally restores volume.
-            val restore = Runnable {
-                volRamp?.let { volHandler.removeCallbacks(it) }
-                volRamp = null
-                volRestore = null
-                if (cfPlayer != null) {
-                    // An overlap is STILL playing — restoring now would double
-                    // the audio. Cut the overlap first, then come back to full.
-                    stopCfInternal()
-                }
-                setExoVolume(1f)
-            }
-            volRestore = restore
-            volHandler.postDelayed(restore, durationMs.toLong() + RESTORE_GRACE_MS)
+            fadeExoDown(durationMs, failSafe = true)
             promise.resolve(true)
         }
+    }
+
+    /** Main looper only. `failSafe` is off for the crossfade, whose own
+     *  handoff restores the volume — a timed restore there could only fire
+     *  early and play the incoming song twice at once. */
+    private fun fadeExoDown(durationMs: Int, failSafe: Boolean) {
+        cancelVolWork()
+        val steps = 16
+        val stepMs = (durationMs / steps).coerceAtLeast(30).toLong()
+        var i = 0
+        val ramp = object : Runnable {
+            override fun run() {
+                i++
+                val v = (1f - i.toFloat() / steps).coerceAtLeast(FADE_FLOOR)
+                setExoVolume(v)
+                if (i < steps) {
+                    volHandler.postDelayed(this, stepMs)
+                } else {
+                    volRamp = null
+                }
+            }
+        }
+        volRamp = ramp
+        volHandler.postDelayed(ramp, stepMs)
+
+        // Fail-safe ONLY, and only for a plain fade (fade-to-pause): a stalled
+        // bridge must never leave the player stuck quiet. The crossfade does
+        // without it — its handoff in cfStep restores the volume, and a timed
+        // restore could only ever land early and double the incoming song.
+        if (!failSafe) return
+        val restore = Runnable {
+            volRamp?.let { volHandler.removeCallbacks(it) }
+            volRamp = null
+            volRestore = null
+            if (cfPlayer != null) {
+                // An overlap is STILL playing — restoring now would double
+                // the audio. Cut the overlap first, then come back to full.
+                resetCf()
+            }
+            setExoVolume(1f)
+        }
+        volRestore = restore
+        volHandler.postDelayed(restore, durationMs.toLong() + RESTORE_GRACE_MS)
     }
 
     /**
@@ -860,7 +1011,10 @@ class AudioModule(private val ctx: ReactApplicationContext) :
 
     override fun onCatalystInstanceDestroy() {
         release()
-        stopCfInternal()
+        cfSpanMs = 0
+        cfHandler.removeCallbacks(cfTick)
+        cfTicking = false
+        resetCf()
         deviceCallback?.let {
             try {
                 (ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager)

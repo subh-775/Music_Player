@@ -142,8 +142,23 @@ identity. Start a different playlist and the numbering begins again, so a
 leftover mark from the previous queue silently vetoed the fade on whichever song
 landed on the same number. Repeat and previous hit it the same way.
 
-Crossfade still only runs while the app is on screen; that is deliberate and
-explained in [Sound](/reference/sound).
+### Crossfade only worked while I was looking at the app
+
+Fixed in **v1.2.9**. The whole crossfade — noticing the end of the song,
+starting the overlap, handing over to the next track — ran on JavaScript
+timers, and Android stops those as soon as the screen goes off or another app
+is in front. So it worked some of the time and not most of the time, depending
+entirely on whether the phone was in your hand. It is scheduled natively now;
+see [Sound](/reference/sound).
+
+### Every song said 320 kbps
+
+Fixed in **v1.2.9**. The quality badge fell back to the **Streaming quality**
+setting when it had no better figure, and on Auto that meant 320 for every
+song from every source. It now shows what the source reports for the stream it
+actually handed over: YouTube's real stream bitrate (usually around 130), the
+JioSaavn file that is really playing (320, 160 or 96), and SoundCloud's chosen
+format (usually 128). If a source reports nothing, there is no badge.
 
 ### I turned Autoplay off and it kept playing
 
