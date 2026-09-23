@@ -548,19 +548,6 @@ export function SettingsScreen({
     }
   }, []);
 
-  /** Clear the custom folder — downloads go back to the default location. */
-  const useDefaultFolder = useCallback(async () => {
-    try {
-      const res = await setDownloadsDir('');
-      patchRemote({
-        downloads: {...(remoteCache.get().downloads ?? {}), ...res},
-      });
-      toast('Using the default download folder');
-    } catch {
-      toast('Could not reset the folder');
-    }
-  }, []);
-
   const openDownloadFolder = useCallback(async () => {
     const native = NativeModules.Backend as {
       openFolder?: (p: string) => Promise<boolean>;
@@ -884,9 +871,6 @@ export function SettingsScreen({
           <View style={styles.row}>
             <View style={styles.rowText}>
               <Text style={styles.rowLabel}>JioSaavn</Text>
-              <Text style={styles.rowHint}>
-                Full-catalogue streaming, up to 320 kbps
-              </Text>
             </View>
             {/* On and locked: the core catalogues cannot be switched off,
                 and a switch in the slot reads as a setting at a glance. */}
@@ -896,9 +880,6 @@ export function SettingsScreen({
           <View style={styles.row}>
             <View style={styles.rowText}>
               <Text style={styles.rowLabel}>SoundCloud</Text>
-              <Text style={styles.rowHint}>
-                Independent uploads, remixes and DJ sets
-              </Text>
             </View>
             <Toggle value disabled onChange={() => {}} />
           </View>
@@ -906,13 +887,6 @@ export function SettingsScreen({
           <View style={styles.row}>
             <View style={styles.rowText}>
               <Text style={styles.rowLabel}>YouTube</Text>
-              <Text style={styles.rowHint}>
-                {ytBusy
-                  ? 'Checking this device…'
-                  : yt && !yt.supported
-                  ? 'Not available on this device.'
-                  : 'Search and download from YouTube. No account required.'}
-              </Text>
             </View>
             <Toggle
               value={!!yt?.enabled}
@@ -945,15 +919,6 @@ export function SettingsScreen({
           </TouchableOpacity>
 
           <Row label="Open in Files" onPress={openDownloadFolder} />
-
-          <TouchableOpacity
-            style={styles.row}
-            onPress={useDefaultFolder}
-            activeOpacity={0.7}>
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Reset to default location</Text>
-            </View>
-          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.row}

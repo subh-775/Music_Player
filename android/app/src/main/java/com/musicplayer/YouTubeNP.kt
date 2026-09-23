@@ -156,9 +156,21 @@ object YouTubeNP {
                 .maxByOrNull { it.averageBitrate }
                 ?: return "{}"
 
+            // averageBitrate is ALREADY kbps (itag 251 reports 160). Dividing
+            // it by 1000 again turned every YouTube stream into 0, which the
+            // backend reads as "unknown" — so YouTube songs never got a
+            // quality label. The > 2000 branch only guards against a future
+            // extractor switching to bits per second.
+            val avg = best.averageBitrate
+            val kbps = when {
+                avg > 2000 -> avg / 1000
+                avg > 0 -> avg
+                else -> 0
+            }
+
             JSONObject()
                 .put("url", best.url)
-                .put("bitrate_kbps", if (best.averageBitrate > 0) best.averageBitrate / 1000 else 0)
+                .put("bitrate_kbps", kbps)
                 .put("codec", best.format?.getName() ?: "")
                 .toString()
         } catch (e: Throwable) {

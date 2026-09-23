@@ -1750,6 +1750,22 @@ single-line titles truncate a little sooner. Checked by `defaultFont.test`.
 with a half card or a gap at the edge. `snapToInterval = CARD + S.gap` with
 the list's gutter padding lands a card on the page margin every time.
 
+## Round 18 — the last rough edges (v1.2.11)
+
+**YouTube had no quality label.** YouTubeNP divided NewPipe's `averageBitrate`
+by 1000, but it is already kbps (itag 251 reports 160), so every YouTube
+stream reported 0 and the backend correctly treated 0 as unknown.
+
+**Rows use +, not a heart.** TrackRow now renders the player's AddButton: the
+first press likes, the next (or a hold) opens Add to playlist. Rows reach the
+sheet through `openAddToPlaylist`, a module-level opener App registers (the
+toast.ts pattern) instead of a prop threaded through every screen. The action
+sheet's like row uses the same CirclePlus / CircleCheck glyphs.
+
+**Also:** search results drop the duration (`showDuration={false}`); Settings
+loses the three source descriptions and "Reset to default location"; the mark
+sits top right on Home after the greeting.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs

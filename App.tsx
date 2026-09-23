@@ -29,7 +29,10 @@ import {PlayerBar} from './src/components/PlayerBar';
 import {BottomNav, type Tab} from './src/components/BottomNav';
 import {SheetHost} from './src/components/Sheet';
 import {Toaster} from './src/components/Toaster';
-import {AddToPlaylistSheet} from './src/components/AddToPlaylistSheet';
+import {
+  AddToPlaylistSheet,
+  useAddToPlaylistHost,
+} from './src/components/AddToPlaylistSheet';
 import {ArtistPickerSheet} from './src/components/ArtistPickerSheet';
 import {UpdateModal} from './src/components/UpdateModal';
 import {
@@ -107,6 +110,8 @@ function Shell() {
   const [sheetTrack, setSheetTrack] = useState<Track | null>(null);
   const [sheetFrom, setSheetFrom] = useState<SheetContext>(null);
   const [addTo, setAddTo] = useState<Track | null>(null);
+  // Lets a list row's + open this sheet without a prop through every screen.
+  useAddToPlaylistHost(setAddTo);
   const [artistChoices, setArtistChoices] = useState<string[]>([]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);

@@ -311,6 +311,7 @@ export const HomeScreen = React.memo(function HomeScreen({
         <View style={styles.headerText}>
           <Greeting />
         </View>
+        <Image source={MARK} style={styles.mark} accessibilityIgnoresInvertColors />
       </View>
 
       {/* Quick access. The two things everyone opens most (Liked, Downloaded)
@@ -502,6 +503,9 @@ function Card({item, onPick}: {item: HomeItem; onPick: (i: HomeItem) => void}) {
 
 const CARD = 138;
 
+/** The app's own mark, as in the menu and on the splash. */
+const MARK = require('../assets/app-icon-bl.png');
+
 /**
  * Every row comes to rest with a card on the page margin.
  *
@@ -532,6 +536,7 @@ const styles = StyleSheet.create({
   },
   gear: {padding: 2},
   headerText: {flex: 1, minWidth: 0},
+  mark: {width: 38, height: 38, borderRadius: 19},
   dot: {
     position: 'absolute',
     top: 0,
