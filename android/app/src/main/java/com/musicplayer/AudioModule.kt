@@ -596,8 +596,8 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     private fun cfStep(): Long {
         val exo = PlaybackSession.exoPlayer() ?: return 1000L
         // The *WindowIndex names are the pre-2.16 spellings of the same calls.
-        val idx = (exoGet(exo, "getCurrentMediaItemIndex") ?: exoGet(exo, "getCurrentWindowIndex"))
-            as? Int ?: return 1000L
+        val idxAny = exoGet(exo, "getCurrentMediaItemIndex") ?: exoGet(exo, "getCurrentWindowIndex")
+        val idx = idxAny as? Int ?: return 1000L
         val playing = exoGet(exo, "isPlaying") as? Boolean ?: false
         val now = android.os.SystemClock.uptimeMillis()
 
@@ -664,8 +664,8 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         }
         // C.INDEX_UNSET (-1) at the end of a queue; the SAME index under
         // repeat-one, where crossfading a song into itself is just noise.
-        val next = (exoGet(exo, "getNextMediaItemIndex") ?: exoGet(exo, "getNextWindowIndex"))
-            as? Int ?: -1
+        val nextAny = exoGet(exo, "getNextMediaItemIndex") ?: exoGet(exo, "getNextWindowIndex")
+        val next = nextAny as? Int ?: -1
         if (next < 0 || next == idx) {
             return 1000L
         }
