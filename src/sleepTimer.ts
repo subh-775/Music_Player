@@ -14,14 +14,17 @@
  * track has already become active and started playing. The stop then landed one
  * to two seconds into a song nobody asked for.
  *
- * So end-of-track now has two paths. The primary one is a one-shot armed two
- * seconds out by the playback watcher, which lands on the boundary itself. The
- * track change stays exactly as it was, as the BACKSTOP: if JS was frozen and
- * the one-shot never ran, the event still stops playback — late, rather than
- * never.
+ * So end-of-track is now ExoPlayer's own: setPauseAtEndOfMediaItems, armed
+ * while the timer is, pauses on the last frame of the song — natively, so it
+ * is exact and it holds with the screen off. The JS one-shot it replaces
+ * started a 2.5s fade 0.15s before the end, so the next song always began
+ * before the pause landed; and with the screen off it never ran at all.
+ * The track change stays as the BACKSTOP for an engine that refused the
+ * switch: late, rather than never.
  */
 import {useSyncExternalStore} from 'react';
 import {cancelCrossfade, fadeToPause} from './player';
+import {setPauseAtEndOfTrack} from './audioEffects';
 import {diag} from './diag';
 
 type Mode = 'off' | 'clock' | 'endOfTrack';
@@ -37,8 +40,6 @@ type State = {
 let state: State = {mode: 'off', endsAt: 0, remaining: 0};
 const listeners = new Set<() => void>();
 let ticker: ReturnType<typeof setInterval> | null = null;
-/** The punctual end-of-track stop. Null whenever one is not armed. */
-let boundaryStop: ReturnType<typeof setTimeout> | null = null;
 
 function emit() {
   state = {...state};
@@ -49,13 +50,6 @@ function stopTicker() {
   if (ticker) {
     clearInterval(ticker);
     ticker = null;
-  }
-}
-
-function clearBoundaryStop() {
-  if (boundaryStop) {
-    clearTimeout(boundaryStop);
-    boundaryStop = null;
   }
 }
 
@@ -75,24 +69,15 @@ export function sleepMode(): Mode {
 }
 
 /**
- * Arm the punctual stop, from the playback watcher's tick.
- *
- * Idempotent: the watcher calls this every second inside the window, and only
- * the first call arms anything. Two seconds of lead is deliberate — long
- * enough that a one-second tick cannot miss the window, short enough that the
- * OS has not yet had a reason to freeze us since the last time it saw us.
+ * ExoPlayer paused. `atEnd` is true when it stopped on the last frame, which
+ * with an end-of-track timer armed is the timer doing its job: clear it, so
+ * the next play carries on into the next song.
  */
-export function scheduleEndOfTrackStop(remainingSeconds: number): void {
-  if (state.mode !== 'endOfTrack' || boundaryStop) {
-    return;
+export function sleepTimerOnPause(atEnd: boolean): void {
+  if (state.mode === 'endOfTrack' && atEnd) {
+    diag('sleep', 'stopped at end of track');
+    cancelSleepTimer();
   }
-  // A shade before the boundary rather than on it. Landing after the engine has
-  // already moved on is the entire bug this replaces.
-  const ms = Math.max(0, (remainingSeconds - 0.15) * 1000);
-  boundaryStop = setTimeout(() => {
-    boundaryStop = null;
-    fire('track boundary');
-  }, ms);
 }
 
 /**
@@ -119,7 +104,7 @@ export function sleepTimerOnTrackChange(automatic: boolean): void {
 
 export function startSleepTimer(minutes: number): void {
   stopTicker();
-  clearBoundaryStop();
+  setPauseAtEndOfTrack(false);
   state = {
     mode: 'clock',
     endsAt: Date.now() + minutes * 60_000,
@@ -139,7 +124,7 @@ export function startSleepTimer(minutes: number): void {
 
 export function sleepAtEndOfTrack(): void {
   stopTicker();
-  clearBoundaryStop();
+  setPauseAtEndOfTrack(true);
   state = {mode: 'endOfTrack', endsAt: 0, remaining: 0};
   emit();
   // An overlap may already be running when the timer is armed — a 12s crossfade
@@ -151,7 +136,7 @@ export function sleepAtEndOfTrack(): void {
 
 export function cancelSleepTimer(): void {
   stopTicker();
-  clearBoundaryStop();
+  setPauseAtEndOfTrack(false);
   state = {mode: 'off', endsAt: 0, remaining: 0};
   emit();
 }

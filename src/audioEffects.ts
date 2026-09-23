@@ -16,6 +16,7 @@ type AudioNative = {
   setEqualizer?: (enabled: boolean, gainsDb: number[]) => Promise<boolean>;
   setNormalize?: (enabled: boolean) => Promise<boolean>;
   setCrossfade?: (spanMs: number) => Promise<boolean>;
+  setPauseAtEndOfTrack?: (on: boolean) => Promise<boolean>;
   stopCrossfade?: () => Promise<boolean>;
   fadeOutPlayer?: (durationMs: number) => Promise<boolean>;
   fadeInPlayer?: (durationMs: number) => Promise<boolean>;
@@ -71,6 +72,19 @@ export async function setCrossfade(spanMs: number): Promise<void> {
     await native.setCrossfade?.(Math.max(0, Math.round(spanMs)));
   } catch {
     /* an APK without the scheduler — plain cuts, still correct */
+  }
+}
+
+/**
+ * Pause on the last frame of the current song instead of moving to the next.
+ * ExoPlayer's own setPauseAtEndOfMediaItems, so it is exact and it works with
+ * the screen off. False when the engine is not reachable.
+ */
+export async function setPauseAtEndOfTrack(on: boolean): Promise<boolean> {
+  try {
+    return (await native.setPauseAtEndOfTrack?.(on)) ?? false;
+  } catch {
+    return false;
   }
 }
 

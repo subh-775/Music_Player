@@ -27,10 +27,12 @@ import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
 import {currentQuality, readSettings, writeSetting} from './store';
 import {
   cleanText,
+  getBestArtworkUrl,
   getDownloadKey,
   isPlayableTrack,
   normalizeTrack,
 } from './tracks';
+import {getArtworkColor} from './artworkColor';
 import {
   applyAudioEffects,
   endCrossfade,
@@ -41,7 +43,7 @@ import {
 } from './audioEffects';
 import {setPausedByDuck} from './duckState';
 import {
-  scheduleEndOfTrackStop,
+  sleepTimerOnPause,
   sleepMode,
   sleepTimerOnTrackChange,
 } from './sleepTimer';
@@ -306,6 +308,20 @@ export async function setupPlayer(): Promise<boolean> {
     // Every track the engine lands on — auto-advance, radio, a queue tap —
     // goes into Recently Played AS IT STARTS, so Home updates live. Manual
     // playTrack() also records (first write wins on order; remember() de-dupes).
+    // The end-of-track sleep stop is ExoPlayer pausing itself on the last
+    // frame (setPauseAtEndOfTrack). This notices that pause — a native event,
+    // so it arrives with the screen off — and clears the timer, so the next
+    // press of play carries on normally.
+    TrackPlayer.addEventListener(Event.PlaybackState, async e => {
+      if (e.state !== State.Paused || sleepMode() !== 'endOfTrack') {
+        return;
+      }
+      try {
+        const {position, duration} = await TrackPlayer.getProgress();
+        sleepTimerOnPause(duration > 0 && duration - position < 1.5);
+      } catch {}
+    });
+
     TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async e => {
       // The "play this soon" window is relative to the current song — a new song
       // starts a fresh one, so anything queued now goes right after it again.
@@ -437,6 +453,20 @@ export async function restoreSession(): Promise<boolean> {
     // until the user pressed play (RNTP's own hook self-seeded on mount; ours
     // has to be told).
     await refreshEngineMirror();
+    // The cover and the bar's colour BEFORE the track is published, so the
+    // mini player arrives finished under the splash instead of filling in
+    // after it lifts. Capped: a slow network costs at most 1.2s, then the bar
+    // shows what it has, exactly as before.
+    const art = getBestArtworkUrl(items[idx].t);
+    if (art) {
+      await Promise.race([
+        Promise.all([
+          Image.prefetch(art).catch(() => false),
+          getArtworkColor(art).catch(() => null),
+        ]),
+        new Promise(r => setTimeout(r, 1200)),
+      ]);
+    }
     publishTrack(engineQueue[activeIndex] ?? null);
     // The earlier tracks come back AFTER the player is on screen, prepended so
     // Previous still works; this shifts the active index to idx without ever
@@ -1432,24 +1462,6 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       }
     } catch {}
 
-    try {
-      const {position, duration} = await TrackPlayer.getProgress();
-      if (duration <= 0 || position <= 0) {
-        return;
-      }
-      // Seconds of CLOCK left, not of audio: at 1.5x a track with 12s of audio
-      // left ends in 8, and the stop below is armed against a wall clock.
-      const remaining = (duration - position) / playbackRate();
-      // The end-of-track sleep stop, ON the boundary. Arming it two seconds
-      // out lands the stop there instead of one to two seconds into the next
-      // song, which is where the track-change event — still in place as the
-      // backstop — necessarily lands.
-      if (remaining <= 2) {
-        scheduleEndOfTrackStop(remaining);
-      }
-    } catch {
-      /* engine not up */
-    }
   }, 1000);
 }
 

@@ -1766,6 +1766,28 @@ sheet's like row uses the same CirclePlus / CircleCheck glyphs.
 loses the three source descriptions and "Reset to default location"; the mark
 sits top right on Home after the greeting.
 
+## Round 19 — the pull-up, the cold start and the sleep stop (v1.2.12)
+
+**Pull-up from the mini player.** The parked player was `display: none`, so it
+was out of layout; a drag had to lay the whole screen out mid-gesture while
+transforms applied at once — the delay and the cover floating free of its
+panel. It is `opacity: 0` now: laid out, measured before the first open, and
+drawn as nothing. The artist ticker takes `paused` so the laid-out copy does
+not loop for nobody; the host hides from TalkBack while parked.
+
+**Cold start.** restoreSession prefetches the cover and computes the bar's
+colour (capped 1.2s) before publishing the track, and App waits out the bar's
+240ms entrance under the splash, so the mini player is finished when it lifts.
+
+**End of track.** The JS one-shot started a 2.5s fade 0.15s before the end, so
+the next song always began first; with the screen off it never ran and the
+track-change backstop paused the next song just after it started. Now
+ExoPlayer's setPauseAtEndOfMediaItems is armed with the timer; a Paused event
+near the end clears it. The backstop stays for an engine that refused.
+
+**Also:** album and playlist rows drop the per-song length; the splash mark is
+248dp at 0.62 opacity, a dull grey on black.
+
 ### Standing constraints
 - **Any control renamed, moved or removed: grep `docs/content` for its old name
   before merging.** The queue "grip" became two glyphs in round 6 and the docs

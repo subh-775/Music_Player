@@ -597,6 +597,7 @@ export function CollectionScreen({
                       : undefined
                   }
                   showActions={!selecting}
+                  showDuration={false}
                 />
               </View>
             </View>
