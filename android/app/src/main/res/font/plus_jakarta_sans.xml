@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plus Jakarta Sans (SIL OFL 1.1, see android/app/PLUS_JAKARTA_SANS_OFL.txt).
+     One family, five weights. Registered in MainApplication as
+     "Plus Jakarta Sans", so a fontWeight in JS picks the matching file.
+     The app uses 400-900; 900 resolves to the nearest, 800. -->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <font android:fontStyle="normal" android:fontWeight="400" android:font="@font/plus_jakarta_sans_regular"
+        app:fontStyle="normal" app:fontWeight="400" app:font="@font/plus_jakarta_sans_regular" />
+    <font android:fontStyle="normal" android:fontWeight="500" android:font="@font/plus_jakarta_sans_medium"
+        app:fontStyle="normal" app:fontWeight="500" app:font="@font/plus_jakarta_sans_medium" />
+    <font android:fontStyle="normal" android:fontWeight="600" android:font="@font/plus_jakarta_sans_semibold"
+        app:fontStyle="normal" app:fontWeight="600" app:font="@font/plus_jakarta_sans_semibold" />
+    <font android:fontStyle="normal" android:fontWeight="700" android:font="@font/plus_jakarta_sans_bold"
+        app:fontStyle="normal" app:fontWeight="700" app:font="@font/plus_jakarta_sans_bold" />
+    <font android:fontStyle="normal" android:fontWeight="800" android:font="@font/plus_jakarta_sans_extrabold"
+        app:fontStyle="normal" app:fontWeight="800" app:font="@font/plus_jakarta_sans_extrabold" />
+</font-family>
