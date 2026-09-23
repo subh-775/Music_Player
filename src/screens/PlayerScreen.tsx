@@ -771,11 +771,18 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    * thing is switched off and nothing it contains can be visible whatever the
    * arithmetic inside it did.
    *
-   * `display: none` rather than opacity, so it also stops being laid out and
-   * composited while parked — which is most of the session.
+   * OPACITY, not `display: none`. It used to be display, so a parked player
+   * was taken out of layout altogether — and a pull up on the mini player
+   * then had to lay the whole screen out from nothing in the middle of the
+   * gesture. Transforms apply on the UI thread at once while that layout
+   * lands frames later, so the first part of every pull showed the cover
+   * travelling against a panel that was not there yet: the delay and the
+   * broken frames. Closing never did it because the layout already existed.
+   * At opacity 0 Android draws nothing, the tree stays laid out, and the
+   * cover is measured before the first open instead of during it.
    */
   const hostStyle = useAnimatedStyle(() => ({
-    display: morph.value > 0.999 ? ('none' as const) : ('flex' as const),
+    opacity: morph.value > 0.999 ? 0 : 1,
   }));
 
   const backdropStyle = useAnimatedStyle(() => {
@@ -900,8 +907,9 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     <Animated.View
       style={[styles.host, hostStyle]}
       // A parked player is still in the tree; it must not eat touches meant for
-      // the app behind it.
-      pointerEvents={visible ? 'auto' : 'none'}>
+      // the app behind it, nor be read out by a screen reader.
+      pointerEvents={visible ? 'auto' : 'none'}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}>
       <Animated.View ref={wrapRef} style={[styles.wrap, sheetStyle]}>
         {/* The panel's SURFACE, as its own view rather than a colour on the
             wrap above — so it can fade out during the morph while the artwork,
@@ -1028,6 +1036,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
                     text={artists}
                     style={styles.artist}
                     ticker={artistCount > 1}
+                    paused={!visible}
                   />
                 </TouchableOpacity>
                 {/* Third line. Both badges render nothing when their setting is

@@ -178,6 +178,10 @@ function Shell() {
           // Force the shell to show the player bar even though nothing was
           // tapped this launch.
           setEngine(true);
+          // The bar slides in over 240ms when its track first appears. Let it
+          // finish under the splash, so the first thing seen is a finished
+          // mini player rather than one still arriving.
+          await new Promise(r => setTimeout(r, 280));
         }
       }
       engineDone.current = true;

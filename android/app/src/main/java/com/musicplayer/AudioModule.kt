@@ -581,6 +581,36 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         null
     }
 
+    /**
+     * Pause on the last frame of the current item instead of moving on — the
+     * sleep timer's "end of track". ExoPlayer's own setPauseAtEndOfMediaItems,
+     * so it is exact and needs no timer; JS clears it once the pause lands.
+     */
+    @ReactMethod
+    fun setPauseAtEndOfTrack(on: Boolean, promise: Promise) {
+        cfHandler.post {
+            val exo = PlaybackSession.exoPlayer()
+            val ok = try {
+                if (exo == null) {
+                    false
+                } else {
+                    val m = exoMethods.getOrPut("setPauseAtEndOfMediaItems(Z)") {
+                        exo.javaClass.getMethod(
+                            "setPauseAtEndOfMediaItems",
+                            Boolean::class.javaPrimitiveType,
+                        ).apply { isAccessible = true }
+                    }
+                    m.invoke(exo, on)
+                    true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "setPauseAtEndOfMediaItems failed: ${e.message}")
+                false
+            }
+            promise.resolve(ok)
+        }
+    }
+
     private fun exoSpeed(exo: Any): Float {
         val params = exoGet(exo, "getPlaybackParameters") ?: return 1f
         return try {

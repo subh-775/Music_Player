@@ -50,9 +50,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: C.bg,
   },
-  // 208. The mark is the only thing on the screen, so it should read as the
-  // app arriving rather than as an icon placed on a black page — a bit over
-  // half the width of a 360dp phone does that without crowding the edges. The
-  // radius keeps the proportion it had at every earlier size.
-  icon: {width: 208, height: 208, borderRadius: 47},
+  // 248, about two thirds of a 360dp phone: the mark is the only thing on
+  // the screen, so it should read as the app arriving. At 0.62 the white
+  // line-art settles to a dull grey on the black, while the black of the
+  // image stays black and keeps the square invisible. The radius keeps the
+  // proportion it had at every earlier size.
+  icon: {width: 248, height: 248, borderRadius: 56, opacity: 0.62},
 });

@@ -30,17 +30,22 @@ export function Marquee({
   text,
   style,
   ticker = false,
+  paused = false,
 }: {
   text: string;
   style?: StyleProp<TextStyle>;
   ticker?: boolean;
+  /** Hold still — for a copy that is laid out but not on screen, where a
+   *  native loop would still run every frame for nobody. */
+  paused?: boolean;
 }) {
   const [boxWidth, setBoxWidth] = useState(0);
   const [textWidth, setTextWidth] = useState(0);
   const shift = useRef(new Animated.Value(0)).current;
 
   const overflow = textWidth - boxWidth;
-  const scrolls = ticker ? textWidth > 0 && boxWidth > 0 : overflow > 4;
+  const scrolls =
+    !paused && (ticker ? textWidth > 0 && boxWidth > 0 : overflow > 4);
 
   const onBox = useCallback((e: LayoutChangeEvent) => {
     setBoxWidth(e.nativeEvent.layout.width);
