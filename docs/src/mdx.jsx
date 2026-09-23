@@ -64,8 +64,8 @@ function callout(kind, label) {
 
 export const Tip = callout('tip', 'Tip');
 export const Note = callout('info', 'Note');
-export const Warn = callout('warn', 'Worth knowing');
-export const Danger = callout('danger', 'This one matters');
+export const Warn = callout('warn', 'Warning');
+export const Danger = callout('danger', 'Important');
 
 export const mdxComponents = {
   h2: heading('h2'),

@@ -15,19 +15,13 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 /* ── The product mark ────────────────────────────────────────────────────── */
 
 /**
- * The application's own icon, at the size the home page can give it.
- *
- * The hero used to hold a working equalizer. It was a good control and the
- * wrong thing to open with: a reader arriving at the front page is deciding
- * whether this is the product they want, not adjusting 6 kHz. The icon answers
- * that question in one glance and is the same mark they will look for on the
- * home screen afterwards.
+ * The app's mark, large. White line-art on its own black square, placed on a
+ * page that is the same black, so the figure stands on the page with no edge.
  */
 export function AppMark() {
   return (
     <div className="appmark" aria-hidden="true">
-      <span className="appmark-halo" />
-      <img src={`${BASE}/logo.png`} alt="" width="220" height="220" />
+      <img src={`${BASE}/logo.png`} alt="" width="440" height="440" />
     </div>
   );
 }
@@ -187,8 +181,7 @@ export function SeekDemo() {
         <span>drag or tap</span>
       </div>
       <p className="demo-sub">
-        Scrubbing is continuous; the seek happens once, on release — one range
-        request rather than one per pixel.
+        The song jumps once, when you let go.
       </p>
       <HBar value={pos} max={DURATION} steps={0} onChange={setPos} label="Position" />
       <div className="hbar-ends">
@@ -271,32 +264,32 @@ const CARDS = [
   [
     'swipe',
     'Swipe the artwork',
-    'Left for the next song, right for the previous one. The incoming title travels with the cover, so you can see where you are heading before you let go — and you can change your mind mid-drag.',
+    'Left for the next song, right for the previous one. The next title moves with the cover, so you see where you are going before you let go.',
   ],
   [
     'doubleTap',
-    'Double-tap to seek',
-    'Two taps on the right half of the artwork jump forward ten seconds; the left half goes back. Consecutive taps stack, so a quick triple-tap goes twenty and a fourth thirty.',
+    'Double-tap to jump',
+    'Double-tap the right half to go forward 10 seconds, the left half to go back. Keep tapping and it adds up: 20, then 30.',
   ],
   [
     'dragDown',
-    'Drag down to minimise',
-    'From the top strip or from the artwork. Let go past about a third of the way and it finishes the slide by itself, carrying the speed you gave it; let go early and it springs back.',
+    'Drag down to close',
+    'Drag down from the top strip or the artwork. Past about a third of the way, it closes by itself. Let go sooner and it stays open.',
   ],
   [
     'pullUp',
     'Pull up the queue',
-    'From anywhere along the bottom row of the player, or by tapping the queue glyph on its right. The sheet opens as the drag is recognised rather than when you let go, so it is already on its way up under your finger. Push back down to change your mind.',
+    'Pull up anywhere on the bottom row of the player, or tap the queue button on the right. Push back down to cancel.',
   ],
   [
     'edge',
     'Swipe in from the edge',
-    'On Home, drag in from the left edge for the drawer. The panel tracks your finger from the first pixel; the release decides whether it opens or returns.',
+    'On Home, drag in from the left edge to open the menu. It follows your finger.',
   ],
   [
     'reorder',
-    'Hold a handle to reorder',
-    'In the queue, press and hold the handle on any upcoming song and drag it where you want it. The playing track stays pinned and cannot be moved — moving it would stop the music.',
+    'Hold to reorder',
+    'In the queue, hold the handle on any song that is coming up and drag it. The song that is playing cannot be moved.',
   ],
 ];
 

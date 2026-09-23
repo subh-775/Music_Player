@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -7,14 +7,14 @@
     <title>Relaxify — Documentation</title>
     <meta
       name="description"
-      content="Relaxify for Android: search, stream and download from JioSaavn, SoundCloud and YouTube as one catalogue. Every gesture, setting and feature, documented."
+      content="Relaxify is an Android music player. One search covers JioSaavn, SoundCloud and YouTube. How to install it, use it and fix it."
     />
-    <meta name="theme-color" content="#020903" />
+    <meta name="theme-color" content="#000000" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Relaxify — Documentation" />
     <meta
       property="og:description"
-      content="One search across JioSaavn, SoundCloud and YouTube, merged into a single list. Every gesture, setting and feature, documented."
+      content="One search covers JioSaavn, SoundCloud and YouTube, in one list. How to install Relaxify, use it and fix it."
     />
     <!-- Absolute, deliberately: Vite rewrites href/src against the base path but
          never a meta content attribute, and a crawler cannot resolve a relative
@@ -22,36 +22,6 @@
     <meta property="og:image" content="https://subh-775.github.io/Music_Player/logo.png" />
     <meta property="og:url" content="https://subh-775.github.io/Music_Player/" />
 
-    <script>
-      /*
-       * Before first paint, not in React.
-       *
-       * The theme has to be on <html> before the browser paints anything, or a
-       * reader who chose light gets a black screen for one frame on every
-       * navigation - the flash that makes a site feel cheap. This is the one
-       * thing that cannot wait for a framework to mount.
-       *
-       * It ALWAYS stamps an attribute now, falling back to the system
-       * preference and then to dark. The stylesheet used to carry a second
-       * copy of the entire light palette inside a prefers-color-scheme query
-       * purely to serve the un-stamped case; deciding it here instead means
-       * there is one palette to maintain rather than two.
-       */
-      (function () {
-        var theme = 'dark';
-        try {
-          var saved = localStorage.getItem('fm-theme');
-          if (saved === 'light' || saved === 'dark') {
-            theme = saved;
-          } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-            theme = 'light';
-          }
-        } catch (e) {
-          /* private window, or site data blocked - the dark default stands */
-        }
-        document.documentElement.dataset.theme = theme;
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

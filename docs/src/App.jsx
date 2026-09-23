@@ -18,15 +18,7 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import {FLAT, NAV, SIDEBAR, SITE} from './nav.js';
 import {mdxComponents} from './mdx.jsx';
 import {SearchPalette} from './search.jsx';
-import {
-  Close,
-  Github,
-  Menu,
-  Moon,
-  Pencil,
-  Search as SearchIcon,
-  Sun,
-} from './icons.jsx';
+import {Close, Github, Menu, Pencil, Search as SearchIcon} from './icons.jsx';
 import './styles.css';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -127,48 +119,6 @@ function useRouter() {
   return [path, navigate];
 }
 
-/* ── Theme ───────────────────────────────────────────────────────────────── */
-
-/** How long the palette takes to cross over. Matches styles.css. */
-const THEME_FADE = 320;
-let themingTimer = 0;
-
-function useTheme() {
-  // The inline script in index.html always stamps data-theme before first
-  // paint, from storage or from the system preference, so this reads one
-  // attribute rather than re-deriving the same answer a second way.
-  const [theme, setTheme] = useState(
-    () => document.documentElement.dataset.theme || 'dark',
-  );
-
-  const toggle = useCallback(() => {
-    setTheme(prev => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      const root = document.documentElement;
-      // Only WHILE swapping. A permanent transition on every colour would make
-      // every hover and every focus ring drag behind the pointer; this arms
-      // one for the length of the change and then takes it away again, so the
-      // page fades between the two palettes and nothing else is affected.
-      root.classList.add('theming');
-      window.clearTimeout(themingTimer);
-      themingTimer = window.setTimeout(
-        () => root.classList.remove('theming'),
-        THEME_FADE + 40,
-      );
-      root.dataset.theme = next;
-      try {
-        localStorage.setItem('fm-theme', next);
-      } catch {
-        // Private windows and blocked site data both throw here. The toggle
-        // still works for this visit; it just will not be remembered.
-      }
-      return next;
-    });
-  }, []);
-
-  return [theme === 'dark', toggle];
-}
-
 /* ── On this page ────────────────────────────────────────────────────────── */
 
 function Toc({path}) {
@@ -261,17 +211,17 @@ function Pager({path}) {
   return (
     <nav className="pager" aria-label="Nearby pages">
       {prev ? (
-        <a className="prev" href={prev.link} aria-label={`Previous: ${prev.text}`}>
-          <span className="dir" aria-hidden="true">←</span>
+        <a className="prev" href={prev.link}>
+          <span className="dir">Previous</span>
           <span className="name">{prev.text}</span>
         </a>
       ) : (
         <span />
       )}
       {next && (
-        <a className="next" href={next.link} aria-label={`Next: ${next.text}`}>
+        <a className="next" href={next.link}>
+          <span className="dir">Next</span>
           <span className="name">{next.text}</span>
-          <span className="dir" aria-hidden="true">→</span>
         </a>
       )}
     </nav>
@@ -282,7 +232,6 @@ function Pager({path}) {
 
 export default function App() {
   const [path, navigate] = useRouter();
-  const [dark, toggleTheme] = useTheme();
   const [drawer, setDrawer] = useState(false);
   const [search, setSearch] = useState(false);
 
@@ -375,28 +324,7 @@ export default function App() {
                 {n.text}
               </a>
             ))}
-            <a href={SITE.releases} target="_blank" rel="noreferrer">
-              Download
-              <span className="ext" aria-hidden="true">
-                ↗
-              </span>
-            </a>
           </div>
-
-          <span className="hdr-sep" />
-
-          <button
-            type="button"
-            className={`theme-switch${dark ? ' dark' : ''}`}
-            role="switch"
-            aria-checked={dark}
-            aria-label="Dark theme"
-            title={dark ? 'Switch to the light theme' : 'Switch to the dark theme'}
-            onClick={toggleTheme}>
-            <span className="theme-knob">
-              {dark ? <Moon size={12} /> : <Sun size={12} />}
-            </span>
-          </button>
 
           <a
             className="icon-btn"
@@ -405,6 +333,14 @@ export default function App() {
             rel="noreferrer"
             aria-label="Source on GitHub">
             <Github />
+          </a>
+
+          <a
+            className="btn btn-primary hdr-dl"
+            href={SITE.releases}
+            target="_blank"
+            rel="noreferrer">
+            Download
           </a>
         </div>
       </header>
@@ -452,11 +388,11 @@ export default function App() {
                   <>
                     <h1>Page not found</h1>
                     <p>
-                      There is no page at <code>{path}</code>. It may have been
-                      renamed — the sidebar has everything the site knows about.
+                      There is no page at <code>{path}</code>. Pick a page from
+                      the list on the left, or search.
                     </p>
                     <p>
-                      <a href="/guide/introduction">Start at the introduction →</a>
+                      <a href="/guide/introduction">Go to the introduction</a>
                     </p>
                   </>
                 )}
@@ -470,7 +406,7 @@ export default function App() {
                     target="_blank"
                     rel="noreferrer">
                     <Pencil />
-                    Suggest an edit to this page
+                    Edit this page on GitHub
                   </a>
                   <Pager path={path} />
                 </>

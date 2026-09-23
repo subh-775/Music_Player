@@ -251,7 +251,7 @@ export function SearchPalette({open, onClose, onNavigate}) {
                 go(hit);
               }}>
               <span className="pal-crumb">
-                {hit.group ? `${hit.group} · ` : ''}
+                {hit.group ? `${hit.group} › ` : ''}
                 {hit.title}
               </span>
               <span className="pal-name">{hit.heading || hit.title}</span>

@@ -1,61 +1,54 @@
 # Downloads & Offline
 
-Downloading writes a **real audio file** into a folder you choose, with artwork and tags embedded. It is not a cache entry and it is not locked to the app.
+A download saves a **real audio file** to a folder you choose, with the cover and song details inside it. It is not locked to the app.
 
 ## Downloading
 
-Tap **⭳** in the player, or long-press any row and choose Download.
+Tap **⭳** in the player, or long-press a row and choose **Download**.
 
 - The first time, Android asks for storage permission.
-- Progress shows on the Downloads screen while it runs.
-- The glyph becomes a **green tick** the moment the file lands — no need to reopen the screen.
-- Downloaded songs carry an **Offline** badge wherever they appear.
+- Progress shows on the Downloads screen.
+- The button turns into a **green tick** when the file is saved.
+- Downloaded songs show an **Offline** label everywhere.
 
-## Where the files go
+## Where files go
 
-**Settings → Downloads** shows the folder and lets you change it. **Open in Files** takes you there in your file manager.
+**Settings → Download location** shows the folder and lets you change it. **Open in Files** opens it in your file manager. **Reset to default location** goes back to the standard folder.
 
-The files are ordinary tagged audio. They play in any other music app on the phone, they copy to a computer, and **they survive uninstalling Relaxify** — they live in your own music folder, not in the app's private storage.
+The files are normal audio files. Other music apps can play them, you can copy them to a computer, and **they stay if you uninstall Relaxify**.
 
-<Danger title="Uninstalling still costs you something">
-  Your downloads survive an uninstall. Your **playlists, likes and history do not** — Android wipes app data on uninstall. Always update by installing the new build over the top; the in-app updater does this correctly.
+<Danger title="What uninstalling deletes">
+  Your downloads stay. Your **playlists, likes and history are deleted**, because Android removes app data on uninstall. To update, install the new version over the old one. The in-app updater does this for you.
 </Danger>
 
-## Streaming does not save anything
+## Streaming saves nothing
 
-Playing a song through leaves nothing behind. That is a decision, not an oversight.
+Playing a song does not keep a copy. If you want a song on your phone, download it. That way you always know what is saved.
 
-An implicit listen-cache grows without bound, needs an eviction policy nobody can see, and is invisible to the person relying on it — so "I played it once" quietly becomes "why is it there only sometimes", usually on a train with no signal.
+## How the app spots a download
 
-**Download is the feature that keeps a song.** It is explicit, it tells you when it is done, and what it produces is a file you can point at.
+By **title and artist**, read from the file's tags.
 
-## How a download is recognised later
-
-By **title and artist**, normalised — not by a catalogue identifier.
-
-This is worth knowing because it explains the edge cases. A file on disk carries no ISRC, so the app cannot match on one; it matches on what the tags actually contain. Which means:
-
-- Renaming the file is fine. Editing its **title or artist tag** is not — the match is lost and the song reads as not downloaded.
-- Two genuinely different recordings with the same title and artist collapse into one as far as the tick is concerned.
+- Renaming the file is fine.
+- Changing its **title or artist tag** breaks the match, and the song shows as not downloaded.
+- Two different recordings with the same title and artist count as one.
 
 <Note>
-  If a download stops showing as downloaded, the tags changed. Re-downloading fixes it, and the folder is re-scanned every time you open the Library tab.
+  If a song stops showing as downloaded, its tags changed. Download it again. The folder is read again each time you open the Library tab.
 </Note>
 
 ## Deleting
 
-From the Downloads screen. Deleting removes **the file**, not just the entry — that is the honest behaviour for something that occupies real space.
+Delete from the Downloads screen. This removes **the file**, not just the list entry.
 
-Deleting a download does not unlike the song or remove it from playlists. Those are separate things, deliberately.
+Deleting a download does not unlike the song or remove it from playlists.
 
-## Playing offline
+## With no connection
 
-With no connection:
+- **Downloads play normally.**
+- Search shows nothing, because it needs the three sources.
+- Playlists still open. Downloaded songs in them play, and the rest are skipped with a note.
 
-- **Downloads play normally.** Everything in that collection is available.
-- Search returns nothing — it needs three public catalogues.
-- Your playlists still open; songs in them that are downloaded play, and the rest are skipped with a note.
+## Covers
 
-## Artwork
-
-Covers are embedded in the file at download time. The library also remembers the cover it saw, so a file whose tags carry no picture still shows the right artwork in the app — and a file that genuinely has none does not cost a request that was always going to fail.
+The cover is saved inside the file. The app also remembers the cover it saw, so a file without one still shows the right picture.

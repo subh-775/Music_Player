@@ -1,98 +1,94 @@
 # Settings
 
-Reached from the drawer — swipe in from the left edge of Home, or tap the hamburger.
+Open the menu (swipe in from the left edge of Home, or tap the menu button), then tap **Settings**.
 
-Anything with more than a switch's worth of choice opens as **its own screen** rather than expanding in place, so the list stays scannable.
-
-## What is in the drawer
-
-Four entries, and this is the list — if you are looking for something that is not here, it is somewhere in the app itself rather than in the drawer.
+## The menu
 
 | Entry | What it opens |
 | --- | --- |
 | **Equalizer** | Eight bands and eleven presets. See [Equalizer](/guide/equalizer) |
-| **Your activity** | What you have been listening to — top artists, top songs, this week |
-| **Read docs** | This documentation, in your browser |
+| **Your activity** | What you have been listening to: top artists, top songs, this week |
+| **Read docs** | This site, in your browser |
 | **Settings** | Everything below |
-
-The **sleep timer** is not in the drawer. It is the timer glyph at the bottom left of the full player — a thing you reach for with the phone already face-down, which is two gestures too far from the music.
 
 ## Playback
 
+| Row | What it does |
+| --- | --- |
+| **Crossfade** | Opens the Playback screen. Shows the current crossfade, or Off |
+| **Equalizer** | Opens the equalizer. Shows the preset, or Off |
+
+### The Playback screen
+
 | Setting | Default | What it does |
 | --- | --- | --- |
-| **Autoplay** | On | Keeps playing similar songs when the queue runs out. See [The Queue](/guide/queue) |
-| **Normalize volume** | Off | Plays every track at roughly the same loudness |
-| **Crossfade** | Off | Overlap between songs, 0–12 seconds |
-| **Equalizer** | Off | Eight-band shaping. Opens [its own screen](/guide/equalizer) |
-| **Streaming quality** | Auto | Auto, 96, 128, 256 or 320 kbps |
+| **Autoplay** | On | Adds similar songs when the queue runs low. See [The Queue](/guide/queue) |
+| **Normalize volume** | Off | Plays every song at about the same loudness |
+| **Crossfade** | Off | Fades one song into the next, 0 to 12 seconds |
+| **Sleep timer** | Off | Stops the music later. See below |
+
+Turning Autoplay off also removes the suggested songs already waiting in the queue.
 
 ### Crossfade
 
-A horizontal bar, dragged or tapped, snapping to whole seconds.
+Drag or tap the bar. It moves in whole seconds. 0 is off, which suits albums where songs run straight into each other. See [Sound & Quality](/reference/sound#crossfade).
 
-Nought is off, which is the right answer for albums sequenced to run together. Twelve is the ceiling; past that you are hearing two songs rather than a transition.
+### Sleep timer
 
-### Streaming quality
+Stop after **15, 30, 45 or 60 minutes**, or at the **end of this track**. You can also set it from the timer button at the bottom left of the full player. It turns green while a timer is set.
 
-A **ceiling, not a promise**. A source that has no 320 kbps stream still gives you its best available, and the quality badge under the song's name in the full player tells you what you actually got — the figure the source reports for the stream it handed over, not this setting. When a source reports nothing, the badge shows nothing.
+The music **fades out** over a couple of seconds instead of stopping suddenly.
 
-Tapping the row opens the choices in a sheet from the bottom.
+**End of track** stops exactly when the song ends, even with the screen off. Pressing next does **not** stop the music. The timer waits for a song to end by itself.
 
-**Auto** adapts to the source. Pick a number if you are counting data.
+## Audio quality
 
-## Sleep timer
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Streaming quality** | Auto | Auto, Low (96), Normal (128), High (256) or Very High (320 kbps) |
 
-The **timer glyph at the bottom left of the full player**. 15, 30, 45 or 60 minutes, or the end of this track.
+Tap the row to choose from a sheet. The setting is an **upper limit**. If a source does not have that bitrate, you get its best. The label under the song name in the full player shows what you actually got. If the source does not say, there is no label.
 
-The glyph turns green while one is running. Music **fades out** over a couple of seconds rather than stopping dead, which is a better way to be left than a cut.
+Downloads always use the best quality a source has, whatever this is set to.
 
-"End of this track" stops on the boundary, not a second or two into the next song. It is scheduled precisely and also checked against the playback engine's own events, so it still works with the screen off — which is the only time anybody uses it. Pressing next with one armed does **not** stop the music: the timer means "this song, then silence", and it waits for the song you chose to actually end.
+## Content sources
+
+| Source | Switch |
+| --- | --- |
+| **JioSaavn** | Always on (locked) |
+| **SoundCloud** | Always on (locked) |
+| **YouTube** | On or off |
+
+JioSaavn and SoundCloud cannot be turned off. They are searched together, and each is the backup when the other cannot play a song. YouTube is searched with them when it is on.
 
 ## Downloads
 
 | Row | What it does |
 | --- | --- |
-| **Download folder** | Where files are written. The path is shown, middle-ellipsised |
+| **Download location** | Where files are saved. Tap to change it |
 | **Open in Files** | Opens that folder in your file manager |
-| **Storage used** | How much the downloads take |
-| **Clear cache** | Frees temporary files, saved lyrics and search history |
+| **Reset to default location** | Goes back to the standard folder |
+| **Clear cached data** | Removes temporary files, saved lyrics and search history. Shows how much it frees |
 
-**Clear cache does not touch downloads, playlists or liked songs.** It only drops things the app can fetch again.
+**Clear cached data does not touch downloads, playlists or liked songs.**
 
 ## Appearance
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| **Show source label** | On | The JioSaavn / SoundCloud / YouTube badge on rows |
-| **Show quality label** | On | The kbps badge on rows |
+| **Show source label** | On | The JioSaavn, SoundCloud or YouTube label |
+| **Show quality label** | On | The kbps label |
 
-Both are pure information density. Turn them off for a quieter list.
+## Software update
 
-## Updates
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| **Automatic updates** | On | Checks GitHub for a newer release quietly in the background |
-| **Check for updates** | — | Runs a check now, regardless of the switch above |
-| **App version** | — | What is installed |
+| Row | What it does |
+| --- | --- |
+| **App version** | The version installed |
+| **Check for updates** | Checks now. If there is an update, the same row installs it |
+| **Automatic updates** | On by default. Checks GitHub in the background |
 
 See **[Updates](/reference/updates)**.
 
-## Sources
-
-Three rows — JioSaavn, SoundCloud, YouTube. **JioSaavn and SoundCloud show a switch that is on and locked**; YouTube's switch is live.
-
-The two locked ones cannot be turned off. They are searched together and the fallback between them is what makes a dead stream recoverable; turning one off would only make results worse in ways that are hard to attribute later.
-
-## Diagnostics
-
-What the audio engine can see: whether the playback service is bound, which audio session is live, whether the effects attached, the device's real band count, and the last error it hit.
-
-<Tip>
-  This page answers most "it is not working" questions without a cable. Quoting it in an issue is the single most useful thing you can do.
-</Tip>
-
 ## Reset all settings
 
-Puts every switch back to its default. **Your library — likes, playlists, downloads — is not touched.**
+Puts every setting back to its default. **Your likes, playlists and downloads are kept.**

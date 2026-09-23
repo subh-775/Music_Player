@@ -1,72 +1,62 @@
 # Equalizer
 
-Eight bands from 60 Hz to 16 kHz, −12 to +12 dB, eleven presets and a custom curve. In the drawer, or **Settings → Playback → Equalizer**.
+Eight bands from 60 Hz to 16 kHz, from −12 to +12 dB, with eleven presets and a custom curve. Open it from the menu, or from **Settings → Equalizer**.
 
-That is the real control, with the app's real presets and real range. Drag a band and watch what happens to the preset row.
+## Dragging a band switches to Custom
 
-## Dragging a band puts you in Custom
+Custom **starts from the curve you had**. Pick Rock, move the 60 Hz band, and you get Rock with your change, not a flat curve.
 
-Always — and Custom is **seeded from whatever curve is on screen**. Pick Rock, nudge the 60 Hz band, and you get Rock-plus-your-change rather than a flat slate.
+## The bands come from your phone
 
-A preset is a starting point, not a cage. That is the whole reason the behaviour exists.
+Android does not let apps choose band frequencies.
 
-## The bands are your device's, not ours
+Most phones have **five** bands, at frequencies the maker chose. Some have ten. The gain range differs too, for example ±12 dB on one phone and ±15 dB on another.
 
-Android does not let an app choose its own band frequencies.
-
-Most phones expose **five** bands at frequencies of the manufacturer's choosing. Some expose ten. The valid gain range differs too — ±12 dB on one handset, ±15 on another.
-
-So the eight-band curve you draw is **interpolated onto whatever your device actually has**, at runtime, and clamped to its real range. The interpolation is done in **log frequency**, not linear: 60 → 150 Hz and 12 → 16 kHz are comparable musical distances but wildly different in Hz, and a linear blend would crowd every device band into the top octave.
-
-Nothing here is tuned for one phone.
+So the eight bands you set are **mapped onto the bands your phone has**, and kept inside its range. The mapping follows how we hear pitch, not raw Hz, so your phone's bands spread evenly across the curve.
 
 <Note>
-  The hint under the toggle tells you what the app found: “Shaping 5 hardware bands from these eight.” If it says something else, read on.
+  The line under the switch says what the app found, for example "Shaping 5 hardware bands from these eight."
 </Note>
 
-## Why ±12 dB and not more
+## Why ±12 dB
 
-Because a bass boost that stays punchy is worth more than one that turns to mud.
+More than about +12 dB does not make the bass louder. It makes the sound distort.
 
-Past about +12 dB you are not making the low end louder relative to the mix; you are clipping the mix. The ceiling is the reason the presets sound like presets rather than like damage.
-
-## The presets
+## Presets
 
 | Preset | Shape |
 | --- | --- |
-| **Flat** | No shaping. The reference |
-| **Rock** | Lifted lows and highs, scooped low-mids |
-| **Metal** | Rock, harder — more scoop, more presence |
-| **Pop** | Forward mids, gentle everything else |
-| **Hip-Hop** | Heavy sub and bass, relaxed mids |
-| **Electronic** | Sub and treble lifted, mids pulled back |
-| **Classical** | Wide and gentle, nothing aggressive |
-| **Jazz** | Warm lows, a small presence dip |
-| **Vocal** | Mids forward, everything else out of the way |
-| **Bass Boost** | Low end only, tapering to flat by 1 kHz |
-| **Treble Boost** | The mirror of it |
-| **Custom** | Whatever you dragged |
+| **Flat** | No change |
+| **Rock** | More lows and highs, fewer low-mids |
+| **Metal** | Like Rock, but stronger |
+| **Pop** | Mids forward, the rest gentle |
+| **Hip-Hop** | Heavy bass, relaxed mids |
+| **Electronic** | More sub-bass and treble, fewer mids |
+| **Classical** | Wide and gentle |
+| **Jazz** | Warm lows, a small dip in the upper mids |
+| **Vocal** | Voices forward, the rest pulled back |
+| **Bass Boost** | Low end only, flat from 1 kHz |
+| **Treble Boost** | High end only |
+| **Custom** | Your own curve |
 
-Tapping a preset **switches the equalizer on**. You are standing in the equalizer screen tapping a named preset — that is the intent, and the toggle is right there to undo it.
+Tapping a preset **turns the equalizer on**.
 
-## “Play something first”
+## "Play something first"
 
-Audio effects attach to a **live audio session**. Until something is playing there is no session to attach to, so the equalizer has nothing to act on and says so.
+The equalizer attaches to the sound that is playing. With nothing playing, it has nothing to work on and says so.
 
 Start a song, then open the equalizer.
 
-<Warn title="If it says the device refused the effects">
-  Some handsets decline audio effects on an offloaded or fast-path audio route. That is the phone, not the app, and there is no way around it from inside an app.
-
-  The app reports the device's own reason rather than showing you the generic message, so the two cases are distinguishable — which they were not in earlier builds, and that is why a refusing device used to look like a bug.
+<Warn title="If it says your phone refused the effects">
+  Some phones block audio effects on certain audio paths. The app cannot get around this. It shows your phone's own reason, so you can tell this apart from "play something first".
 </Warn>
 
 ## Normalize volume
 
-Not part of the equalizer, but next to it: **Settings → Playback → Normalize volume** evens out loudness between tracks, so a quiet 1970s master and a loudness-war remaster sit at roughly the same level.
+On the Playback screen (**Settings → Crossfade**), **Normalize volume** plays every song at about the same loudness, so a quiet old recording and a loud new one sit at a similar level.
 
-It is a gain applied to the live session, so it takes effect immediately and costs nothing at all when switched off.
+It works on the song that is playing right away, and does nothing at all when it is off.
 
 <Note>
-  Opening this screen while music is playing can cost one momentary step in level. Reading your device's real band count and gain range requires attaching a live effect, and inserting an effect makes Android re-route the audio. It is the one place that has to; everywhere else, effects are only created when they will actually be used.
+  Opening the equalizer while music plays can cause one short jump in volume. The app has to attach an effect to read your phone's bands, and Android reroutes the audio when it does.
 </Note>
