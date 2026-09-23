@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import {runOnJS} from 'react-native-reanimated';
-import {Menu} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {
   getHome,
@@ -296,8 +295,18 @@ export const HomeScreen = React.memo(function HomeScreen({
           belongs on the left — a right-hand button that opens a left-hand panel
           reads backwards, and it's the far corner for a right thumb. */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onOpenMenu} hitSlop={14} style={styles.gear}>
-          <Menu size={25} color={C.text} strokeWidth={2.4} />
+        {/* The mark IS the menu button: it opens the drawer, which carries
+            the same mark at its top, so the tap lands where it points. */}
+        <TouchableOpacity
+          onPress={onOpenMenu}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Open menu">
+          <Image
+            source={MARK}
+            style={styles.mark}
+            accessibilityIgnoresInvertColors
+          />
           {/* A waiting update has to stay findable after the popup is
               dismissed — this is the only thing that says so. */}
           {updateWaiting && (
@@ -311,7 +320,6 @@ export const HomeScreen = React.memo(function HomeScreen({
         <View style={styles.headerText}>
           <Greeting />
         </View>
-        <Image source={MARK} style={styles.mark} accessibilityIgnoresInvertColors />
       </View>
 
       {/* Quick access. The two things everyone opens most (Liked, Downloaded)
@@ -534,7 +542,6 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
     gap: 12,
   },
-  gear: {padding: 2},
   headerText: {flex: 1, minWidth: 0},
   mark: {width: 38, height: 38, borderRadius: 19},
   dot: {
