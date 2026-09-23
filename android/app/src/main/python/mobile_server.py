@@ -507,6 +507,34 @@ def _resolve_stream_url_cached(url: str, source: str, bitrate: int = 320) -> Opt
     return resolved
 
 
+# What each resolved stream ACTUALLY carries, in kbps, keyed like _STREAM_CACHE.
+# Filled by _resolve_stream_url from the source's own answer — NewPipe's
+# averageBitrate, the rung in a JioSaavn file name, SoundCloud's format abr —
+# because the quality badge used to fall back to the SETTING, and the setting
+# is a ceiling: on Auto every source read "320 kbps" whatever was playing.
+_SERVED_KBPS: "OrderedDict[tuple, int]" = OrderedDict()
+
+
+def _note_kbps(url: str, source: str, bitrate: int, kbps) -> None:
+    try:
+        kbps = int(round(float(kbps or 0)))
+    except (TypeError, ValueError):
+        kbps = 0
+    if kbps <= 0:
+        return
+    with _stream_cache_lock:
+        _SERVED_KBPS[(source, url, bitrate)] = kbps
+        _SERVED_KBPS.move_to_end((source, url, bitrate))
+        while len(_SERVED_KBPS) > _STREAM_CACHE_MAX:
+            _SERVED_KBPS.popitem(last=False)
+
+
+def _jiosaavn_rung(stream_url: str) -> int:
+    """JioSaavn names the file by its bitrate: …_320.mp4, …_160.mp4, …_96.mp4."""
+    m = re.search(r"_(\d{2,3})\.mp4(?:$|\?)", stream_url or "")
+    return int(m.group(1)) if m else 0
+
+
 def _evict_stream_url(url: str, source: str, bitrate: int) -> None:
     with _stream_cache_lock:
         _STREAM_CACHE.pop((source, url, bitrate), None)
@@ -551,13 +579,23 @@ def _resolve_stream_url(url: str, source: str, bitrate: int = 320) -> Optional[s
         import newpipe_yt
 
         info = newpipe_yt.stream_url(url)
-        return info.get("url") if info else None
+        if not info:
+            return None
+        _note_kbps(url, source, bitrate, info.get("bitrate_kbps"))
+        return info.get("url")
     if source == "jiosaavn":
         # JioSaavn serves discrete bitrates only: 320 / 160 / 96.
         js_bitrate = 320 if bitrate >= 320 else (160 if bitrate >= 160 else 96)
-        return _source_client("jiosaavn").get_streaming_url(url, js_bitrate)
+        stream = _source_client("jiosaavn").get_streaming_url(url, js_bitrate)
+        if stream:
+            _note_kbps(url, source, bitrate, _jiosaavn_rung(stream) or js_bitrate)
+        return stream
     if source == "soundcloud":
-        return _source_client("soundcloud").get_streaming_url(url, bitrate)
+        fmt = _source_client("soundcloud").get_streaming_format(url, bitrate)
+        if not fmt:
+            return None
+        _note_kbps(url, source, bitrate, fmt.get("abr") or fmt.get("tbr"))
+        return fmt.get("url")
     return None
 
 
@@ -811,25 +849,28 @@ def stream_info():
     """Live quality readout for the player.
 
     The desktop build shelled out to ffprobe to read the true bitrate off the
-    wire. Android has no ffmpeg, so we report what the source advertises. For
-    JioSaavn that IS the real value (we request a specific bitrate and it serves
-    that exact file); SoundCloud transcodes are ~128k MP3.
+    wire. Android has no ffmpeg, so we report what the SOURCE says the stream it
+    handed us carries (see _SERVED_KBPS) — and nothing when it says nothing,
+    rather than a number that only looks like a measurement.
+
+    For JioSaavn the rung the proxy actually pinned wins over the one asked
+    for: a track with no 320 file is playing its 160 one, and the badge should
+    say so.
     """
     source = _arg("source")
+    url = _arg("url")
     bitrate = _int_arg("bitrate", 320)
+    with _ladder_lock:
+        bitrate = _LADDER_PIN.get((source, url)) or bitrate
     try:
         # Cached: proxy_stream is about to resolve the very same URL a beat later.
-        stream_url = _resolve_stream_url_cached(_arg("url"), source, bitrate)
+        stream_url = _resolve_stream_url_cached(url, source, bitrate)
         if not stream_url:
             return jsonify({"bitrate_kbps": None, "codec": None,
                             "error": "Could not resolve stream"})
-        if source == "jiosaavn":
-            served = 320 if bitrate >= 320 else (160 if bitrate >= 160 else 96)
-            return jsonify({"bitrate_kbps": served, "codec": "aac"})
-        if source == "soundcloud":
-            codec = "mp3" if ".mp3" in stream_url or "mp3" in stream_url else "opus"
-            return jsonify({"bitrate_kbps": 128, "codec": codec})
-        return jsonify({"bitrate_kbps": None, "codec": None})
+        with _stream_cache_lock:
+            kbps = _SERVED_KBPS.get((source, url, bitrate))
+        return jsonify({"bitrate_kbps": kbps})
     except Exception as e:
         return jsonify({"bitrate_kbps": None, "codec": None, "error": str(e)})
 
@@ -1090,8 +1131,9 @@ def delete_download_file():
     directory = Path(get_default_download_dir()).resolve()
     try:
         target = Path(raw).resolve()
-        # target must be within the download directory (Python 3.9+: is_relative_to)
-        inside = str(target).startswith(str(directory))
+        # A PARENT check, not a string prefix: "…/Relaxify-old/x.m4a" starts
+        # with "…/Relaxify" and used to pass. Same rule /api/local applies.
+        inside = directory in target.parents
         if not inside or not target.is_file():
             return jsonify({"ok": False, "error": "not a managed download"}), 400
         target.unlink()

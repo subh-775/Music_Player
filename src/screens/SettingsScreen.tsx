@@ -47,6 +47,7 @@ import {resetSettings, useStore, writeSetting} from '../store';
 import {createStore, useStoreValue} from '../storage';
 import {clearSearchHistory} from '../searchHistory';
 import {Toggle} from '../components/Toggle';
+import {Sheet} from '../components/Sheet';
 import {EqualizerScreen} from './EqualizerScreen';
 import {ConfirmModal} from '../components/ConfirmModal';
 import {applyAudioEffects} from '../audioEffects';
@@ -680,7 +681,7 @@ export function SettingsScreen({
   if (panel === 'playback') {
     return (
       <View style={styles.wrap}>
-        <View style={[styles.bar, styles.barElevated]}>
+        <View style={styles.bar}>
           <TouchableOpacity
             onPress={() => setPanel(null)}
             hitSlop={12}
@@ -788,7 +789,7 @@ export function SettingsScreen({
 
   return (
     <View style={styles.wrap}>
-      <View style={[styles.bar, styles.barElevated]}>
+      <View style={styles.bar}>
         <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.back}>
           <ChevronLeft size={28} color={C.text} />
         </TouchableOpacity>
@@ -832,13 +833,17 @@ export function SettingsScreen({
           <Row
             label="Streaming quality"
             value={qualityLabel}
-            onPress={() => setQualityOpen(v => !v)}
+            onPress={() => setQualityOpen(true)}
           />
-          {qualityOpen &&
-            QUALITIES.map(q => (
+          {/* A sheet, not an inline expander: five rows appearing in the
+              middle of the list shoved everything below them down with no
+              motion, on a grey slab that matched nothing else here. */}
+          <Sheet open={qualityOpen} onClose={() => setQualityOpen(false)}>
+            <Text style={styles.sheetTitle}>Streaming quality</Text>
+            {QUALITIES.map(q => (
               <TouchableOpacity
                 key={q.value}
-                style={styles.choice}
+                style={styles.row}
                 activeOpacity={0.7}
                 onPress={() => {
                   writeSetting('audioQuality', q.value);
@@ -859,6 +864,7 @@ export function SettingsScreen({
                 )}
               </TouchableOpacity>
             ))}
+          </Sheet>
         </Section>
 
         {/*
@@ -882,10 +888,9 @@ export function SettingsScreen({
                 Full-catalogue streaming, up to 320 kbps
               </Text>
             </View>
-            {/* A word, not a frozen switch. A disabled Toggle renders at 40%
-                opacity, so two of these next to one live switch read as two
-                FAILED toggles rather than as two that need no setting. */}
-            <Text style={styles.statusValue}>Always on</Text>
+            {/* On and locked: the core catalogues cannot be switched off,
+                and a switch in the slot reads as a setting at a glance. */}
+            <Toggle value disabled onChange={() => {}} />
           </View>
 
           <View style={styles.row}>
@@ -895,7 +900,7 @@ export function SettingsScreen({
                 Independent uploads, remixes and DJ sets
               </Text>
             </View>
-            <Text style={styles.statusValue}>Always on</Text>
+            <Toggle value disabled onChange={() => {}} />
           </View>
 
           <View style={styles.row}>
@@ -1089,20 +1094,6 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   back: {padding: 4},
-  // A softly elevated header — a lift off the black body that reads like the
-  // subtle grey gradient on Spotify's own sub-screen bars, without pulling in a
-  // gradient dependency.
-  barElevated: {
-    backgroundColor: C.surface,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 5,
-  },
   barTitle: {...T.screenTitle, color: C.text, fontSize: 22},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   // Enough tail room that the last row clears the mini player + bottom nav —
@@ -1166,13 +1157,13 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     gap: 14,
   },
-  choice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 14,
-    backgroundColor: C.surfaceHi,
+  sheetTitle: {
+    ...T.body,
+    color: C.text,
+    fontWeight: '700',
+    paddingHorizontal: S.gutter,
+    paddingTop: 6,
+    paddingBottom: 4,
   },
   choiceOn: {color: C.accent},
   rowText: {flex: 1, minWidth: 0},
@@ -1186,9 +1177,6 @@ const styles = StyleSheet.create({
     maxWidth: 190,
     textAlign: 'right',
   },
-  /** For a setting that cannot be changed: a word in the slot where its
-   *  control would have been. */
-  statusValue: {...T.sub, color: C.faint, fontWeight: '600'},
   reset: {
     marginTop: 26,
     paddingHorizontal: S.gutter,

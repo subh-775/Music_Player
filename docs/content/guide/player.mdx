@@ -1,82 +1,75 @@
 # The Player
 
-This is where the app stops feeling like a search box. Tap the mini player to open it; drag it down to put it away.
+Tap the mini player to open the full player. Drag it down to close it.
 
-## Reading the screen
+## What is on screen
 
 | Where | What it is |
 | --- | --- |
-| **Top strip** | The album you are inside of, or “Now playing”. The chevron minimises — so does dragging anywhere on this strip |
-| **Artwork** | Swipe it sideways to change song, double-tap either edge to seek |
-| **Title** | The song, at full width |
-| **Artist** | Its own line. Tapping it opens that artist; where several are credited, it asks which one first |
-| **Badges** | Which source is streaming and at what bitrate. Both can be switched off under Settings → Appearance |
-| **⭳ +** | Download on the left, save on the right. The download glyph becomes a green tick once the file is on the phone. **+** saves to Liked Songs on the first press and fills in; pressing it again opens the full list of playlists, and holding it goes straight there |
-| **Output** | Under the buttons, in green, when something other than the phone speaker is connected |
-| **Capsule** | Song or lyrics, in the middle of the timestamp row. Tapping it anywhere flips to the other one. It goes dim when the track genuinely has no lyrics |
-| **Bottom row** | A **timer** on the left and the **queue** on the right. The timer turns green while a sleep timer is running |
+| **Top strip** | The album you are playing from, or "Now playing". The arrow closes the player, and so does dragging this strip down |
+| **Cover** | Swipe sideways to change song. Double-tap either side to jump |
+| **Title** | The song name |
+| **Artist** | Tap to open the artist. If there are several, you pick one. Several names scroll slowly across the line |
+| **Labels** | The source and the bitrate. Turn them off in **Settings → Appearance** |
+| **⭳ +** | Download, and save. The download button turns into a green tick once the song is saved. **+** adds to Liked Songs on the first press. Press again, or hold it, to add to playlists |
+| **Output** | Shown in green under the buttons when headphones or a speaker are connected |
+| **Song / Lyrics** | The switch in the middle of the time row. Tap to swap the cover for the lyrics. It is dimmed when a song has no lyrics |
+| **Bottom row** | Speed and sleep timer on the left, the queue on the right |
 
 ## Playback speed
 
-The gauge in the bottom row opens it, to the left of the sleep timer. Buttons for **1.0, 1.25, 1.5 and 2.0**, and a slider that goes further in both directions — down to **0.25x**, which no button offers because nobody arrives wanting exactly 0.4x, they arrive wanting *slower than this*. The **+** and **−** move in twentieths.
+The speed button is in the bottom row, left of the sleep timer. Choose **1.0, 1.25, 1.5 or 2.0**, or use the slider for anything from **0.25x to 2.0x**. **+** and **−** change it by 0.05.
 
-The pitch is corrected, so 1.5x is faster and not higher.
+The pitch stays the same, so faster does not sound higher.
 
-Whatever you pick **carries over to the next song**, and to the one after that — a speed is a way of listening rather than a property of one track. The button shows the number instead of the gauge whenever it is not 1.0x, so a queue that sounds wrong is never a mystery.
+The speed **stays for the next songs** until you change it. When it is not 1.0x, the button shows the number.
 
 <Note>
-  Crossfade runs its overlap at the same speed, so the two tracks stay in step through the fade. The sleep timer's "end of current track" also counts in real seconds rather than audio ones — at 1.5x a song with a minute of music left has forty seconds left on the clock, and that is when it stops.
+  Crossfade runs at the same speed, so the two songs stay in time. The sleep timer's **end of track** option counts real time: at 1.5x, a minute of music ends in 40 seconds.
 </Note>
 
 ## The seek bar
 
-Drag to scrub, tap to jump. The played portion fills ahead of the handle, so position reads at a glance.
+Drag to move through the song, or tap to jump to a spot.
 
 <SeekDemo />
 
-Two things are true of it that are not obvious:
+- **The song jumps when you let go**, not while you drag. This keeps dragging smooth on a slow connection.
+- **The touch area is 44 pixels tall**, so the thin bar is easy to hit. A drag that goes clearly up or down closes the player instead.
 
-- **The seek happens on release**, not continuously. One range request, not one per pixel — which is what keeps scrubbing smooth on a slow connection.
-- **The touch target is 44 pixels tall for a 4-pixel line.** A thin bar is easy to look at and impossible to hit. A clearly *vertical* drag that starts on the bar still falls through to minimising the player, so the two gestures do not fight.
+## Controls
 
-## Transport
+**Shuffle** turns on and off. On mixes the songs still to come. Off puts them back in their original order.
 
-**Shuffle** is a real toggle, not a re-roll. Turning it on shuffles everything still to come; turning it off puts the original order back. Pressing it repeatedly does not keep re-shuffling — that behaviour reads as "still on" and leaves songs playing in an order you never chose.
+**Previous** restarts the song first. It goes to the previous song only in the first 3 seconds.
 
-**Previous** restarts the current song first. It only jumps to the song before when you are already within the first three seconds. One stray tap cannot lose your place.
+**Repeat** has two states: off, or repeat this song. With repeat on, the song plays again when it ends. Next still skips.
 
-**Repeat** is two-state: off, or repeat this song. It loops the current track when it ends — dominating shuffle and autoplay, which is what "replay" means — while the next button still moves on manually.
+## Lyrics
 
-## Song and lyrics
+The **Song / Lyrics** switch swaps the cover for the lyrics. Tap it to go back.
 
-The capsule in the middle of the timestamp row switches the artwork for the lyrics. **Tapping anywhere on it flips to the other one** — it is a two-state switch, so there is only ever one thing a tap can mean, and half of it is never a dead target.
-
-It goes **dim** when this song genuinely has none, which is common for SoundCloud and YouTube uploads. That is not a failed fetch — the app checked and there is nothing there. Tapping it says so rather than opening a pane that only ever reads "nothing here". See [Lyrics](/guide/lyrics).
+It is **dimmed** when the song has no lyrics, which is common on SoundCloud and YouTube uploads. Tapping it tells you so. See [Lyrics](/guide/lyrics).
 
 ## The bottom row
 
-Two glyphs sit under the transport controls: a **timer** on the left, the **queue** on the right.
+**The queue**: tap the queue button on the right, or pull up anywhere on the row. The queue starts opening as soon as you pull. Push back down to cancel. Only the button opens it with a tap.
 
-**Tap the queue glyph, or pull up anywhere along the row.** The pull opens the sheet as the drag is recognised rather than when you let go, so it is already on its way up under your finger; push back down before releasing and it goes away again. Tapping only counts on the glyph itself — the rest of the row is for the pull, so a tap meant for the pane switch cannot open the queue by accident.
+A drag down on this row still closes the player.
 
-The pull is upward-only on purpose: a downward drag there has to keep falling through to the dismiss, or the strip where your thumb naturally rests becomes a dead zone for minimising the player.
-
-**The timer** arms a sleep timer — 15, 30, 45 or 60 minutes, or the end of this track. It goes green while one is running, which is the only way to know without opening it. See [Settings](/reference/settings#sleep-timer).
+**The sleep timer**: stop after 15, 30, 45 or 60 minutes, or at the end of this song. The button turns green while a timer is set. See [Settings](/reference/settings#sleep-timer).
 
 ## Notification and lock screen
 
-While music plays, Relaxify shows a notification with transport controls. The same controls appear on your lock screen, and on Bluetooth devices, car head units and headsets.
+While music plays, Relaxify shows a notification with play, pause, skip and a seek bar. The same controls work on the lock screen, Bluetooth headphones and car systems.
 
-- Play, pause, skip and the scrubber all work from there.
-- The notification is what **keeps music alive when you leave the app** — Android requires a foreground service for background audio, and that notification is it.
-- A headset's **previous** button restarts the track first, same as the in-app button.
+- The notification is what lets music keep playing after you leave the app. Android needs it for background audio.
+- A headset's **previous** button restarts the song first, like the button in the app.
 
 <Note>
-  Swiping the app away from Recents stops playback and removes the notification. That is intended. If music kept playing after a swipe-away on an older build, updating fixes it — see [Troubleshooting](/reference/troubleshooting).
+  Swiping the app away from Recents stops the music and removes the notification.
 </Note>
 
 ## Resume
 
-The app reopens on the song and timestamp you left, **paused**, with your queue.
-
-Paused rather than playing is deliberate. An app that starts making noise the moment you open it is an app you stop opening in public.
+When you open the app again, it shows the song and position you left, **paused**, with your queue.

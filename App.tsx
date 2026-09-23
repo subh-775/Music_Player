@@ -123,7 +123,7 @@ function Shell() {
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
-  /** The drawer's Recents / Your sound pages. null = closed. */
+  /** The drawer's Recents / Your activity pages. null = closed. */
   const [activity, setActivity] = useState<'recents' | 'stats' | null>(null);
   const likes = useLikes();
   const updateWaiting = useUpdateAvailable();

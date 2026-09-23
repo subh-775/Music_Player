@@ -1,37 +1,37 @@
 # Installation
 
-Relaxify is published on GitHub rather than through the Play Store. Android therefore asks once for permission to install it, and only once.
+Relaxify is published on GitHub, not the Play Store. Android asks once for permission to install it.
 
-## 1. Download the installer
+## 1. Download the file
 
-Open **[the latest release](https://github.com/subh-775/Music_Player/releases/latest)** on the phone itself and download `Relaxify.apk`.
+On your phone, open **[the latest release](https://github.com/subh-775/Music_Player/releases/latest)** and download `Relaxify.apk`.
 
-Downloading on a computer and transferring the file works exactly as well. There is one file; there are no variants to choose between.
+You can also download it on a computer and copy it to the phone. There is only one file.
 
 <Note title="64-bit phones only">
-  The installer is built for **arm64-v8a**, which is every Android phone sold in roughly the last decade. Older 32-bit handsets (`armeabi-v7a`), x86 Chromebooks and most emulators cannot install it — Android will refuse the file rather than install a broken app.
+  The app is built for **arm64-v8a**, which covers almost every Android phone from the last ten years. Old 32-bit phones (`armeabi-v7a`), x86 Chromebooks and most emulators cannot install it. Android will refuse the file.
 
-  This is a size decision, not an oversight: the app embeds a full CPython runtime, and shipping a second architecture would roughly double the download for everyone to serve a shrinking minority.
+  The app includes a full Python runtime. Adding a second build type would nearly double the download size.
 </Note>
 
 ## 2. Allow the install
 
-Tap the downloaded file. The first time, Android will say your browser or file manager is not allowed to install apps.
+Tap the downloaded file. The first time, Android says your browser or file manager is not allowed to install apps.
 
-Follow the prompt to **Settings → Install unknown apps**, turn it on for that one app — your browser, or Files — and come back. The install then proceeds normally.
+Follow the prompt to **Settings → Install unknown apps**, turn it on for that one app (your browser, or Files), then go back. The install continues.
 
 <Note>
-  You are granting the permission to **the app that hands over the file**, not to Relaxify. Turning it on for Chrome does not turn it on for anything else, and you can turn it off again afterwards without affecting the installed app.
+  This permission is for **the app that opens the file**, not for Relaxify. You can turn it off again afterwards. The installed app keeps working.
 </Note>
 
 ## 3. First launch
 
-The first start takes a few seconds longer than every one after it: the embedded engine unpacks itself and the app restores whatever was playing last.
+The first start takes a few seconds longer than later ones. The built-in engine unpacks itself, and the app restores what was playing last.
 
-The splash screen stays up until **both** the engine and the home screen are genuinely ready. That is deliberate — the alternative is watching the app assemble itself in stages, which reads as slow even when it is not.
+The splash screen stays until the engine and the home screen are both ready.
 
 <Tip>
-  Nothing needs configuring after install. Autoplay is on, quality is on Auto, and the equalizer is off. You can start searching immediately — see **[Quick Start](/guide/quick-start)**.
+  You do not need to set anything up. Autoplay is on, quality is on Auto and the equalizer is off. See **[Quick Start](/guide/quick-start)**.
 </Tip>
 
 ## Requirements
@@ -39,28 +39,28 @@ The splash screen stays up until **both** the engine and the home screen are gen
 | | |
 | --- | --- |
 | **Android** | 7.0 (Nougat) or newer |
-| **Storage** | ~120 MB for the app, plus whatever you download |
-| **Connection** | Needed for search and streaming. Downloads play with none |
+| **Storage** | About 120 MB for the app, plus your downloads |
+| **Connection** | Needed to search and stream. Downloads play without one |
 | **Account** | None |
 
-## Permissions, and when each is asked for
+## Permissions
 
-Nothing is requested at install time. Each is asked for at the moment it is first needed, so you always know what it is for.
+Nothing is asked at install time. Each permission is asked the first time it is needed.
 
-| Permission | Asked when | What happens if you decline |
+| Permission | Asked when | If you say no |
 | --- | --- | --- |
-| **Notifications** | First playback | Music still plays; you lose the lock-screen and notification controls |
-| **Storage** | First download | Streaming still works; downloads cannot be written |
-| **Install packages** | An update is ready | In-app updates stop; you can still install a new build by hand |
+| **Notifications** | You first play a song | Music still plays. You lose the lock screen and notification controls |
+| **Storage** | You first download a song | Streaming still works. Downloads cannot be saved |
+| **Install apps** | An update is ready | In-app updates stop. You can still install a new version by hand |
 
-## Updating later
+## Updating
 
-Once installed, the app checks for new releases by itself and can download and install them from inside Settings. You will not repeat any of the above.
+The app checks for new versions and can install them from Settings. You do not repeat the steps above.
 
 <Danger title="Never uninstall to update">
-  Install the new build **over** the existing app. Uninstalling deletes your playlists, liked songs and listening history — Android wipes app data on uninstall and there is no way to get it back. The in-app updater always installs over the top, which is the safe path.
+  Install the new version **over** the old one. Uninstalling deletes your playlists, liked songs and history, and Android cannot get them back. The in-app updater always installs over the old version.
 
-  Your **downloads** survive either way: they live in your own music folder, outside the app's storage.
+  Your **downloads** are safe either way. They are in your own music folder, not in the app's storage.
 </Danger>
 
-See **[Updates](/reference/updates)** for how the check and the install flow actually work.
+See **[Updates](/reference/updates)**.

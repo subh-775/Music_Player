@@ -1,36 +1,34 @@
 # Releases
 
-Every build, with its notes, is published on GitHub.
+Every version and its notes are on GitHub.
 
 <ReleaseBadges />
 
 <div className="link-list">
-  <a href="https://github.com/subh-775/Music_Player/releases/latest">Download the latest release<span className="ext" aria-hidden="true">↗</span></a>
-  <a href="https://github.com/subh-775/Music_Player/releases">Browse all releases and their notes<span className="ext" aria-hidden="true">↗</span></a>
+  <a href="https://github.com/subh-775/Music_Player/releases/latest">Download the latest version</a>
+  <a href="https://github.com/subh-775/Music_Player/releases">All versions and notes</a>
 </div>
 
 ## How to update
 
-Install the new build **over** the existing app. The in-app updater does exactly this — **Settings → Updates → Check for updates**, then Install — and it is the method to prefer.
+Install the new version **over** the old one. The in-app updater does this: **Settings → Check for updates**, then install.
 
 <Danger title="Never uninstall first">
-  Uninstalling deletes your playlists, liked tracks and listening history. Android removes application data on uninstall and it cannot be recovered.
+  Uninstalling deletes your playlists, liked songs and history, and Android cannot get them back.
 
-  Your **downloads** survive either way; they are written to your own music folder, outside application storage.
+  Your **downloads** are safe either way. They are in your own music folder.
 </Danger>
 
-See **[Updates](/reference/updates)** for how the check, the download and the installation work.
+See **[Updates](/reference/updates)**.
 
-## Version numbering
+## Version numbers
 
-The version is derived from the git tag by the build pipeline rather than written into a file, so the number shown under **Settings → App version** is always the tag the build came from. Tags take the form `vMAJOR.MINOR.PATCH`, and the app compares them numerically rather than as text, so `v1.0.10` is correctly newer than `v1.0.9`.
+Versions look like `v1.2.9`. The number in **Settings → App version** always matches the release. Versions are compared as numbers, so `v1.0.10` is newer than `v1.0.9`.
 
 ## Reporting a problem
 
 **[Open an issue](https://github.com/subh-775/Music_Player/issues)** with:
 
 - What you did, and what happened instead.
-- Your Android version and device model.
-- The contents of **Settings → Diagnostics** if the problem concerns playback or sound.
-
-The last of those answers most questions on its own.
+- Your Android version and phone model.
+- The version from **Settings → App version**.

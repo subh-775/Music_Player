@@ -1,55 +1,53 @@
 # The Queue
 
-Tap the queue glyph at the bottom right of the player, or pull up anywhere along that bottom row.
+Tap the queue button at the bottom right of the player, or pull up on the bottom row.
 
-What you see is the playback engine's **real** queue, not a copy kept alongside it in the interface. It cannot drift from what will actually play.
+This is the player's **real** queue, not a copy, so it always matches what plays next.
 
-## Reading it
+## What you see
 
-- **The current track is pinned** above the list and stays there however far you scroll.
-- The subtitle names the artist and, when something is connected, where the sound is going.
-- The section heading says where the order came from: **Next up** normally, **Shuffling from** when shuffle is on.
-- Songs marked **Recommended** were added by autoplay rather than by you.
+- **The current song stays at the top** while you scroll.
+- The subtitle shows the artist, and where the sound is going if something is connected.
+- The heading says **Next up**, or **Shuffling from** when shuffle is on.
+- Songs marked **Recommended** were added by Autoplay, not by you.
 
-## Reordering
+## Moving songs
 
-**Press and hold the ≡ handle** on any upcoming song, then drag it where you want it.
+**Hold the ≡ handle** on any song that is coming up, then drag it.
 
-Hold rather than grab-on-touch, because the list also has to be scrollable — grabbing on first touch would swallow every fling.
+You hold instead of grab so the list can still scroll.
 
 <Note title="Why the playing song has no handle">
-  Removing the track that is currently playing tears down playback — the engine's remove maps onto ExoPlayer's `removeMediaItem`, and removing the active item stops the music. So the playing row is not draggable and nothing can be dropped above it. The alternative is a queue where a mis-drag kills the audio.
+  Moving the song that is playing would stop the music. So it has no handle, and nothing can be dropped above it.
 </Note>
 
-The sheet is scroll-aware: pull down and the **list** scrolls to its top first, and only then does the sheet start to follow your finger. You never have to aim for the handle.
+Drag down on the sheet and the list scrolls to the top first. Then the sheet follows your finger.
 
-A drop is applied optimistically: the list shows the new order immediately and the engine is brought into line behind it. If the engine refuses the move, the list snaps back to the truth rather than showing you a lie.
+A move shows right away. If the player cannot make the move, the list goes back to the real order.
 
 ## Jumping
 
-**Tap any row** to skip straight to it. Everything before it stays in the queue — jumping is not the same as clearing.
+**Tap any song** to play it. The songs before it stay in the queue.
 
-## Adding to it
+## Adding songs
 
 **Long-press any song row**, anywhere in the app:
 
 | Choice | What happens |
 | --- | --- |
-| **Play next** | Inserted directly after the current song |
-| **Add to queue** | Appended to the end |
+| **Play next** | Goes right after the current song |
+| **Add to queue** | Goes at the end |
 
-Several *play next* choices in a row keep **their** order rather than each one jumping ahead of the last, which is the behaviour people expect and almost no player gets right.
+If you choose **Play next** several times in a row, those songs keep the order you added them in.
 
 ## Shuffle
 
-Shuffle reorders everything after the current track. With the queue open you will see the order change under you — that is the engine, not a redraw.
-
-Turning it **off** puts the original order back. It is a toggle, not a re-roll: pressing it repeatedly does not keep shuffling.
+Shuffle mixes every song after the current one. Turn it **off** to get the original order back. Pressing it again does not reshuffle.
 
 ## Autoplay
 
-With Autoplay on (the default), the queue tops itself up from a radio built around what you have been listening to, so the music does not simply stop when a playlist runs out.
+With Autoplay on (the default), similar songs are added when the queue runs low, so the music does not stop at the end of a playlist.
 
-The top-up rides the engine's own track-change event rather than a timer. That matters more than it sounds: **Android freezes an app's JavaScript timers once the screen is off**, so a timer-driven version would leave the last song of a queue ending in silence until you next picked the phone up. Which is exactly what used to happen.
+This works with the screen off too.
 
-Turn it off under **Settings → Playback → Autoplay** if you would rather the queue simply end.
+To let the queue end, turn off **Autoplay** on the Playback screen (**Settings → Crossfade**).

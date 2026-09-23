@@ -13,7 +13,7 @@
  * the app crashing.
  */
 import {useEffect, useState, useSyncExternalStore} from 'react';
-import {AppState, Image} from 'react-native';
+import {Image} from 'react-native';
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
@@ -33,14 +33,11 @@ import {
 } from './tracks';
 import {
   applyAudioEffects,
-  beginCrossfade,
-  prepareCrossfade,
-  crossfadePosition,
-  crossfadeSupported,
   endCrossfade,
   fadeInPlayer,
   fadeOutPlayer,
   restorePlayerVolume,
+  setCrossfade,
 } from './audioEffects';
 import {setPausedByDuck} from './duckState';
 import {
@@ -50,7 +47,6 @@ import {
 } from './sleepTimer';
 import {remember} from './recentlyPlayed';
 import {clearResume, readResume, saveResume} from './resume';
-import {diag} from './diag';
 
 let ready = false;
 let available: boolean | null = null;
@@ -367,19 +363,10 @@ export async function setupPlayer(): Promise<boolean> {
           } catch {}
         })().catch(() => {});
       });
-      // Crossfade's other half. With a real overlap running, hand off to the
-      // incoming track (seek RNTP to where the overlap reached, then cut it).
-      // Otherwise bring the incoming one up from quiet, or just ensure full
-      // volume on a normal advance / manual skip.
-      if (cfActive) {
-        await handoffCrossfade();
-      } else {
-        // Defensive: if an overlap player somehow survived (a fade that never
-        // handed off), silence it NOW so it can't keep playing a second,
-        // "wrong" song over the top of the queue's real next track.
-        endCrossfade();
-        restoreFullVolume();
-      }
+      // No volume or crossfade work here any more. The handoff is the native
+      // scheduler's (AudioModule.cfStep), and this event can land while an
+      // overlap is still sounding — restoring full volume from here, as this
+      // used to, would play the incoming song twice at once.
       // Effects die with the audio session; re-attach for the new one.
       applyAudioEffects();
     });
@@ -1331,140 +1318,44 @@ async function prefetchNext(): Promise<void> {
   }
 }
 
-/**
- * Fade between songs.
- *
- * NOT a true crossfade, and the setting's hint says so. A real one overlaps two
- * streams, which needs two players; ExoPlayer here is a single output, so this
- * fades the outgoing track down and the next one back up. The gap is what a
- * second player would have filled.
- *
- * Runs off the progress tick rather than a timer so it can't drift from the
- * audio, and re-arms per track via `fadedFor`.
- */
 let fadeTimer: ReturnType<typeof setInterval> | null = null;
 /** Whether the previous watcher tick saw audio running — see the idle gate. */
 let wasPlaying = false;
-let fadedFor = '';
-// True while the native overlap player is running toward a handoff — a REAL
-// crossfade (two songs audible at once) rather than the fade-down/up fallback.
-//
-// There is no `fadeGen` generation counter any more: it existed to let one JS
-// ramp abort another mid-flight. Ramps are native now and the native side owns
-// its own cancellation, so a counter here would guard nothing.
-let cfActive = false;
+/** The span last handed to the native crossfade scheduler, in ms. */
+let pushedSpan = -1;
 
 /**
- * The track the overlap has been PREPARED for, and the one-shot that starts it.
- *
- * Preparation happens while the outgoing track still has `span + 4` seconds to
- * run, because opening a live stream through the proxy is not instant, and the
- * previous design treated "I have called prepareAsync" as "the overlap is
- * playing".
- *
- * The start is a one-shot timer at the exact boundary rather than the 1s
- * watcher tick. On a nine-second fade a tick-aligned start is up to a second
- * late — an 11% error that lands differently on every track, which is most of
- * why the crossfade felt inconsistent even when it worked.
+ * Tell the native scheduler how long to fade — zero while the sleep timer's
+ * end-of-track stop is armed, because a crossfade starts the NEXT song
+ * seconds before the boundary, mixing a song nobody asked for into the last
+ * seconds of the one they meant to fall asleep to.
  */
-let cfPreparedFor = '';
-let cfStartTimer: ReturnType<typeof setTimeout> | null = null;
-
-function cancelScheduledFade(): void {
-  if (cfStartTimer) {
-    clearTimeout(cfStartTimer);
-    cfStartTimer = null;
+function pushCrossfade(seconds: number): void {
+  const span = sleepMode() === 'endOfTrack' ? 0 : Math.max(0, seconds) * 1000;
+  if (span !== pushedSpan) {
+    pushedSpan = span;
+    setCrossfade(span);
   }
 }
 
 /**
- * Tear down a running crossfade WITHOUT the handoff seek — for a manual skip or
- * stop, where the user is choosing the next track rather than letting the queue
- * flow into it. Restores full volume so the chosen track isn't left quiet.
+ * Tear down a running crossfade — for a manual skip, pause or fresh play,
+ * where the user is choosing what plays rather than letting the queue flow
+ * into it. Restores full volume so the chosen track isn't left quiet.
  */
 export function cancelCrossfade(): void {
-  cfActive = false;
-  cancelScheduledFade();
-  cfPreparedFor = '';
   endCrossfade();
-  // ALWAYS restore full volume, natively — a fade-down that never reached its
-  // handoff (backgrounded mid-fade, the setting toggled off, a pause on the
-  // last second) must not leave the engine stuck quiet.
+  // ALWAYS restore full volume, natively — a fade-down that was cut short must
+  // not leave the engine stuck quiet.
   restorePlayerVolume();
   TrackPlayer.setVolume(1).catch(() => {});
-}
-
-/**
- * The overlap reached the track boundary. RNTP has just advanced to the
- * incoming track at position 0, still quiet from the fade-down. Seek it to
- * where the overlap player has reached — under cover of that player's audio, so
- * the re-buffer is inaudible — bring RNTP back to full, THEN cut the overlap.
- */
-async function handoffCrossfade(): Promise<void> {
-  cfActive = false;
-  try {
-    const pos = await crossfadePosition();
-    if (pos > 0.5) {
-      await TrackPlayer.seekTo(pos);
-      // Wait for RNTP to actually be ready to play at that position, rather
-      // than a blind fixed pause. A flat 250ms was a guess: fine on a warm
-      // buffer, but on a slow network the re-buffer after the seek can run
-      // longer — and cutting the overlap before RNTP catches up is exactly the
-      // "brief silence, then the song plays" gap this used to leave, ONLY on
-      // crossfaded transitions (a plain track change never seeks mid-buffer
-      // like this). Poll briefly instead; the 250ms cap keeps the worst case
-      // no worse than before.
-      const deadline = Date.now() + 900;
-      while (Date.now() < deadline) {
-        try {
-          const {state} = await TrackPlayer.getPlaybackState();
-          if (state === State.Playing || state === State.Ready) {
-            break;
-          }
-        } catch {
-          break;
-        }
-        await new Promise(r => setTimeout(r, 60));
-      }
-    }
-  } catch {}
-  // ORDER MATTERS. Cut the overlap BEFORE bringing RNTP back to full: both are
-  // playing the same incoming track a little out of step, so any window where
-  // both are loud is heard as the song doubled over itself. Restoring first and
-  // stopping second (what this used to do, with a 250ms gap between) is exactly
-  // the "sound clashes, I hear it twice for a second" report.
-  await endCrossfade();
-  try {
-    await TrackPlayer.setVolume(1);
-  } catch {}
-  restorePlayerVolume(); // cancel the native fail-safe; it has nothing left to do
-}
-
-/**
- * Put the incoming track at FULL volume on every track change.
- *
- * This used to be a JS ramp (setVolume in a setTimeout loop) and that was the
- * "volume drops on auto-advance and stays low" bug: Android throttles RN's JS
- * timers once the app is backgrounded or the screen locks, so the loop stalled
- * part way and the volume simply stayed there — then crept back up when
- * reopening the app thawed the thread.
- *
- * The reference build (WebView) never touches volume on a normal transition,
- * and that is the behaviour restored here: one idempotent assertion of full
- * volume, no timers, plus the native restore so it holds even if the bridge is
- * frozen. Fading is now exclusively the native crossfade's job.
- */
-async function restoreFullVolume(): Promise<void> {
-  restorePlayerVolume(); // cancels any native ramp, then sets 1.0
-  try {
-    await TrackPlayer.setVolume(1);
-  } catch {}
 }
 
 export function startCrossfadeWatcher(getSeconds: () => number): void {
   if (fadeTimer) {
     return;
   }
+  pushCrossfade(getSeconds());
   fadeTimer = setInterval(async () => {
     // ── The idle gate ─────────────────────────────────────────────────────
     //
@@ -1518,6 +1409,9 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       return;
     }
     wasPlaying = true;
+    // Foreground only, like this whole tick — which is fine: the setting and
+    // the sleep timer are both changed from the UI, so the app is open.
+    pushCrossfade(getSeconds());
 
     // Piggybacked on this tick: keep the queue topped up with similar songs.
     topUpFromRadio().catch(() => {});
@@ -1538,157 +1432,20 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       }
     } catch {}
 
-    const span = getSeconds();
-    // Crossfade only while the app is actually on screen. The handoff that ends
-    // an overlap (seek RNTP to the overlap position, then cut it) is JS work,
-    // and JS is exactly what Android stops running in the background — a fade
-    // started there would hand off to nobody, leaving the overlap player and
-    // RNTP both audible. Backgrounded, tracks change the plain way: untouched
-    // volume, which is what the WebView build did on every transition anyway.
-    if (span <= 0 || AppState.currentState !== 'active') {
-      return;
-    }
     try {
       const {position, duration} = await TrackPlayer.getProgress();
-      const active = await TrackPlayer.getActiveTrackIndex();
-      /**
-       * The ROW's identity, not its position — and this is why crossfade
-       * "worked, but not every time".
-       *
-       * `cfPreparedFor` and `fadedFor` exist to stop one boundary being faded
-       * twice. Keyed on the queue INDEX they also stopped it being faded ever
-       * again at that index: play something else and the new queue starts at 0
-       * again, so `fadedFor` left over from the last queue silently vetoed the
-       * fade on whichever track happened to land on the same number. Repeat,
-       * previous and a re-shuffle all hit it too.
-       *
-       * `_qid` is the per-row identity toQueueItem already stamps, unique for
-       * the life of the process. Read off the warm mirror rather than a fresh
-       * bridge call, and falling back to the index on an old queue item so a
-       * missing stamp degrades to the previous behaviour instead of to no
-       * crossfade at all.
-       */
-      const key =
-        active == null
-          ? ''
-          : String(
-              (engineQueue[active] as {_qid?: unknown} | undefined)?._qid ??
-                `i${active}`,
-            );
       if (duration <= 0 || position <= 0) {
         return;
       }
-      /**
-       * Seconds of AUDIO left, and seconds of CLOCK left, which stop being the
-       * same number the moment the speed control leaves 1x.
-       *
-       * Everything below is scheduling against a wall clock — a setTimeout for
-       * the fade, another for the sleep stop — so every one of them needs the
-       * second figure. At 1.5x a track with 12s of audio left has 8s of real
-       * time left, and a crossfade armed off the raw number would start half
-       * again too early and the sleep stop would land after the song had ended.
-       */
-      const rate = playbackRate();
-      const remaining = (duration - position) / rate;
-
-      // ── 0. The end-of-track sleep stop, on the boundary ────────────────
-      //
-      // This tick already computes the one number the sleep timer needs, and
-      // already knows how to put a one-shot on a precise moment. Arming it two
-      // seconds out lands the stop ON the boundary instead of one to two
-      // seconds into the next song, which is where the track-change event —
-      // still in place as the backstop — necessarily lands.
+      // Seconds of CLOCK left, not of audio: at 1.5x a track with 12s of audio
+      // left ends in 8, and the stop below is armed against a wall clock.
+      const remaining = (duration - position) / playbackRate();
+      // The end-of-track sleep stop, ON the boundary. Arming it two seconds
+      // out lands the stop there instead of one to two seconds into the next
+      // song, which is where the track-change event — still in place as the
+      // backstop — necessarily lands.
       if (remaining <= 2) {
         scheduleEndOfTrackStop(remaining);
-      }
-
-      // ── 1. Buffer the incoming track, well before it is needed ────────
-      //
-      // Silent, and not a commitment: if the fade never happens the prepared
-      // player is simply dropped. What it buys is certainty at the boundary —
-      // the difference between an overlap that can start on time and one that
-      // is still opening a socket.
-      if (
-        crossfadeSupported &&
-        !cfActive &&
-        // A crossfade into a track that is never going to play is just the next
-        // song starting early. End-of-track means "this song, then silence",
-        // and with a twelve-second fade the overlap would begin twelve seconds
-        // BEFORE the boundary — mixing a song nobody asked for into the last
-        // seconds of the one they meant to fall asleep to.
-        sleepMode() !== 'endOfTrack' &&
-        active != null &&
-        // Twenty seconds of lead, or span + 8 on a long fade, whichever is
-        // more. Preparing is silent and free to abandon; the only thing that
-        // matters is that the buffer has ARRIVED by the boundary, and a stream
-        // pulled through the local proxy can take several seconds to open. A
-        // four-second margin on a twelve-second fade left the overlap still
-        // buffering when it was asked to start — and a not-ready overlap
-        // cancels the fade entirely, which is a crossfade setting that does
-        // nothing at all.
-        remaining <= Math.max(span + 8, 20) &&
-        cfPreparedFor !== key &&
-        fadedFor !== key
-      ) {
-        cfPreparedFor = key;
-        try {
-          const repeatOne =
-            (await TrackPlayer.getRepeatMode()) === RepeatMode.Track;
-          // The LOCAL file when there is one. A downloaded next track opens in
-          // milliseconds and costs no network — and it stops the same song
-          // being pulled through the single-process proxy twice, once for this
-          // overlap and once for RNTP a moment later.
-          const nextSource = queueSource[active + 1];
-          const q = await TrackPlayer.getQueue();
-          const nextUrl = nextSource?.file_path
-            ? `file://${nextSource.file_path}`
-            : q[active + 1]?.url;
-          if (!repeatOne && nextUrl) {
-            await prepareCrossfade(String(nextUrl), rate);
-          }
-        } catch {
-          /* nothing to prepare — the plain path below still works */
-        }
-      }
-
-      // ── 2. Start it AT the boundary, not on the next tick ──────────────
-      if (
-        remaining <= span + 1 &&
-        sleepMode() !== 'endOfTrack' &&
-        fadedFor !== key &&
-        !cfStartTimer
-      ) {
-        fadedFor = key;
-        const ms = Math.round(span * 1000);
-        // remaining - span is how long until the fade should begin. Usually a
-        // few hundred milliseconds; never negative.
-        const delay = Math.max(0, Math.round((remaining - span) * 1000));
-        cfStartTimer = setTimeout(() => {
-          cfStartTimer = null;
-          (async () => {
-            const overlapping =
-              crossfadeSupported && !cfActive && (await beginCrossfade(ms));
-            cfActive = overlapping;
-            // Says which of the two happened. Without it a crossfade skipped
-            // because the stream was slow is indistinguishable from one that is
-            // switched off, which makes "is it even working?" unanswerable.
-            diag('crossfade', overlapping ? `overlap ${ms}ms` : 'not ready');
-            if (overlapping) {
-              // The ramp runs NATIVELY (Handler, not a JS timer) so it cannot
-              // stall half way down when the app is backgrounded, and it
-              // restores full volume by itself once the boundary passes.
-              fadeOutPlayer(ms);
-            }
-            // And if it is NOT overlapping: no fade at all. Fading into a
-            // silence nothing is filling is the worst of both — it was the
-            // audible dip, and it happened every time the stream was slow to
-            // open. A plain cut sounds like a decision; a dip sounds broken.
-          })().catch(() => {});
-        }, delay);
-      } else if (remaining > span + 2 && fadedFor === key) {
-        // Seeked backwards out of the fade zone — cancel it and go back to full.
-        fadedFor = '';
-        cancelCrossfade(); // drops the overlap, the schedule AND the volume
       }
     } catch {
       /* engine not up */

@@ -39,7 +39,7 @@ import Animated, {
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
 import {Headphones, Pause, Play} from 'lucide-react-native';
 import {C, S} from '../theme';
-import {cleanText, getBestArtworkUrl} from '../tracks';
+import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {Marquee} from './Marquee';
 import {
   skipNext,
@@ -286,13 +286,21 @@ export const PlayerBar = React.memo(function PlayerBar({
    * onLayout again to correct it — the bar's layout does not change for the
    * rest of the session.
    *
-   * 300 clears the 240ms entrance with room to spare. One timer, once, when the
-   * first song starts.
+   * 300 clears the 240ms entrance with room to spare. Keyed on the bar
+   * actually EXISTING, not on this component mounting: PlayerBar mounts with
+   * the engine, but a restored session takes well over 300ms to publish its
+   * track, so a mount-keyed timer fired at a null ref and the only measurement
+   * left was the one taken mid-entrance — the cold-launch morph that aimed
+   * below the screen while a song started from a list morphed cleanly.
    */
+  const shown = !!active;
   useEffect(() => {
+    if (!shown) {
+      return;
+    }
     const t = setTimeout(measureMiniArt, 300);
     return () => clearTimeout(t);
-  }, [measureMiniArt]);
+  }, [measureMiniArt, shown]);
 
   /**
    * The whole row travels, not just the title.
@@ -373,6 +381,10 @@ export const PlayerBar = React.memo(function PlayerBar({
               style={styles.main}
               activeOpacity={1}
               onPressIn={() => {
+                // Every open starts with a touch here, tap or pull, and the
+                // bar is at rest at this instant — the one moment its
+                // measurement is guaranteed to be the real one.
+                measureMiniArt();
                 press.value = withTiming(1, {duration: 90});
               }}
               onPressOut={() => {
@@ -419,9 +431,11 @@ export const PlayerBar = React.memo(function PlayerBar({
                     {output}
                   </Text>
                 ) : (
-                  <Text style={styles.artist} numberOfLines={1}>
-                    {cleanText(String(active.artist ?? ''))}
-                  </Text>
+                  <Marquee
+                    text={cleanText(String(active.artist ?? ''))}
+                    style={styles.artist}
+                    ticker={splitArtists(String(active.artist ?? '')).length > 1}
+                  />
                 )}
               </View>
             </TouchableOpacity>

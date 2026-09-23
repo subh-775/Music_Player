@@ -1,111 +1,108 @@
 import {AppMark} from '../src/demos.jsx';
 
 <section className="hero">
-  <div>
-    <span className="hero-eyebrow">For Android</span>
+  <AppMark />
 
-    <h1>One search.<br />Three catalogues.<br /><em>One list.</em></h1>
+  <div className="hero-copy">
+    <h1>Three catalogues. One list.</h1>
 
     <p className="hero-lede">
-      Relaxify searches JioSaavn, SoundCloud and YouTube together and merges
-      the results into a single list. A track that exists in more than one
-      place appears once; the remaining sources stay available as fallbacks, so
-      a stream that fails switches source rather than reporting an error.
+      Relaxify is a music player for Android. One search covers JioSaavn,
+      SoundCloud and YouTube, and each song shows up once. If one source
+      cannot play it, the app plays it from another.
     </p>
 
     <div className="hero-actions">
       <a className="btn btn-primary" href="/guide/quick-start">Get started</a>
-      <a className="btn btn-ghost" href="https://github.com/subh-775/Music_Player/releases/latest">Download<span className="ext" aria-hidden="true">↗</span></a>
+      <a className="btn btn-ghost" href="https://github.com/subh-775/Music_Player/releases/latest">Download the app</a>
     </div>
   </div>
-
-  <div className="hero-art">
-    <AppMark />
-  </div>
 </section>
 
-<section className="bento">
-  <div className="tile tile-wide">
-    <h3>One track, one row</h3>
+<section className="bento" aria-label="What it does">
+  <a className="tile tile-spot tile-violet" href="/guide/finding-music">
+    <h3>Search three places at once</h3>
     <p>
-      A track available on all three sources is listed once. The other two are
-      retained as fallbacks, so an unavailable stream switches source rather
-      than returning an error — and the studio recording is ranked above
-      derivative uploads unless the query asks for one.
+      Results from all three sources come back as one list. A song that is on
+      more than one source is listed once, with the others kept as backups.
     </p>
-    <a className="more" href="/guide/finding-music">How search works →</a>
-  </div>
+    <span className="more">How search works</span>
+  </a>
 
-  <div className="tile">
-    <h3>Designed for one-handed use</h3>
+  <a className="tile tile-wide" href="/guide/gestures">
+    <h3>Made for one hand</h3>
     <p>
-      Swipe the artwork to change track, double-tap to seek, pull up from the
-      bottom of the player for the queue, and drag down to dismiss it.
+      Swipe the cover to change song. Double-tap to jump 10 seconds. Pull up
+      for the queue. Drag down to close the player.
     </p>
-    <a className="more" href="/guide/gestures">Every gesture →</a>
-  </div>
+    <span className="more">All gestures</span>
+  </a>
 
-  <div className="tile">
+  <a className="tile" href="/guide/downloads">
     <h3>Downloads you keep</h3>
     <p>
-      Ordinary audio files, written to a folder you choose, tagged and with
-      artwork embedded. They play in any other application and survive
-      uninstalling this one.
+      Real audio files in a folder you pick. They play in other apps and stay
+      on your phone if you uninstall.
     </p>
-    <a className="more" href="/guide/downloads">Downloads and offline →</a>
-  </div>
+    <span className="more">Downloads</span>
+  </a>
 
-  <div className="tile tile-wide">
-    <h3>Sound matched to your device, not to a specification</h3>
+  <a className="tile" href="/guide/spotify-import">
+    <h3>Bring your Spotify playlists</h3>
     <p>
-      Android does not allow an application to choose its own band
-      frequencies — most handsets expose five, some ten, each with its own gain
-      range. The eight-band curve you set is interpolated onto whatever your
-      device actually provides, in log frequency, and clamped to its real
-      limits.
+      Paste a public playlist or album link. You get a normal playlist of your
+      own.
     </p>
-    <a className="more" href="/guide/equalizer">Adjust your sound →</a>
-  </div>
+    <span className="more">Import a playlist</span>
+  </a>
 
-  <div className="tile">
-    <h3>Import from Spotify</h3>
+  <a className="tile" href="/reference/architecture">
+    <h3>No account</h3>
     <p>
-      Any public playlist or album address becomes a playlist you own, matched
-      against the three sources track by track.
+      Your playlists, likes and history are saved on your phone. There is
+      nothing to sign in to.
     </p>
-    <a className="more" href="/guide/spotify-import">Import a playlist →</a>
-  </div>
+    <span className="more">Where things are saved</span>
+  </a>
 
-  <div className="tile">
-    <h3>Your library stays on your device</h3>
+  <a className="tile tile-spot tile-sunset" href="/reference/sound">
+    <h3>Crossfade, even with the screen off</h3>
     <p>
-      Playlists, liked tracks, listening history and settings are written to the
-      application's own storage on the handset. Downloads are written to a
-      folder you choose, outside application storage, and survive uninstalling.
+      Each song fades into the next when the queue moves on by itself, for 1
+      to 12 seconds.
     </p>
-    <a className="more" href="/reference/architecture">Where things are stored →</a>
-  </div>
+    <span className="more">Sound and quality</span>
+  </a>
 
-  <div className="tile">
-    <h3>Updates in place</h3>
+  <a className="tile tile-wide" href="/guide/equalizer">
+    <h3>An equalizer that fits your phone</h3>
     <p>
-      Checks for a new version in the background, indicates one with a dot, and
-      installs over the existing app with your library untouched.
+      Eight bands and eleven presets, mapped onto the bands your phone really
+      has.
     </p>
-    <a className="more" href="/reference/updates">Updates →</a>
-  </div>
+    <span className="more">Equalizer</span>
+  </a>
 </section>
 
-<section className="prose">
+<section className="home-start">
+  <h2>Start here</h2>
 
-## Start here
+  <ol className="steps">
+    <li>
+      <a href="/guide/installation">Install the app</a>
+      <span>Download one file and allow one Android prompt.</span>
+    </li>
+    <li>
+      <a href="/guide/quick-start">Play your first song</a>
+      <span>From search to your first download in five minutes.</span>
+    </li>
+    <li>
+      <a href="/guide/gestures">Learn the gestures</a>
+      <span>The controls you will not find by tapping around.</span>
+    </li>
+  </ol>
 
-Three pages are enough to get you playing music:
-
-1. **[Installation](/guide/installation)** — how to install the product, and the one Android prompt you have to answer.
-2. **[Quick Start](/guide/quick-start)** — first search to first download, in a few minutes.
-3. **[Gestures](/guide/gestures)** — the controls that are not discoverable by tapping around.
-
-If something is not behaving as described, **[Troubleshooting](/reference/troubleshooting)** covers the questions that come up in practice, with the reason rather than a reassurance.
-
+  <p className="home-help">
+    Something not working? See <a href="/reference/troubleshooting">Troubleshooting</a>.
+  </p>
 </section>

@@ -1,75 +1,73 @@
 # Sound & Quality
 
-Everything that changes what comes out of the speaker, and what each control is actually doing underneath.
+Every setting that changes what you hear, and what it does.
 
 ## Streaming quality
 
-| Setting | Bitrate | Rough data per hour |
+| Setting | Bitrate | Data per hour |
 | --- | --- | --- |
-| **Auto** | Source's choice | Varies |
-| **Low** | 96 kbps | ~43 MB |
-| **Normal** | 128 kbps | ~58 MB |
-| **High** | 256 kbps | ~115 MB |
-| **Very High** | 320 kbps | ~144 MB |
+| **Auto** | The source's best | Varies |
+| **Low** | 96 kbps | About 43 MB |
+| **Normal** | 128 kbps | About 58 MB |
+| **High** | 256 kbps | About 115 MB |
+| **Very High** | 320 kbps | About 144 MB |
 
-The setting is a **ceiling**. Asking for 320 does not conjure a 320 kbps stream out of a source that only publishes 128 — you get that source's best, and the badge on the row says what you actually got.
+The setting is an **upper limit**. Asking for 320 does not turn a 128 kbps source into 320. You get that source's best, and the label under the song name shows what you got.
 
-That is why the badge exists at all. Without it, "Very High" in Settings and a 128 kbps stream in your ears are indistinguishable.
+| Source | What it usually sends |
+| --- | --- |
+| **JioSaavn** | 320, 160 or 96 kbps, whichever file is really playing |
+| **YouTube** | About 130 kbps |
+| **SoundCloud** | 128 kbps |
+
+If a source does not report a bitrate, there is no label.
 
 <Note>
-  On a metered connection, **Normal** is the honest default. The difference between 128 and 320 on phone speakers or budget earbuds is far smaller than the difference in your data bill.
+  On mobile data, **Normal** is a good choice. On phone speakers or cheap earbuds, 128 and 320 sound very close. The data use does not.
 </Note>
 
 ## Crossfade
 
-Overlaps the end of one song into the start of the next, 0–12 seconds.
+Fades the end of one song into the start of the next, for 0 to 12 seconds. 0 is off, which suits albums where songs run straight into each other.
 
-Nought is off — the right answer for albums that were sequenced to run together, where a crossfade destroys a transition the artist built.
+Both songs play at once during the fade: one gets quieter while the other gets louder.
 
-The overlap is a real fade on both tracks, not a cut. Near the end of a song the outgoing track ramps down while the incoming one ramps up, which is why the setting is in seconds rather than being a switch.
+It works on **every automatic change** from one song to the next, from an album, a playlist, search or Autoplay, **with the screen on or off**.
 
-### When it doesn't fade
+It does not apply when:
 
-The next song is opened and buffered about twenty seconds before it is needed. If it is still not ready when the boundary arrives — a slow connection, a source having a bad day — **the tracks change plainly instead**, with no fade at all.
+- You press **next** or **previous**. You chose the song, so it changes right away.
+- **Repeat this song** is on. A song fading into itself would just play twice at once.
+- The sleep timer is set to **end of track**. The next song would start under the one you meant to fall asleep to.
 
-That is deliberate, and it is the better of the two failures: fading a song down into a silence nothing is filling is an audible dip, and a dip sounds broken in a way a clean cut does not. **Settings → Diagnostics** records which happened on each boundary if you want to know.
+### When it does not fade
 
-A downloaded next track never has this problem — the file opens instantly.
+The next song starts loading about 20 seconds early. If it is still not ready at the end of the current song, for example on a slow connection, **the songs change without a fade**. A fade into silence would sound like a drop in volume.
 
-<Warn>
-  Crossfade and **Repeat this song** do not combine usefully: a track crossfading into itself is a track played twice, quietly, over itself. Repeat wins.
-</Warn>
+Downloaded songs open instantly, so they always fade.
 
 ## Normalize volume
 
-Evens out perceived loudness between tracks, so a quiet 1970s master and a loudness-war remaster sit at roughly the same level.
+Plays every song at about the same loudness, so a quiet old recording and a loud new one sit at a similar level.
 
-It is implemented as a gain on the **live audio session**, which means:
-
-- It takes effect immediately, on the song already playing.
-- It costs literally nothing when switched off — no effect is created at all.
-- It cannot make a quiet recording sound like a loud one; it moves the level, not the dynamics.
+- It works right away, on the song that is playing.
+- It uses no effect at all when it is off.
+- It changes the volume, not the recording. A quiet song gets louder, not clearer.
 
 ## Equalizer
 
-Eight bands, ±12 dB, interpolated onto your device's real hardware bands. It has its own page — **[Equalizer](/guide/equalizer)**.
+Eight bands, ±12 dB, mapped onto your phone's own bands. See **[Equalizer](/guide/equalizer)**.
 
 ## Output devices
 
-When something other than the phone speaker is connected, the app says so: a green headphones glyph and the device name, on the mini player and in the full player.
-
-It is there to answer one specific question — *why is nothing coming out of my phone* — which is almost always a headset that reconnected without you noticing.
+When headphones or a speaker are connected, the app shows a green headphones icon and the device name, in the mini player and the full player. If no sound comes from your phone, check this first.
 
 ## What the app does not do
 
-Worth stating plainly, because their absence is deliberate:
+- **No upscaling.** A 128 kbps stream stays 128 kbps.
+- **No "hi-res" label.** The label shows the real bitrate.
+- **No extra loudness.** Normalize brings quiet songs up. It does not push everything to the maximum.
 
-- **No upscaling.** A 128 kbps source is a 128 kbps source. Nothing here claims to add detail that was never encoded.
-- **No "hi-res" badge.** The badge reports the stream's real bitrate.
-- **No loudness war of its own.** Normalize moves quiet things up toward a target, it does not push everything to the ceiling.
+## Bluetooth codecs
 
-## Bluetooth and codecs
-
-Codec selection is Android's, not the app's. Whether your headphones get SBC, AAC, aptX or LDAC is negotiated between the phone and the headset, and it is visible in Android's own **Developer options → Bluetooth audio codec**.
-
-The app hands Android decoded audio and Android does the rest, which is why a codec that sounds bad in this app sounds bad in every app.
+Android, not the app, picks the Bluetooth codec (SBC, AAC, aptX or LDAC). You can see it in **Developer options → Bluetooth audio codec**. A codec that sounds bad here sounds bad in every app.

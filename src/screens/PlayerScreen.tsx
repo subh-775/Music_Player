@@ -65,6 +65,7 @@ import {C} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
 import {enqueueDownload, useIsDownloaded} from '../downloads';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
+import {Marquee} from '../components/Marquee';
 import {
   RepeatMode,
   isShuffled,
@@ -878,7 +879,9 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     ? getBestArtworkUrl(track)
     : String(active.artwork ?? '');
   const title = cleanText(String(active.title ?? ''));
-  const artists = splitArtists(String(active.artist ?? '')).join(', ');
+  const artistList = splitArtists(String(active.artist ?? ''));
+  const artists = artistList.join(', ');
+  const artistCount = artistList.length;
   const album = track?.album ? cleanText(track.album) : '';
 
   return (
@@ -1021,9 +1024,11 @@ export const PlayerScreen = React.memo(function PlayerScreen({
                 <TouchableOpacity
                   onPress={() => onOpenArtist(String(active.artist ?? ''))}
                   activeOpacity={0.6}>
-                  <Text style={styles.artist} numberOfLines={1}>
-                    {artists}
-                  </Text>
+                  <Marquee
+                    text={artists}
+                    style={styles.artist}
+                    ticker={artistCount > 1}
+                  />
                 </TouchableOpacity>
                 {/* Third line. Both badges render nothing when their setting is
                     off or the source has none, so the row collapses to nothing
