@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  Sampled from the mark itself rather than picked by hand, so the plate behind
-  it belongs to the same artwork the foreground came from.
--->
-<resources>
-  <color name="ic_launcher_bl_background">#202020</color>
-</resources>

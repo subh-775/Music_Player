@@ -1,28 +1,45 @@
 /**
- * The full player's position, shared — and the two artwork rects that let it
- * morph into the mini player instead of merely sliding past it.
+ * The full player's position, shared — and the geometry that lets it become the
+ * mini player rather than merely sliding past it.
  *
  * Same reasoning as `src/drawer.ts`, and the same shape: a Reanimated shared
- * value outside the component, so a gesture ANYWHERE can drive the sheet frame
+ * value outside the component, so a gesture ANYWHERE can drive the panel frame
  * by frame on the UI thread rather than asking PlayerScreen to animate itself
  * once the finger has already let go. That is what lets a drag UP on the mini
- * player open the panel under the fingertip — the mini player and the sheet are
- * different components, and a `useSharedValue` inside one of them is not
- * reachable from the other.
+ * player open the panel under the fingertip — the mini player and the panel are
+ * different components, and a `useSharedValue` inside one is not reachable from
+ * the other.
  *
- * ## The morph
+ * ## The transition
  *
  * There is no shared-element library here and there does not need to be. Both
  * artworks are already on screen at once (PlayerScreen sits at zIndex 30 over a
  * mini player that is never unmounted), they show the SAME image at the same
- * moment, and the sheet's own travel already moves the big one most of the way.
+ * moment, and the panel's own travel already moves the big one most of the way.
  * All that was missing is where the two squares actually are.
  *
- * So each side reports its own on-screen rect here, measured rather than
- * derived: `measureInWindow` on both, in the same coordinate space, so the
- * status bar and the navigation bar cancel out instead of having to be guessed
- * at. Nothing is hardcoded, which means rotation, a font-scale change or a
- * relayout fixes itself on the next frame.
+ * So each side reports its own on-screen rect (`measureInWindow`), in the same
+ * coordinate space, so the status bar and the navigation bar cancel out instead
+ * of having to be guessed at. Nothing is hardcoded, so rotation, a font-scale
+ * change or a relayout fixes itself on the next frame.
+ *
+ * ## State is a PROPORTION; measurements are only ever geometry
+ *
+ * This separation is the hard-won part, and every bug this file has had came
+ * from blurring it. `sheetP` says how far along the transition is, 0 to 1, and
+ * nothing measured can change it. Pixels — how far to slide, how much to
+ * shrink, where to land — are derived from it and the current measurements,
+ * fresh every frame.
+ *
+ * It used to be the other way round: the value held PIXELS, and progress was
+ * `pixels / measuredSpan`. The closed position was therefore a pixel figure
+ * snapshotted when the dismissal began, while the span kept being re-measured —
+ * so anything that relaid the mini player out afterwards (a song change, a
+ * Bluetooth device appearing in the bar) moved the finish line out from under a
+ * value already parked. Progress settled at 0.93 rather than 1, the cover
+ * stopped short of the slot, and a second artwork sat there off to one side.
+ * Different measurement timings on different launches is precisely why it
+ * behaved differently every time the app was opened.
  */
 import {Dimensions} from 'react-native';
 import {
@@ -33,98 +50,82 @@ import {
   type SharedValue,
 } from 'react-native-reanimated';
 
-/**
- * Full sheet travel for the open/close slide — the LONGEST edge, not the
- * height.
- *
- * max(w, h) is the same number in both orientations; a plain `height` read is
- * not, and this activity handles rotation itself rather than being recreated.
- * A portrait height captured in landscape left "closed" only halfway down a
- * portrait screen, with the player still visible.
- */
-export const HIDE_Y = (({width, height}) => Math.max(width, height))(
-  Dimensions.get('window'),
-);
-
-/** The window, for the one case where the panel's own frame has not been
- *  measured yet. The panel fills the window, so this is not an estimate. */
+/** The window, for the cases where a frame has not been measured yet. The
+ *  panel fills the window, so this is not an estimate. */
 const SCREEN = Dimensions.get('window');
 
-/** 0 = fully open; `closedY()` = fully dismissed. Seeded at HIDE_Y, which is
- *  what `closedY()` also returns until the two covers have been measured. */
-export const sheetY: SharedValue<number> = makeMutable(HIDE_Y);
+/**
+ * A fallback travel distance, used only until both covers have been measured.
+ *
+ * The LONGEST edge, not the height: max(w, h) is the same number in both
+ * orientations, and this activity handles rotation itself rather than being
+ * recreated, so a portrait height captured in landscape would be wrong.
+ */
+export const FALLBACK_SPAN = Math.max(SCREEN.width, SCREEN.height);
 
 /**
- * How far the finger must travel up from the mini player before the drag counts
- * as an open rather than a stray touch on its way to a button.
+ * How far along the transition the panel is: **0 fully open, 1 fully closed.**
  *
- * The SAME number the skip swipe uses for its horizontal threshold, on purpose.
- * The two are raced, so whichever axis reaches 14px first takes the touch —
- * symmetric, and a diagonal drag resolves to whichever way it is actually
- * leaning. A smaller number here would let a lazy diagonal open the player
- * when the thumb plainly meant to skip.
+ * A proportion, never pixels — see the note at the top of this file for what
+ * went wrong when it was the other way round. Closed is the number 1, and
+ * nothing measured can move it.
  */
+export const sheetP: SharedValue<number> = makeMutable(1);
+
+/** How far the finger must travel before a drag counts as an open rather than
+ *  a stray touch on its way to a button. The SAME number the skip swipe uses
+ *  horizontally, so a diagonal resolves to whichever way it is leaning. */
 export const EXPAND_GRAB = 14;
 
 /** A square on screen, in window coordinates. */
 export type Rect = {x: number; y: number; size: number};
 
-/** A rectangle on screen, in window coordinates. Used for the two surfaces —
- *  the full panel and the mini player's bar — that morph into each other. */
+/** A rectangle on screen, in window coordinates — the two SURFACES that morph
+ *  into each other, as opposed to the two covers. */
 export type Box = {x: number; y: number; w: number; h: number};
 
 /**
  * Where each artwork is right now.
  *
- * Shared values rather than plain module variables because the morph reads them
- * from a worklet on the UI thread, sixty times a second, while a JS-side
+ * Shared values rather than plain module variables because the transition reads
+ * them from a worklet on the UI thread, sixty times a second, while a JS-side
  * `measureInWindow` callback may be writing them. A shared value is the only
  * thing here both sides can touch.
  *
  * `size: 0` means "not measured yet", and every reader treats that as "no
- * morph" — a cover that has not been laid out must never move the sheet to
+ * morph" — a cover that has not been laid out must never move anything to
  * coordinate 0.
  */
 export const miniArt: SharedValue<Rect> = makeMutable({x: 0, y: 0, size: 0});
 export const bigArt: SharedValue<Rect> = makeMutable({x: 0, y: 0, size: 0});
 
-/**
- * The two SURFACES, as opposed to the two covers.
- *
- * `miniBar` is the floating bar's own frame; `sheetRect` is the full panel's,
- * measured with its current offset taken back out so it describes where the
- * panel sits when open. Between them they let the panel's boundary travel to
- * the bar's boundary instead of dissolving on the spot — see `surfaceRect`.
- */
+/** `miniBar` is the floating bar's own frame; `sheetRect` is the full panel's,
+ *  measured with its current offset taken back out so it describes where the
+ *  panel sits when open. */
 export const miniBar: SharedValue<Box> = makeMutable({x: 0, y: 0, w: 0, h: 0});
-export const sheetRect: SharedValue<Box> = makeMutable({x: 0, y: 0, w: 0, h: 0});
+export const sheetRect: SharedValue<Box> = makeMutable({
+  x: 0,
+  y: 0,
+  w: 0,
+  h: 0,
+});
 
 /** The mini bar's corner radius — PAD + MINI_ART_RADIUS, concentric with its
- *  artwork. The panel's corners interpolate to exactly this. */
+ *  artwork. The panel's corners interpolate to exactly this, and PlayerBar
+ *  builds its own corner from the same constant so the two cannot drift. */
 export const MINI_BAR_RADIUS = 11;
 
-/**
- * The mini player's cover radius, and the value the morph rounds down to.
- *
- * It lives here rather than in PlayerBar because the morph is the thing that
- * has to agree with it — PlayerBar imports it back for its own style, so there
- * is exactly one number and no chance of the two drifting apart. The bar's
- * concentric-corner rule (outer radius = inner radius + padding) is built on
- * top of it there.
- */
+/** The mini player's cover radius, and what the big cover rounds down to. */
 export const MINI_ART_RADIUS = 6;
 
-/** The full player's cover radius — the other end of the interpolation. */
+/** The full player's cover radius — the other end of that interpolation. */
 export const BIG_ART_RADIUS = 10;
 
 /**
- * How far the sheet travels while the artwork is shrinking.
+ * How far the panel slides while the artwork is shrinking.
  *
- * The sheet's own downward translation does ALL of the vertical work: by the
- * time it has moved this far, the big cover is sitting exactly where the mini
- * cover is, and the morph is finished. Past that point the artwork holds
- * position (see the counter-translate in PlayerScreen) while the rest of the
- * panel carries on off the bottom of the screen.
+ * The panel's own downward travel does ALL of the vertical work: by the time it
+ * has moved this far, the big cover is sitting exactly where the mini cover is.
  *
  * Takes both rects as ARGUMENTS rather than reading the shared values itself,
  * and that is not stylistic. Reanimated builds a style's dependency list from
@@ -134,81 +135,72 @@ export const BIG_ART_RADIUS = 10;
  * values in its own body, where they are seen.
  *
  * Clamped to a sane minimum so a mid-layout read — or a device where the two
- * squares genuinely overlap — can never divide by something near zero and send
- * the progress to infinity.
+ * squares genuinely overlap — can never divide by something near zero.
  */
 export function spanBetween(mini: Rect, big: Rect): number {
   'worklet';
   if (!mini.size || !big.size) {
-    return HIDE_Y;
+    return FALLBACK_SPAN;
   }
   return Math.max(120, mini.y + mini.size / 2 - (big.y + big.size / 2));
 }
 
 /**
- * Where the big cover should be drawn for a given sheet position.
+ * Where the big cover should be drawn at a given point in the transition.
  *
- * The whole morph in one pure function, so it can be checked rather than
- * eyeballed: at the end of the travel the numbers below must place the big
- * square EXACTLY on top of the small one, or the hand-off to the real mini
- * player shows as a jump at the last moment. `__tests__/playerMorph.test.ts`
- * asserts that.
+ * The whole thing in one pure function, so it can be checked rather than
+ * eyeballed: at `p = 1` the numbers below must place the big square EXACTLY on
+ * top of the small one, or the hand-off shows as a jump at the last moment.
  *
  * - `dx` is a plain centre-to-centre difference. RN applies a translate in the
- *   PARENT's coordinate space whatever comes after it in the transform list,
- *   so a scale later in the array needs no correction here.
- * - `dy` is zero for the whole of the morph: the sheet is already carrying the
- *   artwork down one-for-one, and `spanBetween` is defined as exactly the
- *   distance at which that lands it on the mini slot. Past that point the panel
- *   keeps going and the cover must not, so it subtracts the overshoot and
- *   parks.
+ *   PARENT's coordinate space whatever comes after it in the transform list, so
+ *   a scale later in the array needs no correction here.
+ * - `dy` is zero throughout. The panel is already carrying the cover down by
+ *   `span * p`, and `span` is defined as exactly the distance at which that
+ *   lands it on the mini slot — so the cover simply rides along. There is no
+ *   overshoot to undo, because the panel now stops AT the span rather than
+ *   continuing a whole screen past it.
  * - `radius` is divided by the scale, because a corner radius shrinks with the
  *   view it is on: asking for 6 at scale 0.14 would paint a corner under a
  *   pixel wide. What has to interpolate on SCREEN is `radius * scale`.
  */
-export function morphTransform(mini: Rect, big: Rect, y: number) {
+export function morphTransform(mini: Rect, big: Rect, p: number) {
   'worklet';
-  // `p` is computed FIRST, and before any guard, because it is not geometry —
-  // it is simply how far down the sheet is sitting, and it is meaningful
-  // whether or not the two covers have been measured.
-  //
-  // Getting that wrong shipped a genuinely broken build. The unmeasured case
-  // used to return `p: 0` along with the identity transform, reading "no morph"
-  // as "fully open". But `bigArt` is only measured once the full player has
-  // laid itself out, which never happens until the player is opened — and the
-  // mini player fades itself in on `p`. So on a fresh launch the bar computed
-  // an opacity of 0 and disappeared, taking with it the only way to open the
-  // panel that would have measured it. Music played to an empty screen.
-  //
-  // spanBetween falls back to HIDE_Y when nothing is measured, so a closed
-  // sheet gives p = 1 — bar fully visible — which is the honest answer.
+  // Clamped rather than trusted: the geometry below must not be asked to
+  // extrapolate past either rectangle.
+  const t = Math.min(1, Math.max(0, p));
   const span = spanBetween(mini, big);
-  const p = Math.min(1, Math.max(0, y / span));
-  // Only the GEOMETRY degrades: no scaling and no travel toward a square whose
-  // size we do not know. The panel falls back to a plain slide, which is what
-  // it did before the morph existed.
+  // Only the GEOMETRY degrades when nothing has been measured — no scaling, no
+  // travel toward a square whose size is unknown. `p` still comes back
+  // untouched, because the mini player's own visibility depends on it and a bar
+  // that hides itself is not a fallback, it is a brick. That exact mistake
+  // shipped once: the unmeasured branch returned `p: 0`, reading "no morph" as
+  // "fully open", so on a fresh launch the bar computed zero opacity and
+  // vanished — taking with it the only control that opens the panel whose
+  // layout would have measured it.
   if (!mini.size || !big.size) {
-    return {p, scale: 1, dx: 0, dy: 0, radius: BIG_ART_RADIUS};
+    return {p: t, span, scale: 1, dx: 0, dy: 0, radius: BIG_ART_RADIUS};
   }
-  const scale = 1 + (mini.size / big.size - 1) * p;
+  const scale = 1 + (mini.size / big.size - 1) * t;
   return {
-    p,
+    p: t,
+    span,
     scale,
-    dx: (mini.x + mini.size / 2 - (big.x + big.size / 2)) * p,
-    dy: -Math.max(0, y - span),
-    radius: (BIG_ART_RADIUS + (MINI_ART_RADIUS - BIG_ART_RADIUS) * p) / scale,
+    dx: (mini.x + mini.size / 2 - (big.x + big.size / 2)) * t,
+    dy: 0,
+    radius: (BIG_ART_RADIUS + (MINI_ART_RADIUS - BIG_ART_RADIUS) * t) / scale,
   };
 }
 
 /**
- * How visible the mini player is, for a given sheet position.
+ * How visible the mini player is at a given point in the transition.
  *
- * The bar fades in on the TAIL of the morph. Without that it sat at full
- * strength behind a panel that was itself fading out, so half way through a
- * dismissal there were two players on screen — the cover shrinking toward a bar
- * that was already drawn underneath it. Held at zero until the morph is three
- * quarters done, then brought in over the last quarter, by which point the
- * shrinking cover is nearly on top of this one.
+ * The bar fades in on the TAIL. Without that it sat at full strength behind a
+ * panel that was itself fading out, so half way through a dismissal there were
+ * two players on screen — the cover shrinking toward a bar already drawn
+ * underneath it. Held at zero until the panel's surface has shrunk to roughly
+ * bar-sized, then brought in over the last stretch, by which point the two are
+ * the same rectangle in the same place and the crossing is not a visible event.
  *
  * ## The guard is not optional
  *
@@ -216,22 +208,14 @@ export function morphTransform(mini: Rect, big: Rect, y: number) {
  * left to the arithmetic. This function decides whether the ONLY control that
  * opens the full player is on screen at all: if it ever returns 0 while the
  * player is closed, the app plays music to a screen with no transport on it and
- * no way to get one back. A rule that important should not be an emergent
- * property of a division — it should be a line you can read.
- *
- * Pure and exported, so the test can pin exactly that.
+ * no way to get one back. A rule that important should be a line you can read,
+ * not an emergent property of a division.
  */
-export function miniBarOpacity(mini: Rect, big: Rect, y: number): number {
+export function miniBarOpacity(big: Rect, p: number): number {
   'worklet';
   if (!big.size) {
     return 1;
   }
-  const p = morphTransform(mini, big, y).p;
-  // The last 12%. The panel's own surface has by then shrunk to this bar's
-  // exact rectangle and is fading out over it, so what crosses here is two
-  // views of the same size in the same place — which is not a visible change
-  // at all. It used to start at 75%, while a still-large translucent panel was
-  // draped over the bar, and the pair read as a flash.
   return Math.min(1, Math.max(0, (p - 0.88) / 0.12));
 }
 
@@ -244,28 +228,25 @@ export function miniBarOpacity(mini: Rect, big: Rect, y: number): number {
  * — reads as a flash, because a third of the screen changes brightness in under
  * a tenth of a second. Shrinking it instead means there is never a large shape
  * to get rid of: by the time it disappears it is already bar-sized, bar-shaped
- * and in the bar's place, and the real bar is fading up underneath it.
+ * and in the bar's place, with the real bar fading up underneath it.
  *
  * Returned in the panel's OWN coordinates, because that is where the view
- * lives. The panel is itself translated down by `y`, so the target has to have
+ * lives. The panel is itself translated down by `offsetY`, so the target has
  * that subtracted back out or the surface would chase the panel downward
  * instead of staying put over the bar.
  *
- * Both rectangles are measured. With either one missing this returns the full
- * panel unchanged, so the transition degrades to the plain fade rather than
- * collapsing the surface to a point.
+ * With either rectangle unmeasured this returns the whole window rather than
+ * `sheet.w`, which is ZERO until the measurement lands — a zero-width surface
+ * is an invisible panel, and this function must never be the reason the player
+ * has no background.
  */
 export function surfaceRect(
   sheet: Box,
   bar: Box,
-  y: number,
+  offsetY: number,
   p: number,
 ): {left: number; top: number; width: number; height: number; radius: number} {
   'worklet';
-  // Not measured yet — one frame at mount, or mid-rotation. Fall back to the
-  // whole window rather than to `sheet.w`, which is ZERO until the measurement
-  // lands: a zero-width surface is an invisible panel, and this function must
-  // never be the reason the player has no background.
   if (!sheet.w || !bar.w) {
     return {
       left: 0,
@@ -280,67 +261,36 @@ export function surfaceRect(
     // Interpolated in WINDOW space, then converted to the panel's own frame by
     // removing the panel's origin and its current offset.
     left: lerp(sheet.x, bar.x) - sheet.x,
-    top: lerp(sheet.y, bar.y) - sheet.y - y,
+    top: lerp(sheet.y, bar.y) - sheet.y - offsetY,
     width: lerp(sheet.w, bar.w),
     height: lerp(sheet.h, bar.h),
     radius: lerp(0, MINI_BAR_RADIUS),
   };
 }
 
-/**
- * Park the panel ready to open, with no animation — for opening by TAP, where
- * the settle should start from a known place rather than from wherever a
- * previous gesture left it.
- *
- * At the SPAN, not at HIDE_Y, for the same reason the upward drag starts there:
- * everything above the span is invisible (the backdrop has faded out and the
- * cover is parked exactly on the mini player's), so the two look identical at
- * rest — but an open that begins at HIDE_Y spends its first 40% travelling
- * through that invisible stretch, and the morph only gets the tail of the
- * animation. Starting here gives the whole 260ms to the part you can see.
- */
+/** Park the panel closed with no animation — for opening by TAP, where the
+ *  settle should start from a known place rather than from wherever a previous
+ *  gesture left it. */
 export function resetPlayer(): void {
-  sheetY.value = closedY();
-}
-
-/**
- * Where the sheet rests when the player is closed.
- *
- * The SPAN, not a whole screen height. Everything past the span is invisible —
- * the backdrop has faded out and the cover is parked exactly on the mini
- * player's — so travelling it is time the animation spends showing nothing.
- * Closing used to spend 44% of its duration down there, which is why the
- * dismissal appeared to finish and then take a moment longer to let go.
- *
- * It is also where an open begins, so open and close are now the same journey
- * in opposite directions rather than two different lengths.
- */
-export function closedY(): number {
-  'worklet';
-  return spanBetween(miniArt.value, bigArt.value);
+  sheetP.value = 1;
 }
 
 /**
  * Let go: run the rest of the way to open or closed.
  *
- * A flick finishes quicker than a slow drag, so the panel keeps whatever
- * momentum the finger gave it — the same easing and the same reasoning as
- * `settleDrawer`.
+ * Slower than it once was (260/280ms), and deliberately. The morph is the thing
+ * being watched now, not just a panel getting out of the way, and at a quarter
+ * of a second the eye reads the end state rather than the change. A flick keeps
+ * the momentum the finger gave it.
  */
 export function settlePlayer(
   open: boolean,
   velocity = 0,
   done?: (finished: boolean) => void,
 ): void {
-  sheetY.value = withTiming(
-    open ? 0 : closedY(),
+  sheetP.value = withTiming(
+    open ? 0 : 1,
     {
-      // Slower than it was (260/280), and deliberately.
-      //
-      // The morph is the thing being watched now, not just a panel getting out
-      // of the way, and at a quarter of a second the eye reads the end state
-      // rather than the change. These are close to the upper limit before a
-      // transition starts to feel like something you are waiting for.
       duration: Math.abs(velocity) > 1500 ? 300 : open ? 420 : 440,
       easing: Easing.out(Easing.cubic),
     },

@@ -50,8 +50,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: C.bg,
   },
-  // 172, not 132. On a 1080-wide phone the old mark was under a third of the
-  // screen width and read as an icon sitting on a black page rather than as
-  // the app opening. The radius keeps the same proportion it had.
-  icon: {width: 172, height: 172, borderRadius: 39},
+  // 208. The mark is the only thing on the screen, so it should read as the
+  // app arriving rather than as an icon placed on a black page — a bit over
+  // half the width of a 360dp phone does that without crowding the edges. The
+  // radius keeps the proportion it had at every earlier size.
+  icon: {width: 208, height: 208, borderRadius: 47},
 });

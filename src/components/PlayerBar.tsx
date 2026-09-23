@@ -56,11 +56,11 @@ import {
   MINI_ART_RADIUS,
   MINI_BAR_RADIUS,
   bigArt,
-  closedY,
   miniArt,
   miniBar,
   miniBarOpacity,
-  sheetY,
+  sheetP,
+  spanBetween,
 } from '../playerSheet';
 import type {Track} from '../backend';
 import {AddButton} from './AddButton';
@@ -199,27 +199,22 @@ export const PlayerBar = React.memo(function PlayerBar({
    *
    * The tap still works and is still the common case — this is for the drag,
    * which used to do nothing at all, so the panel could only ever appear on its
-   * own schedule after the gesture had finished. Writing `sheetY` directly is
+   * own schedule after the gesture had finished. Writing `sheetP` directly is
    * what makes the cover grow out of this slot as the thumb travels: the full
-   * player's whole morph is a function of that one value, so the two are the
-   * same motion rather than two animations that happen to agree.
+   * player's whole transition is a function of that one value, so the two are
+   * the same motion rather than two animations that happen to agree.
    *
    * UPWARD only, and it fails on horizontal travel so the skip swipe above
    * keeps its claim. The two are raced rather than nested: whichever the finger
    * commits to first wins outright, at the same threshold on both axes.
    *
-   * ## Why the drag starts at `closedY` and not a whole screen down
+   * ## The pull is measured against the SPAN, not the screen
    *
-   * The sheet's closed position is a whole screen height down; the distance
-   * over which the cover actually changes size is the shorter `spanBetween`.
-   * Starting the drag a full screen down meant the first ~390px of a pull moved
-   * the panel while changing nothing anyone could see — the backdrop is still
-   * fully transparent up there and the cover is still parked on top of the real
-   * mini player — so the gesture felt dead until it suddenly committed.
-   *
-   * Starting at the span looks identical at rest (everything above it is
-   * invisible anyway) and maps the whole pull onto the part that is visible:
-   * the cover begins growing on the first pixel of travel.
+   * The distance over which the cover actually changes size is shorter than the
+   * screen. Measuring the drag against the full height meant the first ~40% of
+   * an upward pull moved the panel while changing nothing anyone could see, so
+   * the gesture felt dead until it suddenly committed. Against the span, the
+   * cover begins growing on the first pixel of travel.
    */
   const pullUp = useMemo(
     () =>
@@ -227,22 +222,23 @@ export const PlayerBar = React.memo(function PlayerBar({
         .activeOffsetY([-EXPAND_GRAB, 1000])
         .failOffsetX([-EXPAND_GRAB, EXPAND_GRAB])
         .onStart(() => {
-          sheetY.value = closedY();
+          sheetP.value = 1;
           runOnJS(onBeginExpandDrag)();
         })
         .onUpdate(e => {
-          // translationY is negative going up, so adding it walks the sheet
-          // toward 0 — fully open. Clamped at both ends so pushing past the
-          // top does not overshoot into a gap above the panel.
-          const from = closedY();
-          sheetY.value = Math.min(from, Math.max(0, from + e.translationY));
+          // translationY is negative going up, so this walks the proportion
+          // from 1 (closed) toward 0 (open) across the SPAN — the distance
+          // over which the cover actually changes size. Measuring the drag
+          // against a whole screen height meant the first 40% of a pull moved
+          // the panel while changing nothing anyone could see.
+          const span = spanBetween(miniArt.value, bigArt.value);
+          sheetP.value = Math.min(1, Math.max(0, 1 + e.translationY / span));
         })
         .onEnd((e, success) => {
           // A third of the way, or a firm flick. Anything less goes back — a
           // gesture you abandoned must not commit.
-          const from = closedY();
           const open =
-            success && (-e.translationY > from * 0.3 || e.velocityY < -700);
+            success && (sheetP.value < 0.7 || e.velocityY < -700);
           runOnJS(onEndExpandDrag)(open, e.velocityY);
         }),
     [onBeginExpandDrag, onEndExpandDrag],
@@ -320,7 +316,7 @@ export const PlayerBar = React.memo(function PlayerBar({
    * computed once and never updated again.
    */
   const barFade = useAnimatedStyle(() => ({
-    opacity: miniBarOpacity(miniArt.value, bigArt.value, sheetY.value),
+    opacity: miniBarOpacity(bigArt.value, sheetP.value),
   }));
   const barStyle = useAnimatedStyle(() => ({
     transform: [{scale: 1 - press.value * 0.015}],

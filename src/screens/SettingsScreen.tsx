@@ -4,7 +4,6 @@ import {
   BackHandler,
   Easing,
   NativeModules,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -51,14 +50,6 @@ import {Toggle} from '../components/Toggle';
 import {EqualizerScreen} from './EqualizerScreen';
 import {ConfirmModal} from '../components/ConfirmModal';
 import {applyAudioEffects} from '../audioEffects';
-import {
-  APP_ICONS,
-  type AppIconKey,
-  appIconSupported,
-  currentAppIcon,
-  restartApp,
-  setAppIcon,
-} from '../appIcon';
 import {dropQueuedRadio} from '../player';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
@@ -479,39 +470,6 @@ export function SettingsScreen({
   const [ytBusy, setYtBusy] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
 
-  /**
-   * The live launcher icon, read from the system rather than remembered.
-   *
-   * A stored copy drifts the moment anything changes the component state from
-   * outside — a restore, a reinstall, adb — and a picker showing the wrong one
-   * as selected is worse than one that has to go and ask.
-   */
-  const [icon, setIcon] = useState<AppIconKey>('default');
-  /** Non-null while asking whether to relaunch; holds the icon just applied. */
-  const [restartFor, setRestartFor] = useState<AppIconKey | null>(null);
-  useEffect(() => {
-    currentAppIcon().then(setIcon);
-  }, []);
-
-  const pickIcon = useCallback(
-    async (key: AppIconKey) => {
-      if (key === icon) {
-        return;
-      }
-      try {
-        const changed = await setAppIcon(key);
-        setIcon(await currentAppIcon());
-        // Only ask about a restart when something actually changed — `false`
-        // means that icon was already live and there is nothing to refresh.
-        if (changed) {
-          setRestartFor(key);
-        }
-      } catch {
-        toast('Could not change the app icon');
-      }
-    },
-    [icon],
-  );
   const sleep = useSleepTimer();
   const scrollRef = useRef<ScrollView>(null);
   const updateY = useRef(0);
@@ -1014,43 +972,6 @@ export function SettingsScreen({
         </Section>
 
         <Section title="Appearance" Icon={Eye}>
-          {appIconSupported() && (
-            <View style={styles.row}>
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>App icon</Text>
-                <Text style={styles.rowHint}>
-                  Changes the mark on your home screen
-                </Text>
-              </View>
-            </View>
-          )}
-          {appIconSupported() && (
-            <View style={styles.iconRow}>
-              {APP_ICONS.map(opt => {
-                const on = icon === opt.key;
-                return (
-                  <TouchableOpacity
-                    key={opt.key}
-                    activeOpacity={0.8}
-                    onPress={() => pickIcon(opt.key)}
-                    style={styles.iconChoice}
-                    accessibilityRole="button"
-                    accessibilityState={{selected: on}}
-                    accessibilityLabel={`${opt.label} app icon`}>
-                    <Image
-                      source={opt.preview}
-                      style={[styles.iconArt, on && styles.iconArtOn]}
-                    />
-                    <Text
-                      style={[styles.iconLabel, on && styles.iconLabelOn]}
-                      numberOfLines={1}>
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
           <ToggleRow
             label="Show source label"
             hint="Marks which service each track came from"
@@ -1135,26 +1056,6 @@ export function SettingsScreen({
         <View style={styles.tail} />
       </ScrollView>
 
-      {/* The app's own dialog rather than a system toast: this asks a question
-          with two answers, and it is the launcher — not the app — that has not
-          caught up yet, which takes a sentence to say. */}
-      <ConfirmModal
-        visible={restartFor !== null}
-        title="Restart to finish?"
-        message={
-          'The icon is set. Some launchers keep showing the old one until the ' +
-          'app is restarted — and a few not until the phone is. Restarting ' +
-          'stops whatever is playing.'
-        }
-        confirmLabel="Restart now"
-        cancelLabel="Later"
-        onConfirm={() => {
-          setRestartFor(null);
-          restartApp();
-        }}
-        onCancel={() => setRestartFor(null)}
-      />
-
       <ConfirmModal
         visible={resetOpen}
         title="Reset all settings?"
@@ -1178,26 +1079,6 @@ export function SettingsScreen({
 }
 
 const styles = StyleSheet.create({
-  // The picker sits INSIDE the Appearance card, under its own label row, so it
-  // reads as one setting with a choice rather than as a second kind of card.
-  iconRow: {
-    flexDirection: 'row',
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    paddingTop: 2,
-  },
-  iconChoice: {alignItems: 'center', gap: 7},
-  iconArt: {
-    width: 62,
-    height: 62,
-    borderRadius: 15,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  iconArtOn: {borderColor: C.accent},
-  iconLabel: {...T.sub, color: C.sub},
-  iconLabelOn: {color: C.accent, fontWeight: '700'},
   wrap: {flex: 1, backgroundColor: C.bg},
   bar: {
     flexDirection: 'row',

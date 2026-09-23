@@ -587,7 +587,7 @@ function Shell() {
    * A pull UP on the mini player has begun.
    *
    * Mount the full player WITHOUT animating it: PlayerBar has already parked
-   * sheetY at HIDE_Y and is about to drive it frame by frame, and an open
+   * the panel closed and is about to drive it frame by frame, and an open
    * animation started here would fight the thumb for the same value. That is
    * what `dragging` tells PlayerScreen.
    */

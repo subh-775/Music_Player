@@ -90,8 +90,9 @@ import {
   morphTransform,
   resetPlayer,
   settlePlayer,
+  sheetP,
   sheetRect,
-  sheetY,
+  spanBetween,
   surfaceRect,
 } from '../playerSheet';
 import {surfaceTint, useArtworkColor} from '../artworkColor';
@@ -162,7 +163,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   onOpenArtist,
 }: {
   visible: boolean;
-  /** True while a finger on the mini player is driving `sheetY` directly. The
+  /** True while a finger on the mini player is driving `sheetP` directly. The
    *  open animation must not run against it — see the effect below. */
   dragging?: boolean;
   onClose: () => void;
@@ -379,7 +380,10 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     // below re-measures with the sheet at rest, which corrects it exactly;
     // upgrade path if that is ever not enough is to measure in a worklet off
     // the same frame.
-    const at = sheetY.value;
+    // The panel's CURRENT pixel offset, derived from the proportion the same
+    // way the style derives it — so the measurement is corrected by exactly
+    // the transform it was taken through.
+    const at = sheetP.value * spanBetween(miniArt.value, bigArt.value);
     artRef.current?.measureInWindow((x, y, w) => {
       if (w > 0) {
         bigArt.value = {x, y: y - at, size: w};
@@ -398,13 +402,13 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   useEffect(() => {
     if (visible) {
       // `dragging` is the mini player's pull. When the finger is already
-      // driving sheetY, animating it to 0 from here would yank the panel out
+      // driving sheetP, animating it to 0 from here would yank the panel out
       // from under it — the open must stay where the thumb is until it lifts.
       //
       // The `> 0` guard matters on the way out of a drag: clearing `dragging`
       // re-runs this effect, and without it an abandoned pull (which is
       // settling back DOWN) would be turned into an open.
-      if (!dragging && sheetY.value > 0) {
+      if (!dragging && sheetP.value > 0) {
         settlePlayer(true, 0, measureArt);
       } else if (!dragging) {
         // Already open — take the measurement the morph needs while the sheet
@@ -467,7 +471,10 @@ export const PlayerScreen = React.memo(function PlayerScreen({
         .activeOffsetY([-1000, 10])
         .failOffsetX([-18, 18])
         .onUpdate(e => {
-          sheetY.value = Math.max(0, e.translationY);
+          // Across the SPAN, so the proportion means the same thing whether it
+          // is a finger or an animation driving it.
+          const span = spanBetween(miniArt.value, bigArt.value);
+          sheetP.value = Math.min(1, Math.max(0, e.translationY / span));
         })
         .onEnd((e, success) => {
           if (success && (e.translationY > 120 || e.velocityY > 800)) {
@@ -479,7 +486,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           } else {
             // Firm, and clamped: the old RN spring overshot and wobbled visibly
             // on release, which read as jittery for a sheet this size.
-            sheetY.value = withSpring(0, {
+            sheetP.value = withSpring(0, {
               damping: 22,
               stiffness: 190,
               overshootClamping: true,
@@ -629,6 +636,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   );
 
   const sheetStyle = useAnimatedStyle(() => {
+    const y = sheetP.value * spanBetween(miniArt.value, bigArt.value);
     // No corner radius here any more. The SURFACE owns the panel's corners now
     // and rounds them all the way to the bar's own — a radius on this wrapper
     // as well would clip the surface against a second, differently-timed curve
@@ -645,7 +653,11 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       // that a settled sheet stops handing Android a matrix to compose at all,
       // which is free and correct on its own terms. The structural fix is the
       // queue moving out of this stack entirely.
-      transform: sheetY.value === 0 ? [] : [{translateY: sheetY.value}],
+      // Pixels, derived from the proportion and the CURRENT measurements. The
+      // panel travels exactly `span`, which is defined as the distance that
+      // lands the big cover on the small one — so at p = 1 the cover is on the
+      // slot whatever has been re-measured since the gesture began.
+      transform: y === 0 ? [] : [{translateY: y}],
     };
   });
   /**
@@ -657,14 +669,12 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    * is read directly in this body, which is the only way Reanimated knows to
    * re-run it. The styles then depend on this one value.
    */
-  const morph = useDerivedValue(
-    () => morphTransform(miniArt.value, bigArt.value, sheetY.value).p,
-  );
+  const morph = useDerivedValue(() => sheetP.value);
 
   /**
    * The morph: the cover shrinks into the mini player's slot, and back out.
    *
-   * Everything here is a function of `sheetY`, which is also what moves the
+   * Everything here is a function of `sheetP`, which is also what moves the
    * sheet — so the two can never disagree, and both run on the UI thread under
    * the finger. The maths reads the same in both directions, which is why
    * opening needed no separate animation: dragging up on the mini player drives
@@ -686,7 +696,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    * the identity there rather than flinging the cover at coordinate zero.
    */
   const artStyle = useAnimatedStyle(() => {
-    const m = morphTransform(miniArt.value, bigArt.value, sheetY.value);
+    const m = morphTransform(miniArt.value, bigArt.value, sheetP.value);
     return {
       borderRadius: m.radius,
       transform: [
@@ -747,9 +757,34 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   // an ellipse — 11px across and under a pixel down by the end. The node is a
   // childless leaf so Yoga re-measures one view per frame; upgrade path if it
   // ever janks is a transform plus a separately-drawn corner.
+  /**
+   * When the panel is fully closed it draws NOTHING. Not a faded surface, not a
+   * cover parked on the mini player's — nothing.
+   *
+   * Every stray-artwork report has had the same shape: something ends up
+   * slightly off the value it should have settled on, and a leftover piece of
+   * the panel is left sitting somewhere near the bar. Chasing each cause one at
+   * a time is a losing game, because the panel being closed and the panel being
+   * invisible were two facts that had to agree rather than one fact. This makes
+   * them one: past 0.999 there is no transition left to show, so the whole
+   * thing is switched off and nothing it contains can be visible whatever the
+   * arithmetic inside it did.
+   *
+   * `display: none` rather than opacity, so it also stops being laid out and
+   * composited while parked — which is most of the session.
+   */
+  const hostStyle = useAnimatedStyle(() => ({
+    display: morph.value > 0.999 ? ('none' as const) : ('flex' as const),
+  }));
+
   const backdropStyle = useAnimatedStyle(() => {
     const p = morph.value;
-    const r = surfaceRect(sheetRect.value, miniBar.value, sheetY.value, p);
+    const r = surfaceRect(
+      sheetRect.value,
+      miniBar.value,
+      p * spanBetween(miniArt.value, bigArt.value),
+      p,
+    );
     return {
       left: r.left,
       top: r.top,
@@ -859,8 +894,8 @@ export const PlayerScreen = React.memo(function PlayerScreen({
      * it by construction, and the app's own GestureHandlerRootView now covers
      * these gestures, so the second root view this used to need is gone too.
      */
-    <View
-      style={styles.host}
+    <Animated.View
+      style={[styles.host, hostStyle]}
       // A parked player is still in the tree; it must not eat touches meant for
       // the app behind it.
       pointerEvents={visible ? 'auto' : 'none'}>
@@ -1228,7 +1263,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
           />
         </Sheet>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 });
 
