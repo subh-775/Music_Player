@@ -313,7 +313,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={C.accent} />
+          <ActivityIndicator size="large" color={C.accent} />
         </View>
       ) : (
         <View style={styles.listBox}>
@@ -576,7 +576,12 @@ const styles = StyleSheet.create({
   chipOn: {backgroundColor: C.text},
   chipText: {...T.sub, color: C.text, fontSize: 13},
   chipTextOn: {color: C.bg, fontWeight: '700'},
-  center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: BOTTOM_INSET,
+  },
   // The bars at the foot of the app float OVER the page now, so a list has to
   // end above them or its last row is permanently behind one. See src/layout.ts.
   listBox: {flex: 1},

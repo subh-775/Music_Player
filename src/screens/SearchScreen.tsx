@@ -318,7 +318,7 @@ export const SearchScreen = React.memo(function SearchScreen({
 
       {busy && (
         <View style={styles.center}>
-          <ActivityIndicator color={C.accent} />
+          <ActivityIndicator size="large" color={C.accent} />
         </View>
       )}
 
@@ -563,7 +563,15 @@ const styles = StyleSheet.create({
   },
   spotifyTitle: {...T.body, color: C.text},
   spotifySub: {...T.sub, color: C.sub, marginTop: 4},
-  center: {paddingVertical: 40, alignItems: 'center'},
+  // The whole space under the field, centred in the part you can SEE: the
+  // mini player and tab bar float over the bottom BOTTOM_INSET of it. Nothing
+  // else renders while a search is running, so the spinner has it to itself.
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: BOTTOM_INSET,
+  },
   error: {
     color: C.danger,
     paddingHorizontal: S.gutter,

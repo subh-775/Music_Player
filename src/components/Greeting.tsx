@@ -1,48 +1,71 @@
 /**
- * "Good evening" — the time-of-day header on Home.
+ * "Listen up Buddy" — the header on Home, one colour per letter.
  *
- * The time word is colour-coded (morning amber, afternoon green, evening
- * violet) and blushes in: a short fade plus a brightness bloom, so opening the
- * app feels like arriving somewhere rather than a list appearing.
+ * The colours are dealt fresh every time the app is opened: the palette is
+ * shuffled ONCE, at module load, so a launch gets its own arrangement and keeps
+ * it while you use the app — a header that re-rolled on every render would
+ * flicker each time Home re-rendered.
  *
- * The hour is read once per mount and again on a slow tick, so leaving the app
- * open across, say, 5:59pm doesn't leave it insisting it's still afternoon.
+ * Every colour in the palette is bright enough to read on true black, and no
+ * two neighbouring letters are ever given the same one, so the line always
+ * reads as a run of colour rather than blocks of it.
+ *
+ * It blushes in on mount — a short fade and rise — so opening the app feels
+ * like arriving somewhere rather than a list appearing.
  */
-import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
-import {C} from '../theme';
+import React, {useEffect, useRef} from 'react';
+import {Animated, Easing, StyleSheet, Text} from 'react-native';
 
-function partOfDay(hour: number): {word: string; color: string} {
-  if (hour < 12) {
-    return {word: 'morning', color: '#f0b429'};
+const LINE = 'Listen up Buddy';
+
+/** Vivid on #000, each distinct in hue from its neighbours in the wheel. */
+const PALETTE = [
+  '#FF5A5F', // coral red
+  '#FF9F1C', // orange
+  '#FFD23F', // sun yellow
+  '#8AE234', // lime
+  '#2EC4B6', // teal
+  '#00B4FF', // sky
+  '#7B8CFF', // periwinkle
+  '#B388FF', // lavender
+  '#FF6FD8', // pink
+];
+
+/**
+ * A colour for every character of `text` (spaces get '' — they have none).
+ *
+ * The palette is shuffled with `rand`, then dealt round in that order, so
+ * adjacent letters always differ as long as the palette has two or more
+ * entries. Exported for the test.
+ */
+export function letterColors(
+  text: string,
+  palette: string[],
+  rand: () => number = Math.random,
+): string[] {
+  const deck = [...palette];
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
   }
-  if (hour < 17) {
-    return {word: 'afternoon', color: C.accentBright};
-  }
-  return {word: 'evening', color: '#a78bfa'};
+  let n = 0;
+  return [...text].map(ch => (ch === ' ' ? '' : deck[n++ % deck.length]));
 }
 
+// Once per launch — see the note at the top.
+const COLORS = letterColors(LINE, PALETTE);
+
 export function Greeting() {
-  const [hour, setHour] = useState(() => new Date().getHours());
   const bloom = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Re-check every few minutes; the boundary only matters to the minute.
-    const id = setInterval(() => setHour(new Date().getHours()), 4 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    bloom.setValue(0);
     Animated.timing(bloom, {
       toValue: 1,
       duration: 620,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [bloom, hour]);
-
-  const {word, color} = partOfDay(hour);
+  }, [bloom]);
 
   return (
     <Animated.View
@@ -60,18 +83,27 @@ export function Greeting() {
           ],
         },
       ]}>
-      <View style={styles.line}>
-        <Text style={styles.good}>Good </Text>
-        <Text style={[styles.word, {color}]}>{word}</Text>
-      </View>
+      {/* One line, always: on a narrow phone the text shrinks rather than
+          wrapping or being cut off. Read out as the phrase, not letter by
+          letter. */}
+      <Text
+        style={styles.line}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        accessibilityRole="header"
+        accessibilityLabel={LINE}>
+        {[...LINE].map((ch, i) => (
+          <Text key={i} style={COLORS[i] ? {color: COLORS[i]} : null}>
+            {ch}
+          </Text>
+        ))}
+      </Text>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {flex: 1, minWidth: 0},
-  line: {flexDirection: 'row', alignItems: 'baseline'},
-  // lineHeight gives the 'g' descender room — Android crops it otherwise.
-  good: {fontSize: 32, lineHeight: 41, fontWeight: '900', color: C.text, letterSpacing: -1.1},
-  word: {fontSize: 32, lineHeight: 41, fontWeight: '900', letterSpacing: -1.1},
+  // lineHeight gives the 'y' descender room — Android crops it otherwise.
+  line: {fontSize: 32, lineHeight: 41, fontWeight: '900', letterSpacing: -1.1},
 });

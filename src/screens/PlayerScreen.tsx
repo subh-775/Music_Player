@@ -52,7 +52,7 @@ import {
   Timer,
 } from 'lucide-react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
-import Svg, {Rect} from 'react-native-svg';
+import Svg, {Defs, RadialGradient, Rect, Stop} from 'react-native-svg';
 import Animated, {
   Easing,
   runOnJS,
@@ -62,6 +62,7 @@ import Animated, {
   useSharedValue,
   withSpring,
   withTiming,
+  interpolateColor,
 } from 'react-native-reanimated';
 import {C} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
@@ -124,6 +125,53 @@ import {toast} from '../toast';
  * hour is how you stop it without unmounting it.
  */
 const PARKED_POLL = 3600000;
+
+/**
+ * The full player's colour, per song: the cover's hue at this app's own
+ * restrained saturation (surfaceTint), at three lightnesses.
+ *
+ *   STAGE_L — the open player's surface. Lifted from 0.075, where the song's
+ *             colour barely registered against true black.
+ *   BAR_L   — the middle of the mini bar's own gradient (0.145 → 0.095 in
+ *             PlayerBar), which is what the surface has to BE when it lands.
+ *   GLOW_L  — the light pooled behind the cover.
+ *
+ * The fallbacks are what shows before a cover's colour is known: black, and
+ * the bar's own untinted fill.
+ */
+const STAGE_L = 0.1;
+const BAR_L = 0.12;
+const GLOW_L = 0.3;
+const STAGE_FALLBACK = '#000000';
+const BAR_FALLBACK = '#262626';
+
+/**
+ * The cover's own light: a soft pool of its hue behind it, strongest at the
+ * centre, gone well inside the square it is drawn in.
+ *
+ * Drawn ONCE per song. The morph only moves and scales the view it sits in
+ * (a transform — the bitmap is reused, never re-rasterised), and fades it; no
+ * frame of the animation redraws it. Memoised so a re-render of the player
+ * does not either.
+ */
+const CoverGlow = React.memo(function CoverGlow({tint}: {tint: string | null}) {
+  if (!tint) {
+    return null;
+  }
+  const c = surfaceTint(tint, GLOW_L);
+  return (
+    <Svg width="100%" height="100%">
+      <Defs>
+        <RadialGradient id="coverGlow" cx="50%" cy="50%" r="50%">
+          <Stop offset="0.3" stopColor={c} stopOpacity={0.85} />
+          <Stop offset="0.62" stopColor={c} stopOpacity={0.32} />
+          <Stop offset="0.9" stopColor={c} stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill="url(#coverGlow)" />
+    </Svg>
+  );
+});
 
 const SWIPE_COMMIT = 64; // px before a swipe actually changes track
 // How far the artwork (and now the title) travels off-screen on a full swipe.
@@ -237,6 +285,17 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       ? getBestArtworkUrl(track)
       : String(active?.artwork ?? '') || undefined,
   );
+  /**
+   * The two ends of the surface's colour, per song — see STAGE_L / BAR_L.
+   * Shared values so the morph reads them on the UI thread; a new song writes
+   * them once, and nothing re-renders for it.
+   */
+  const stageColor = useSharedValue(STAGE_FALLBACK);
+  const barColor = useSharedValue(BAR_FALLBACK);
+  useEffect(() => {
+    stageColor.value = tint ? surfaceTint(tint, STAGE_L) : STAGE_FALLBACK;
+    barColor.value = tint ? surfaceTint(tint, BAR_L) : BAR_FALLBACK;
+  }, [tint, stageColor, barColor]);
 
   // Fetched here, not inside the pane: the tab bar has to know whether this
   // song has lyrics BEFORE the tab is pressed. Only while the sheet is open,
@@ -723,10 +782,12 @@ export const PlayerScreen = React.memo(function PlayerScreen({
    * frame after mount, or an old layout mid-rotation. The morph collapses to
    * the identity there rather than flinging the cover at coordinate zero.
    */
+  // The transform is on the FRAME, which carries the cover and its halo
+  // together; the rounded clip stays on the cover itself. Two styles because
+  // Reanimated will not share one across views.
   const artStyle = useAnimatedStyle(() => {
     const m = morphTransform(miniArt.value, bigArt.value, sheetP.value);
     return {
-      borderRadius: m.radius,
       transform: [
         // `slide` is the swipe-to-change-song offset, which keeps working
         // mid-morph: the two are different axes of the same view.
@@ -736,6 +797,18 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       ],
     };
   });
+  const artClipStyle = useAnimatedStyle(() => ({
+    borderRadius: morphTransform(miniArt.value, bigArt.value, sheetP.value)
+      .radius,
+  }));
+  /**
+   * The halo dims as the cover shrinks, and is gone (by 0.75) well before
+   * the cover is bar-sized: at mini-player size a pool of light would spill
+   * past the bar it is landing in.
+   */
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: 1 - Math.min(1, Math.max(0, (sheetP.value - 0.3) / 0.45)),
+  }));
 
   /**
    * Everything that is NOT the cover fades out over the same progress.
@@ -826,6 +899,14 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       width: r.width,
       height: r.height,
       borderRadius: r.radius,
+      // The surface travels from the open player's colour to the mini bar's
+      // own, arriving by 0.85 — just before the real bar starts fading in
+      // over it at 0.88 — so the handoff is between two identical colours.
+      backgroundColor: interpolateColor(
+        p,
+        [0, 0.85],
+        [stageColor.value, barColor.value],
+      ),
       opacity: 1 - Math.min(1, Math.max(0, (p - 0.9) / 0.1)),
     };
   });
@@ -950,11 +1031,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             rather than a wash. */}
         <Animated.View
           pointerEvents="none"
-          style={[
-            styles.backdrop,
-            !!tint && {backgroundColor: surfaceTint(tint, 0.075)},
-            backdropStyle,
-          ]}
+          style={[styles.backdrop, backdropStyle]}
         />
         {/* Header — close on the left, what you're inside of in the middle.
             Drag it (or the area around it) DOWN to dismiss, like Spotify. */}
@@ -998,29 +1075,35 @@ export const PlayerScreen = React.memo(function PlayerScreen({
             <GestureDetector gesture={artGesture}>
               <View style={styles.artArea}>
                 <Animated.View
-                  ref={artRef}
-                  onLayout={measureArt}
-                  style={[styles.artHolder, artStyle]}
+                  style={[styles.artFrame, artStyle]}
                   pointerEvents="none">
-                  {artwork ? (
-                    // Keyed by the URL: when the song changes, React swaps in
-                    // a FRESH Image rather than reusing the old element (which
-                    // held the previous cover visible until the new one
-                    // decoded — the "previous artwork for a few ms" flash).
-                    //
-                    // fadeDuration=0 because the cover is prefetched (see
-                    // warmArtwork in player.ts) — Android's default 300ms
-                    // cross-fade was spending a third of a second dissolving
-                    // in an image that was already decoded and ready to paint.
-                    <Image
-                      key={artwork}
-                      source={{uri: artwork}}
-                      style={styles.art}
-                      fadeDuration={0}
-                    />
-                  ) : (
-                    <View style={[styles.art, styles.artFallback]} />
-                  )}
+                  <Animated.View style={[styles.glow, glowStyle]}>
+                    <CoverGlow tint={tint} />
+                  </Animated.View>
+                  <Animated.View
+                    ref={artRef}
+                    onLayout={measureArt}
+                    style={[styles.artHolder, artClipStyle]}>
+                    {artwork ? (
+                      // Keyed by the URL: when the song changes, React swaps in
+                      // a FRESH Image rather than reusing the old element (which
+                      // held the previous cover visible until the new one
+                      // decoded — the "previous artwork for a few ms" flash).
+                      //
+                      // fadeDuration=0 because the cover is prefetched (see
+                      // warmArtwork in player.ts) — Android's default 300ms
+                      // cross-fade was spending a third of a second dissolving
+                      // in an image that was already decoded and ready to paint.
+                      <Image
+                        key={artwork}
+                        source={{uri: artwork}}
+                        style={styles.art}
+                        fadeDuration={0}
+                      />
+                    ) : (
+                      <View style={[styles.art, styles.artFallback]} />
+                    )}
+                  </Animated.View>
                 </Animated.View>
 
                 {/* Double-tap zones over the artwork edges. They claim a TAP
@@ -1633,7 +1716,7 @@ const LyricsPane = React.memo(function LyricsPane({
   if (busy) {
     return (
       <View style={styles.lyricCenter}>
-        <ActivityIndicator color={C.accent} />
+        <ActivityIndicator size="large" color={C.accent} />
       </View>
     );
   }
@@ -1788,12 +1871,25 @@ const styles = StyleSheet.create({
   // overflow: hidden so the radius the morph interpolates actually clips the
   // cover inside. The Image keeps no radius of its own — two of them disagreeing
   // is how you get a square corner peeking out from under a rounded one.
-  artHolder: {
+  artFrame: {
     width: '100%',
     aspectRatio: 1,
     maxHeight: '100%',
+  },
+  artHolder: {
+    width: '100%',
+    height: '100%',
     overflow: 'hidden',
     borderRadius: 10,
+  },
+  // 1.7x the cover, centred on it. The light is transparent well inside this
+  // square's edge, so nothing can show a hard boundary.
+  glow: {
+    position: 'absolute',
+    top: '-35%',
+    left: '-35%',
+    right: '-35%',
+    bottom: '-35%',
   },
   art: {
     width: '100%',

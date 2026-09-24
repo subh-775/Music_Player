@@ -1,0 +1,42 @@
+diff --git a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
+index d3add83..4e1e4ce 100644
+--- a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
+@@ -4,6 +4,7 @@ import {
+   useDerivedValue,
+   useSharedValue,
+ } from "react-native-reanimated";
++import { State as GestureState } from "react-native-gesture-handler";
+ import { DEFAULT_PROPS, SCROLL_POSITION_TOLERANCE } from "../constants";
+ import { useProps } from "../context/propsContext";
+ import { useAnimatedValues } from "../context/animatedValueContext";
+@@ -24,6 +25,7 @@ export function useAutoScroll() {
+     activeCellSize,
+     hoverOffset,
+     activeIndexAnim,
++    panGestureState,
+   } = useAnimatedValues();
+ 
+   const hoverScreenOffset = useDerivedValue(() => {
+@@ -84,8 +86,20 @@ export function useAutoScroll() {
+     const isEdgeDisabled = topDisabled || bottomDisabled;
+ 
+     const cellIsActive = activeIndexAnim.value >= 0;
++    // Only while the row is actually being DRAGGED — the pan past its
++    // activation distance — not merely lifted. Lifting a row that already sits
++    // inside the threshold (the first or last visible row always does) started
++    // autoscroll with the finger perfectly still: the list scrolled, the lifted
++    // row rode across its neighbours, and letting go dropped it somewhere else.
++    const isDragging = panGestureState.value === GestureState.ACTIVE;
+ 
+-    return hasScrolledToTarget && isAtEdge && !isEdgeDisabled && cellIsActive;
++    return (
++      hasScrolledToTarget &&
++      isAtEdge &&
++      !isEdgeDisabled &&
++      cellIsActive &&
++      isDragging
++    );
+   }, []);
+ 
+   function scrollToInternal(offset: number) {

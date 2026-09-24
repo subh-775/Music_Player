@@ -125,7 +125,7 @@ export function ArtistScreen({
 
       {busy ? (
         <View style={styles.center}>
-          <ActivityIndicator color={C.accent} />
+          <ActivityIndicator size="large" color={C.accent} />
         </View>
       ) : (
         <ScrollView
@@ -256,7 +256,12 @@ const styles = StyleSheet.create({
   wrap: {flex: 1, backgroundColor: C.bg},
   bar: {flexDirection: 'row', paddingTop: 12, paddingHorizontal: 8},
   barBtn: {padding: 4},
-  center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: BOTTOM_INSET,
+  },
   // The bars at the foot of the app float OVER the page now, so a list has to
   // end above them or its last row is permanently behind one. See src/layout.ts.
   body: {paddingBottom: BOTTOM_INSET},
