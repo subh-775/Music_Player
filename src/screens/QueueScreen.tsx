@@ -90,6 +90,17 @@ export function QueuePane({
   // A drop writes the new order straight into state; the engine round-trip that
   // follows must not repaint the old order over it.
   const settleUntil = useRef(0);
+  /** An event that landed inside the settle window — deferred, not dropped. */
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The list's own drag state (activeIndexAnim & co), handed over by the
+   * library once at mount. See onDragEnd for why this reaches into it.
+   */
+  const anim = useRef<{
+    activeIndexAnim: SharedValue<number>;
+    spacerIndexAnim: SharedValue<number>;
+    touchTranslate: SharedValue<number>;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -109,8 +120,25 @@ export function QueuePane({
   useEffect(() => {
     refresh();
     const guarded = () => {
-      if (!dragging.current && Date.now() > settleUntil.current) {
+      if (dragging.current) {
+        return; // onDragEnd repaints from its own result
+      }
+      const wait = settleUntil.current - Date.now();
+      if (wait <= 0) {
         refresh();
+        return;
+      }
+      // Inside the post-drop window. Dropping this outright left a track
+      // change that happened during it unshown — the pinned "now playing" row
+      // stayed on the old song until some later event. Run it when the window
+      // closes instead.
+      if (!settleTimer.current) {
+        settleTimer.current = setTimeout(() => {
+          settleTimer.current = null;
+          if (!dragging.current) {
+            refresh();
+          }
+        }, wait);
       }
     };
     const sub = TrackPlayer.addEventListener(
@@ -125,6 +153,10 @@ export function QueuePane({
     return () => {
       sub.remove();
       off();
+      if (settleTimer.current) {
+        clearTimeout(settleTimer.current);
+        settleTimer.current = null;
+      }
     };
   }, [refresh]);
 
@@ -196,7 +228,23 @@ export function QueuePane({
     async ({from, to, data}: {from: number; to: number; data: RNTPTrack[]}) => {
       dragging.current = false;
       onRowDragEnd?.();
-      if (from === to || activeIdx < 0) {
+      if (from === to) {
+        // The library only resets its drag state when the list's KEYS change,
+        // and a drop that reorders nothing changes none. activeIndexAnim then
+        // stays >= 0 for good, so the next drag never re-syncs its autoscroll
+        // target (autoscroll goes dead after any scroll) and can reuse a stale
+        // scroll origin (the lifted row jumps). Reset it here — and ONLY here:
+        // on a real reorder the library's own reset runs after the new order
+        // is committed, and zeroing mid-commit would snap the row back.
+        const a = anim.current;
+        if (a) {
+          a.activeIndexAnim.value = -1;
+          a.spacerIndexAnim.value = -1;
+          a.touchTranslate.value = 0;
+        }
+        return;
+      }
+      if (activeIdx < 0) {
         return;
       }
       settleUntil.current = Date.now() + 2000;
@@ -299,6 +347,20 @@ export function QueuePane({
           onDragBegin?.();
         }}
         onDragEnd={onDragEnd}
+        onAnimValInit={v => {
+          anim.current = v;
+        }}
+        // A lifted row stays exactly where the finger picked it up. Without
+        // this the library clamps it inside the viewport, so a row half
+        // hidden at the top or bottom edge snapped into view the moment it
+        // lifted — and a snap past half a row counted as passing its
+        // neighbour, so releasing without moving reordered the queue.
+        // Autoscroll is unaffected: the edge distance floors at 0.
+        dragItemOverflow
+        // Each autoscroll step waits for Android's ~250ms smooth scroll, so the
+        // default 100px/step topped out near 400px/s — slow enough to read as
+        // "it won't scroll".
+        autoscrollSpeed={220}
         // Uniform rows: lets the list place the drop target without measuring,
         // which is what keeps a long queue smooth.
         getItemLayout={(_d, i) => ({
@@ -441,7 +503,10 @@ const styles = StyleSheet.create({
     // an opaque row painted a black slab around every song.
     backgroundColor: 'transparent',
   },
-  rowLifted: {backgroundColor: C.surfaceHi, elevation: 8},
+  // No elevation: the shadow switched off on the exact frame the row landed,
+  // which is most of the "settles twice" jitter on drop. The fill alone says
+  // "lifted" and has nothing to snap away.
+  rowLifted: {backgroundColor: C.surfaceHi},
   rowMain: {
     flex: 1,
     flexDirection: 'row',

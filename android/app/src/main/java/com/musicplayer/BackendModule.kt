@@ -111,6 +111,25 @@ class BackendModule(reactContext: ReactApplicationContext) :
             ),
         )
 
+    /**
+     * Start the embedded server again after it has died.
+     *
+     * Application.onCreate was the only caller of PythonBackend.start, and the
+     * playback foreground service keeps this process alive long after the UI
+     * is closed — so "close the app and open it again" never re-ran it, and a
+     * crashed backend stayed dead until a force-stop. JS calls this when
+     * /health stops answering, then polls for it to come back.
+     *
+     * Idempotent: start() returns at once while a server is still running.
+     * The token is per-PROCESS (PythonBackend.apiToken), so the restarted
+     * server accepts the one JS already holds.
+     */
+    @ReactMethod
+    fun restart(promise: Promise) {
+        PythonBackend.start(reactApplicationContext, BuildConfig.BACKEND_PORT)
+        promise.resolve(true)
+    }
+
     /** Open the system folder picker; resolves a real path, or "" on cancel. */
     @ReactMethod
     fun pickFolder(promise: Promise) {

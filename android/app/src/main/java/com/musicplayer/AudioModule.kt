@@ -9,6 +9,7 @@ import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.Promise
@@ -16,6 +17,11 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Audio effects and output routing.
@@ -327,7 +333,9 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      * "most recently connected" is the closest honest proxy — and it is what
      * makes switching headsets mid-song name the new one.
      */
-    private val seenAt = HashMap<Int, Long>()
+    // Concurrent: written by the device callback on the main looper, read by
+    // getAudioOutput on the native-module thread.
+    private val seenAt = ConcurrentHashMap<Int, Long>()
     private var deviceCallback: android.media.AudioDeviceCallback? = null
 
     private fun ensureDeviceWatch(am: AudioManager) {
@@ -414,14 +422,19 @@ class AudioModule(private val ctx: ReactApplicationContext) :
      * and the whole thing is best-effort: a null just means the UI keeps its
      * plain background.
      */
+    /** One worker for every palette lookup. A fresh Thread per call was
+     *  unbounded: a fast run of skips started one download thread each. */
+    private val colorWorker = Executors.newSingleThreadExecutor()
+
     @ReactMethod
     fun artworkColor(url: String, promise: Promise) {
-        Thread {
+        colorWorker.execute {
+            var conn: java.net.HttpURLConnection? = null
             try {
-                val conn = java.net.URL(url).openConnection()
+                conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 8000
-                val bytes = conn.getInputStream().use { it.readBytes() }
+                val bytes = conn.inputStream.use { it.readBytes() }
 
                 // Two-pass decode: bounds first, then sampled down to ~112px.
                 val bounds = android.graphics.BitmapFactory.Options().apply {
@@ -437,7 +450,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                     .decodeByteArray(bytes, 0, bytes.size, opts)
                 if (bmp == null) {
                     promise.resolve(null)
-                    return@Thread
+                    return@execute
                 }
                 val palette = androidx.palette.graphics.Palette.from(bmp).generate()
                 bmp.recycle()
@@ -451,8 +464,10 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                 )
             } catch (e: Exception) {
                 promise.resolve(null)
+            } finally {
+                conn?.disconnect()
             }
-        }.start()
+        }
     }
 
     // ─── Crossfade: a SECOND player for the overlap, scheduled HERE ──────────
@@ -500,8 +515,22 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     private var cfPreparedAt = 0L
     /** The outgoing index whose overlap is sounding; -1 = none. */
     private var cfStartedIdx = -1
-    /** When the handoff seek was issued; 0 = not handing off. */
+    /** When the handoff began; 0 = not handing off. */
     private var cfHandoffAt = 0L
+    /** Re-seeks spent pulling ExoPlayer into step with the overlap. */
+    private var cfAlignTries = 0
+    /**
+     * How far AHEAD of the overlap an in-buffer seek has to aim to land in
+     * step with it — the time ExoPlayer takes to restart output after a seek.
+     * Learned from each handoff's residual and kept, because it is a property
+     * of the device, not of the song.
+     */
+    private var cfLeadMs = 0L
+    /** The final short handover ramp is running. */
+    private var cfHandingOver = false
+    /** Effects cloned onto the overlap's own session — see cloneEffectsOnto. */
+    private var cfEq: Equalizer? = null
+    private var cfLoud: LoudnessEnhancer? = null
     private var cfTicking = false
     private val cfTick = object : Runnable {
         override fun run() {
@@ -632,26 +661,68 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         val now = android.os.SystemClock.uptimeMillis()
 
         // ── The queue advanced under a sounding overlap: hand off ──────────
+        //
+        // The overlap (MediaPlayer, at full volume) is playing the incoming
+        // song; ExoPlayer has just started the same song from 0 at the floor.
+        // ExoPlayer has to take over without the listener hearing it happen.
+        //
+        // It used to seek ExoPlayer to where the overlap WAS, wait up to 900ms
+        // for it to be ready, then swap both volumes in one step. By the swap
+        // the overlap had moved on by however long that seek took, so the
+        // listener heard a slice of the song again — the "new song has just
+        // appeared" moment — plus a hard level step.
+        //
+        // Now: seek, MEASURE how far out of step the two actually are, re-seek
+        // to close it (those seeks land in audio ExoPlayer has already
+        // buffered, so they are quick), and only then hand over on a short
+        // ramp. The overlap is at full volume throughout, so the time this
+        // takes is never heard.
         if (cfStartedIdx >= 0 && idx != cfStartedIdx) {
+            if (cfHandingOver) return 60L // the handover ramp finishes the job
+            val mp = cfPlayer
+            val paused = exoGet(exo, "getPlayWhenReady") as? Boolean == false
+            if (mp == null || paused) {
+                // Overlap gone, or paused mid-handoff (a headset unplugged):
+                // nothing to hand over from — straight back to one player.
+                finishHandoff()
+                return 100L
+            }
+            val rate = exoSpeed(exo)
             if (cfHandoffAt == 0L) {
-                // Seek the incoming track to where the overlap has reached, under
-                // cover of the overlap's own audio, so the re-buffer is inaudible.
-                val pos = try { cfPlayer?.currentPosition ?: -1 } catch (_: Exception) { -1 }
-                if (pos > 500) exoSeek(exo, pos.toLong())
                 cfHandoffAt = now
-                return 60L
+                cfAlignTries = 0
+                val pos = overlapPos(mp)
+                if (pos > 500) exoSeek(exo, pos + (cfLeadMs * rate).toLong())
+                return ALIGN_POLL_MS
             }
             val state = exoGet(exo, "getPlaybackState") as? Int ?: 3
-            // READY and actually playing, or give up waiting at 900ms — a slow
-            // network must not hold two copies of the song on top of each other.
-            if ((state == 3 && playing) || now - cfHandoffAt > 900) {
-                // ORDER MATTERS: cut the overlap BEFORE bringing ExoPlayer up.
-                // Both are the same song slightly out of step, and any moment
-                // where both are loud is heard as the song doubled.
-                resetCf()
-                cancelVolWork()
-                setExoVolume(1f)
+            val ready = state == 3 && playing
+            // A slow network must not hold two copies of the song forever; the
+            // overlap is full-volume meanwhile, so waiting is inaudible, but it
+            // is not unbounded either.
+            val givenUp = now - cfHandoffAt > HANDOFF_GIVE_UP_MS
+            if (!ready && !givenUp) return ALIGN_POLL_MS
+            if (ready && !givenUp && cfAlignTries < MAX_ALIGN_TRIES) {
+                val exoPos = exoGet(exo, "getCurrentPosition") as? Long ?: -1L
+                val mpPos = overlapPos(mp)
+                if (exoPos >= 0 && mpPos > 500) {
+                    val drift = mpPos - exoPos // positive: ExoPlayer is behind
+                    if (cfAlignTries > 0) {
+                        // The last seek landed in buffered audio, so what is left
+                        // over is exactly the restart cost the lead should cover.
+                        // The first seek's drift is network time and says
+                        // nothing about that.
+                        cfLeadMs = (cfLeadMs + (drift / rate).toLong())
+                            .coerceIn(0L, MAX_LEAD_MS)
+                    }
+                    if (abs(drift) > ALIGN_TOLERANCE_MS) {
+                        cfAlignTries++
+                        exoSeek(exo, mpPos + (cfLeadMs * rate).toLong())
+                        return ALIGN_POLL_MS
+                    }
+                }
             }
+            startHandover(mp)
             return 60L
         }
 
@@ -725,9 +796,8 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         if (cfPreparedIdx == idx && mp != null && cfReady && remaining in 300..span.toLong()) {
             try {
                 mp.start()
-                val ms = remaining.toInt()
-                rampUp(mp, ms)
-                fadeExoDown(ms, failSafe = false)
+                cancelVolWork() // a fade-in still running must not fight this
+                startOverlapRamp(mp, remaining.toInt())
                 cfStartedIdx = idx
                 Log.i(TAG, "crossfade: overlap ${ms}ms")
             } catch (e: Exception) {
@@ -780,31 +850,121 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                 prepareAsync()
             }
             cfPlayer = mp
+            cloneEffectsOnto(mp.audioSessionId)
         } catch (e: Exception) {
             Log.w(TAG, "prepareCrossfade failed: ${e.message}")
             stopCfInternal()
         }
     }
 
-    private fun rampUp(mp: MediaPlayer, durationMs: Int) {
-        val steps = 16
-        val stepMs = (durationMs / steps).coerceAtLeast(30).toLong()
-        var i = 0
+    /**
+     * The song-to-song fade: outgoing ExoPlayer down, incoming overlap up.
+     *
+     * EQUAL-POWER (sin/cos), not linear. The two songs are unrelated signals,
+     * so their POWERS add; two linear ramps sum to about -3 dB at the midpoint,
+     * which is heard as the music dipping and then climbing back — a "ramp" in
+     * the middle of every crossfade. sin² + cos² = 1 keeps it level.
+     *
+     * Driven by the clock, not a step count. It was 16 fixed steps, so a
+     * 12-second fade moved in 750ms stairs, each one audible as a small jump.
+     * One step every RAMP_STEP_MS, positioned by elapsed time, cannot drift
+     * and is finer than the ear resolves.
+     */
+    private fun startOverlapRamp(mp: MediaPlayer, durationMs: Int) {
+        val start = SystemClock.uptimeMillis()
+        val dur = durationMs.coerceAtLeast(1).toFloat()
         val r = object : Runnable {
             override fun run() {
                 if (cfPlayer !== mp) return // superseded — stop ramping
-                i++
-                val v = (i.toFloat() / steps).coerceIn(0f, 1f)
+                val t = ((SystemClock.uptimeMillis() - start) / dur).coerceIn(0f, 1f)
+                val a = t * HALF_PI
                 try {
-                    mp.setVolume(v, v)
+                    mp.setVolume(sin(a), sin(a))
                 } catch (_: Exception) {
                     return
                 }
-                if (i < steps) cfHandler.postDelayed(this, stepMs)
+                setExoVolume(cos(a).coerceAtLeast(FADE_FLOOR))
+                if (t < 1f) cfHandler.postDelayed(this, RAMP_STEP_MS)
             }
         }
         cfRamp = r
-        cfHandler.postDelayed(r, stepMs)
+        cfHandler.post(r)
+    }
+
+    /**
+     * The last few hundred ms: the overlap hands the (same, now in-step) song
+     * to ExoPlayer.
+     *
+     * EQUAL-GAIN (linear) here, the opposite choice to the ramp above, for the
+     * opposite reason: both players now carry the SAME signal in step, which
+     * adds in AMPLITUDE. (1 - t) + t is exactly flat; sin/cos would bulge
+     * +3 dB in the middle of it.
+     */
+    private fun startHandover(mp: MediaPlayer) {
+        cfHandingOver = true
+        cancelVolWork()
+        val start = SystemClock.uptimeMillis()
+        val r = object : Runnable {
+            override fun run() {
+                if (cfPlayer !== mp) return // cut from elsewhere; they restored
+                val t = ((SystemClock.uptimeMillis() - start) / HANDOVER_MS.toFloat())
+                    .coerceIn(0f, 1f)
+                try {
+                    mp.setVolume(1f - t, 1f - t)
+                } catch (_: Exception) {}
+                setExoVolume(FADE_FLOOR + (1f - FADE_FLOOR) * t)
+                if (t < 1f) cfHandler.postDelayed(this, RAMP_STEP_MS) else finishHandoff()
+            }
+        }
+        cfRamp = r
+        cfHandler.post(r)
+    }
+
+    /** One player again, at full volume. The overlap is already silent when
+     *  this runs from the handover, so stopping it cannot click. */
+    private fun finishHandoff() {
+        resetCf()
+        cancelVolWork()
+        setExoVolume(1f)
+    }
+
+    private fun overlapPos(mp: MediaPlayer): Long =
+        try { mp.currentPosition.toLong() } catch (_: Exception) { -1L }
+
+    /**
+     * The EQ and loudness the main player has, on the overlap's session too.
+     *
+     * Effects attach to an audio SESSION, and the overlap has its own — so with
+     * EQ or normalization on, the incoming song used to play unprocessed for
+     * the whole fade and then change character at the handoff, the moment
+     * ExoPlayer's processed copy took over. Cloned here, the two sound alike
+     * and the handover has nothing to give it away.
+     */
+    private fun cloneEffectsOnto(session: Int) {
+        val eq = equalizer
+        if (eq != null && eq.enabled) {
+            try {
+                cfEq = Equalizer(0, session).apply {
+                    for (b in 0 until minOf(numberOfBands.toInt(), eq.numberOfBands.toInt())) {
+                        setBandLevel(b.toShort(), eq.getBandLevel(b.toShort()))
+                    }
+                    enabled = true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "overlap EQ refused: ${e.message}")
+            }
+        }
+        val ld = loudness
+        if (ld != null && ld.enabled) {
+            try {
+                cfLoud = LoudnessEnhancer(session).apply {
+                    setTargetGain(ld.targetGain.toInt())
+                    enabled = true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "overlap loudness refused: ${e.message}")
+            }
+        }
     }
 
     /** Cut the overlap and forget the schedule — a manual skip, a pause, a
@@ -823,6 +983,8 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         cfPreparedUri = null
         cfStartedIdx = -1
         cfHandoffAt = 0L
+        cfAlignTries = 0
+        cfHandingOver = false
     }
 
     private fun stopCfInternal() {
@@ -832,6 +994,10 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         try { cfPlayer?.stop() } catch (_: Exception) {}
         try { cfPlayer?.release() } catch (_: Exception) {}
         cfPlayer = null
+        try { cfEq?.release() } catch (_: Exception) {}
+        try { cfLoud?.release() } catch (_: Exception) {}
+        cfEq = null
+        cfLoud = null
     }
 
     // ─── Main player volume, ramped NATIVELY ────────────────────────────────
@@ -866,8 +1032,11 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     private fun setExoVolume(v: Float): Boolean {
         val exo = PlaybackSession.exoPlayer() ?: return false
         return try {
-            val m = exo.javaClass.getMethod("setVolume", Float::class.javaPrimitiveType)
-            m.isAccessible = true
+            // Cached: the crossfade ramps call this every RAMP_STEP_MS.
+            val m = exoMethods.getOrPut("setVolume(F)") {
+                exo.javaClass.getMethod("setVolume", Float::class.javaPrimitiveType)
+                    .apply { isAccessible = true }
+            }
             m.invoke(exo, v.coerceIn(0f, 1f))
             true
         } catch (e: Exception) {
@@ -891,15 +1060,14 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     @ReactMethod
     fun fadeOutPlayer(durationMs: Int, promise: Promise) {
         volHandler.post {
-            fadeExoDown(durationMs, failSafe = true)
+            fadeExoDown(durationMs)
             promise.resolve(true)
         }
     }
 
-    /** Main looper only. `failSafe` is off for the crossfade, whose own
-     *  handoff restores the volume — a timed restore there could only fire
-     *  early and play the incoming song twice at once. */
-    private fun fadeExoDown(durationMs: Int, failSafe: Boolean) {
+    /** Main looper only. The sleep timer's fade; the crossfade has its own
+     *  ramp (startOverlapRamp) and its own restore (the handover). */
+    private fun fadeExoDown(durationMs: Int) {
         cancelVolWork()
         val steps = 16
         val stepMs = (durationMs / steps).coerceAtLeast(30).toLong()
@@ -919,11 +1087,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         volRamp = ramp
         volHandler.postDelayed(ramp, stepMs)
 
-        // Fail-safe ONLY, and only for a plain fade (fade-to-pause): a stalled
-        // bridge must never leave the player stuck quiet. The crossfade does
-        // without it — its handoff in cfStep restores the volume, and a timed
-        // restore could only ever land early and double the incoming song.
-        if (!failSafe) return
+        // Fail-safe: a stalled bridge must never leave the player stuck quiet.
         val restore = Runnable {
             volRamp?.let { volHandler.removeCallbacks(it) }
             volRamp = null
@@ -1040,6 +1204,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
     }
 
     override fun onCatalystInstanceDestroy() {
+        colorWorker.shutdownNow()
         release()
         cfSpanMs = 0
         cfHandler.removeCallbacks(cfTick)
@@ -1067,5 +1232,18 @@ class AudioModule(private val ctx: ReactApplicationContext) :
         private const val FADE_FLOOR = 0.04f
         /** How long after a fade ends before volume is forced back to full. */
         private const val RESTORE_GRACE_MS = 1500L
+
+        /** Crossfade ramp resolution: ~50 volume updates a second. */
+        private const val RAMP_STEP_MS = 20L
+        private const val HALF_PI = 1.5707964f // π/2
+        /** The final overlap → ExoPlayer handover, once the two are in step. */
+        private const val HANDOVER_MS = 240L
+        /** Closer than this and the two copies are heard as one. */
+        private const val ALIGN_TOLERANCE_MS = 25L
+        private const val MAX_ALIGN_TRIES = 3
+        private const val MAX_LEAD_MS = 400L
+        private const val ALIGN_POLL_MS = 30L
+        /** Stop waiting for ExoPlayer and hand over anyway. */
+        private const val HANDOFF_GIVE_UP_MS = 2500L
     }
 }

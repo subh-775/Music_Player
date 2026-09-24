@@ -48,7 +48,7 @@ import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
 import {resetDrawer, settleDrawer} from './src/drawer';
-import {resetPlayer, settlePlayer} from './src/playerSheet';
+import {settlePlayer} from './src/playerSheet';
 import {C} from './src/theme';
 import {
   appVersion,
@@ -584,41 +584,51 @@ function Shell() {
     [openArtist, openCollection],
   );
   const closePlayer = useCallback(() => setPlayerOpen(false), []);
+  // The three app-level sheets, stable for the same reason as the above: they
+  // are memoised, and each re-render of one re-publishes its whole tree into
+  // SheetHost.
+  const closeTrackSheet = useCallback(() => setSheetTrack(null), []);
+  const openTrackArtist = useCallback(
+    (t: Track) => openArtistCredit(t.artist),
+    [openArtistCredit],
+  );
+  const closeAddTo = useCallback(() => setAddTo(null), []);
+  const closeArtistChoices = useCallback(() => setArtistChoices([]), []);
+  const pickArtistChoice = useCallback(
+    (name: string) => {
+      setArtistChoices([]);
+      openArtist(name); // closes the player too — the profile is behind it
+    },
+    [openArtist],
+  );
   const expandPlayer = useCallback(() => {
-    // Opening by TAP: park the sheet closed, then run it open. The drag path
-    // below skips the animation entirely, because the finger IS the animation
-    // — exactly the split openDrawer/beginDrawerDrag already make.
-    resetPlayer();
+    // Opening by TAP runs the settle from wherever the panel is. It used to
+    // snap it closed first, which was harmless while a closing panel could
+    // not be tapped through — now that it can (see PlayerScreen's close),
+    // snapping would jump a nearly-closed panel shut before it reopened.
     setPlayerOpen(true);
   }, []);
 
   /**
-   * A pull UP on the mini player has begun.
+   * A pull UP on the mini player has ended.
    *
-   * Mount the full player WITHOUT animating it: PlayerBar has already parked
-   * the panel closed and is about to drive it frame by frame, and an open
-   * animation started here would fight the thumb for the same value. That is
-   * what `dragging` tells PlayerScreen.
+   * Nothing in React happens while the finger is down. The pull used to set
+   * two states the instant it began, re-rendering this whole tree and flipping
+   * the player to `visible` mid-gesture — lyrics fetch, colour lookup, progress
+   * clock, pointerEvents on a large tree — and on the old architecture the
+   * native half of that commit runs on the UI thread, the same thread moving
+   * the panel under the thumb. That was the stutter at the start of every
+   * pull. The panel is permanently mounted and laid out, and the finger only
+   * ever needed `sheetP`, which is already a UI-thread value.
    */
-  const beginPlayerDrag = useCallback(() => {
-    setPlayerDragging(true);
-    setPlayerOpen(true);
-  }, []);
-
-  /** The finger lifted. Carry its speed into the settle, and unmount only once
-   *  a close has actually finished — unmounting early would snap the panel
-   *  away mid-animation. */
   const endPlayerDrag = useCallback((open: boolean, velocity: number) => {
-    // `dragging` is cleared in the CALLBACK, not here. Clearing it now would
-    // re-run PlayerScreen's open effect while this settle is still running —
-    // and for an abandoned pull that settle is heading DOWN, so the effect
-    // would turn a cancel into an open.
-    settlePlayer(open, velocity, finished => {
-      setPlayerDragging(false);
-      if (finished && !open) {
-        setPlayerOpen(false);
-      }
-    });
+    if (open) {
+      // One batch: `dragging` stops PlayerScreen's open effect from starting
+      // a second settle on top of this one.
+      setPlayerDragging(true);
+      setPlayerOpen(true);
+    }
+    settlePlayer(open, velocity, () => setPlayerDragging(false));
   }, []);
 
   return (
@@ -787,7 +797,6 @@ function Shell() {
         {engine && (
           <PlayerBar
             onExpand={expandPlayer}
-            onBeginExpandDrag={beginPlayerDrag}
             onEndExpandDrag={endPlayerDrag}
             onAddToPlaylist={setAddTo}
           />
@@ -803,21 +812,18 @@ function Shell() {
       <TrackActionSheet
         track={sheetTrack}
         from={sheetFrom}
-        onClose={() => setSheetTrack(null)}
+        onClose={closeTrackSheet}
         onAddToPlaylist={setAddTo}
-        onOpenArtist={t => openArtistCredit(t.artist)}
+        onOpenArtist={openTrackArtist}
         onOpenAlbum={openAlbumOf}
       />
 
-      <AddToPlaylistSheet track={addTo} onClose={() => setAddTo(null)} />
+      <AddToPlaylistSheet track={addTo} onClose={closeAddTo} />
 
       <ArtistPickerSheet
         names={artistChoices}
-        onClose={() => setArtistChoices([])}
-        onPick={name => {
-          setArtistChoices([]);
-          openArtist(name); // closes the player too — the profile is behind it
-        }}
+        onClose={closeArtistChoices}
+        onPick={pickArtistChoice}
       />
 
       {engine && (

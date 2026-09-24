@@ -2089,6 +2089,23 @@ def start_server(files_dir: str, downloads_dir: str, web_dir: str,
     global _API_TOKEN
     _API_TOKEN = api_token or ""
 
+    # A RESTART (BackendModule.restart, after the previous run died) must not
+    # leave the old run's services behind: its download manager's worker
+    # threads are still alive, and a second one next to it would run every
+    # queued download twice. The old server is not shut down here — shutdown()
+    # blocks until serve_forever returns, and on this path it already has.
+    _server = None
+    if _download_manager:
+        try:
+            _download_manager.stop(wait=False)
+        except Exception:
+            pass
+    if _search_service:
+        try:
+            _search_service.shutdown()
+        except Exception:
+            pass
+
     android_env.configure(files_dir, downloads_dir, web_dir, cache_dir, public_dir)
     android_env.install_stdio_logging()
 

@@ -71,9 +71,13 @@ object PythonBackend {
                 Log.i(TAG, "Python backend stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Python backend crashed", e)
-                // Let a later call try again. The flag was set before the thread
-                // even started, so a crash in here used to latch the backend
-                // off for the whole process lifetime with nothing to retry it.
+            } finally {
+                // Let a later call try again — BackendModule.restart(), which JS
+                // calls when the server stops answering. In `finally` so a
+                // server that RETURNED (serve_forever ending) is restartable
+                // too, not only one that threw; the flag was set before the
+                // thread started, and left set it latched the backend off for
+                // the rest of the process.
                 started = false
             }
         }

@@ -20,6 +20,7 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -281,73 +282,100 @@ export function Sheet({
     return () => sub.remove();
   }, [open, onClose]);
 
-  const close = useCallback(() => onClose(), [onClose]);
+  // Through a ref: owners pass inline arrows, so a `close` that depended on
+  // onClose would change every render and take the memoised gesture with it.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const close = useCallback(() => onCloseRef.current(), []);
 
   // Drag the sheet down to dismiss. Recognised natively, so it wins against
   // anything scrollable inside the sheet only when the drag is clearly vertical
   // and downward.
-  const drag = Gesture.Pan()
-    .enabled(dragEnabled)
-    // Manual only when there is a list to defer to. Whether a downward drag
-    // belongs to the sheet or to the list depends on where the list IS, not on
-    // the direction of the first twelve pixels — which is the one thing an
-    // activeOffset can express. Sheets with no scrollable keep the plain
-    // recognition they have always had.
-    .manualActivation(!!scrollY)
-    .activeOffsetY([-1000, 12])
-    .failOffsetX([-20, 20])
-    .onTouchesDown(e => {
-      const t = e.allTouches[0];
-      if (!t) {
-        return;
-      }
-      startX.value = t.absoluteX;
-      startY.value = t.absoluteY;
-      // The handle always drags, wherever the list happens to be scrolled to.
-      // Grabbing the handle is an unambiguous statement about the sheet.
-      onHandle.value = t.absoluteY < height - sheetH.value + HANDLE_GRAB;
-    })
-    .onTouchesMove((e, state) => {
-      if (!scrollY) {
-        return; // not manual — RNGH recognises this one itself
-      }
-      const t = e.allTouches[0];
-      if (!t) {
-        return;
-      }
-      const dx = t.absoluteX - startX.value;
-      const dy = t.absoluteY - startY.value;
-      if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
-        state.fail();
-      } else if (dy > HANDOFF_DY && (onHandle.value || scrollY.value <= AT_TOP)) {
-        state.activate();
-      }
-    })
-    .onUpdate(e => {
-      // Where in this gesture the sheet took over, so it moves one-to-one with
-      // the finger from THERE. Without it the sheet would jump down by however
-      // far the list had already scrolled at the moment it handed over.
-      if (engagedAt.value < 0) {
-        engagedAt.value = e.translationY;
-      }
-      y.value = Math.max(0, e.translationY - engagedAt.value);
-    })
-    .onEnd(e => {
-      const travelled = e.translationY - Math.max(0, engagedAt.value);
-      engagedAt.value = -1;
-      if (travelled > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
-        y.value = withTiming(HIDE_Y, OUT, finished => {
-          if (finished) {
-            runOnJS(close)();
+  //
+  // Memoised. Rebuilt on every render it re-sent its whole config to the native
+  // handler each time — including every render of the queue sheet mid-drag,
+  // when the lifted row flips dragEnabled.
+  const drag = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(dragEnabled)
+        // Manual only when there is a list to defer to. Whether a downward drag
+        // belongs to the sheet or to the list depends on where the list IS, not on
+        // the direction of the first twelve pixels — which is the one thing an
+        // activeOffset can express. Sheets with no scrollable keep the plain
+        // recognition they have always had.
+        .manualActivation(!!scrollY)
+        .activeOffsetY([-1000, 12])
+        .failOffsetX([-20, 20])
+        .onTouchesDown(e => {
+          const t = e.allTouches[0];
+          if (!t) {
+            return;
           }
-        });
-      } else {
-        y.value = withTiming(0, IN);
-      }
-    })
-    .onFinalize(() => {
-      engagedAt.value = -1;
-    });
+          startX.value = t.absoluteX;
+          startY.value = t.absoluteY;
+          // The handle always drags, wherever the list happens to be scrolled to.
+          // Grabbing the handle is an unambiguous statement about the sheet.
+          onHandle.value = t.absoluteY < height - sheetH.value + HANDLE_GRAB;
+        })
+        .onTouchesMove((e, state) => {
+          if (!scrollY) {
+            return; // not manual — RNGH recognises this one itself
+          }
+          const t = e.allTouches[0];
+          if (!t) {
+            return;
+          }
+          const dx = t.absoluteX - startX.value;
+          const dy = t.absoluteY - startY.value;
+          if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
+            state.fail();
+          } else if (
+            dy > HANDOFF_DY &&
+            (onHandle.value || scrollY.value <= AT_TOP)
+          ) {
+            state.activate();
+          }
+        })
+        .onUpdate(e => {
+          // Where in this gesture the sheet took over, so it moves one-to-one with
+          // the finger from THERE. Without it the sheet would jump down by however
+          // far the list had already scrolled at the moment it handed over.
+          if (engagedAt.value < 0) {
+            engagedAt.value = e.translationY;
+          }
+          y.value = Math.max(0, e.translationY - engagedAt.value);
+        })
+        .onEnd(e => {
+          const travelled = e.translationY - Math.max(0, engagedAt.value);
+          engagedAt.value = -1;
+          if (travelled > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
+            y.value = withTiming(HIDE_Y, OUT, finished => {
+              if (finished) {
+                runOnJS(close)();
+              }
+            });
+          } else {
+            y.value = withTiming(0, IN);
+          }
+        })
+        .onFinalize(() => {
+          engagedAt.value = -1;
+        }),
+    [
+      dragEnabled,
+      scrollY,
+      height,
+      HIDE_Y,
+      close,
+      y,
+      sheetH,
+      startX,
+      startY,
+      onHandle,
+      engagedAt,
+    ],
+  );
 
   const sheetStyle = useAnimatedStyle(() => ({
     // No identity transform on a settled sheet — see the note in PlayerScreen.

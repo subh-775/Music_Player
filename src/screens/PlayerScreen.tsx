@@ -109,7 +109,6 @@ import {clampRate, isRate, rateLabel} from '../playbackRate';
 import {sleepLabel, useSleepTimer} from '../sleepTimer';
 import {toast} from '../toast';
 
-
 /**
  * How often the parked (closed) player polls progress.
  *
@@ -218,12 +217,15 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   // behind a screen that was closed. On a weak connection that duplicate was
   // competing for bandwidth with the audio and with the cover being shown.
   // Same reasoning as the lyrics fetch just below.
+  //
+  // No longer gated on `visible`: the lookup is shared with the mini player's
+  // (same cover, same in-flight request — see getArtworkColor), so the panel
+  // costs no second download, and having the colour before the panel is
+  // visible is what lets a pull up start tinted instead of black.
   const tint = useArtworkColor(
-    visible
-      ? track
-        ? getBestArtworkUrl(track)
-        : String(active?.artwork ?? '') || undefined
-      : undefined,
+    track
+      ? getBestArtworkUrl(track)
+      : String(active?.artwork ?? '') || undefined,
   );
 
   // Fetched here, not inside the pane: the tab bar has to know whether this
@@ -400,6 +402,11 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     });
   }, []);
 
+  /** True from the moment close() starts its settle until that settle ends or
+   *  is overtaken — so the app can be told at once without its `visible`
+   *  change snapping the panel shut underneath the animation. */
+  const closingRef = useRef(false);
+
   useEffect(() => {
     if (visible) {
       // `dragging` is the mini player's pull. When the finger is already
@@ -416,26 +423,35 @@ export const PlayerScreen = React.memo(function PlayerScreen({
         // is provably at rest.
         measureArt();
       }
-    } else {
-      // Already parked by whatever ran the dismissal; this only catches a close
-      // that came from somewhere other than close() (navigating away, say).
+    } else if (!closingRef.current) {
+      // A close that came from somewhere other than close() — navigating to
+      // an artist, say — parks the panel at once. close() runs its own settle.
       resetPlayer();
     }
   }, [visible, dragging, measureArt]);
 
   /**
-   * Slide the rest of the way out, THEN tell the app — no restart, no jump.
+   * Slide the rest of the way out — and tell the app NOW, not at the end.
+   *
+   * The app used to hear about it only once the 440ms settle had finished.
+   * Until then `visible` stayed true, and this full-screen view kept
+   * pointerEvents 'auto' at zIndex 30 while the mini player was already fading
+   * back in underneath it (from about halfway through). Every tap on the bar
+   * in that window landed on an invisible panel: the "clicking the mini player
+   * sometimes doesn't open it" report. Closed-as-far-as-touch-goes starts when
+   * the close does; the settle carries on regardless, and a tap during it
+   * reopens from wherever the panel has got to.
    *
    * `velocity` is px/s, straight from the gesture. A firm flick finishes quicker
    * than a slow drag, so the sheet keeps the speed the finger gave it.
    */
   const close = useCallback(
     (velocity = 0) => {
-      settlePlayer(false, velocity, finished => {
-        if (finished) {
-          finishClose();
-        }
+      closingRef.current = true;
+      settlePlayer(false, velocity, () => {
+        closingRef.current = false;
       });
+      finishClose();
     },
     [finishClose],
   );

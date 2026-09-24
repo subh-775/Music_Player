@@ -16,6 +16,13 @@ const {port, token, version} = (NativeModules.Backend ?? {}) as {
   version?: string;
 };
 
+/** Restart the embedded server after it has died. Read at call time, not
+ *  destructured, so an APK without the method simply skips the attempt. */
+function restartBackend(): Promise<unknown> | undefined {
+  const b = NativeModules.Backend as {restart?: () => Promise<unknown>};
+  return b?.restart?.();
+}
+
 const PORT = port ?? 8771;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -67,18 +74,49 @@ async function warnIfEngineStopped(): Promise<void> {
     return; // the backend is fine — that call failed for its own reasons
   }
   lastEngineWarning = Date.now();
-  toast('The music engine stopped. Close the app and open it again.');
+  // Bring it back before saying anything. "Close the app and open it again"
+  // did not work: the playback service keeps the process alive, so the only
+  // code that ever started the server (Application.onCreate) never ran again.
+  const restarting = restartBackend();
+  if (restarting) {
+    try {
+      await restarting;
+      if (await waitForBackend(15_000)) {
+        return;
+      }
+    } catch {}
+  }
+  toast('The music engine stopped. Force-stop the app and open it again.');
 }
 
-/** GET an /api endpoint as JSON. Throws on a non-2xx or a network error. */
-export async function apiGet<T>(path: string): Promise<T> {
+/**
+ * How long one API call may take before it is abandoned.
+ *
+ * React Native's fetch has no timeout of its own, so a request to a wedged
+ * server thread never settled and its screen spun forever. Generous, because
+ * a cold source resolve is legitimately slow; the import is longer again.
+ */
+const API_TIMEOUT_MS = 30_000;
+
+/** GET an /api endpoint as JSON. Throws on a non-2xx, a network error or a
+ *  timeout. */
+export async function apiGet<T>(
+  path: string,
+  timeoutMs = API_TIMEOUT_MS,
+): Promise<T> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(apiUrl(path));
+    res = await fetch(apiUrl(path), {signal: ctl.signal});
   } catch (e) {
-    warnIfEngineStopped().catch(() => {});
+    clearTimeout(timer);
+    if (!ctl.signal.aborted) {
+      warnIfEngineStopped().catch(() => {});
+    }
     throw e;
   }
+  clearTimeout(timer);
   if (!res.ok) {
     throw new Error(`${path} -> HTTP ${res.status}`);
   }

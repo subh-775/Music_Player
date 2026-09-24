@@ -104,15 +104,12 @@ const MiniProgress = React.memo(function MiniProgress() {
  */
 export const PlayerBar = React.memo(function PlayerBar({
   onExpand,
-  onBeginExpandDrag,
   onEndExpandDrag,
   onAddToPlaylist,
 }: {
   onExpand: () => void;
-  /** A pull UP has started: mount the full player without animating it, so the
-   *  finger can drive it the rest of the way. Mirrors the drawer's own
-   *  begin/end pair. */
-  onBeginExpandDrag: () => void;
+  /** A pull UP has ended; `open` says whether it committed. There is no
+   *  begin counterpart on purpose — see App's endPlayerDrag. */
   onEndExpandDrag: (open: boolean, velocity: number) => void;
   onAddToPlaylist: (t: Track) => void;
 }) {
@@ -216,32 +213,57 @@ export const PlayerBar = React.memo(function PlayerBar({
    * the gesture felt dead until it suddenly committed. Against the span, the
    * cover begins growing on the first pixel of travel.
    */
+  /** Where the pull engaged: the finger's travel at activation, the panel's
+   *  proportion at that moment, and when. */
+  const pullFrom = useSharedValue(0);
+  const pullStartP = useSharedValue(1);
+  const pullAt = useSharedValue(0);
+
   const pullUp = useMemo(
     () =>
       Gesture.Pan()
         .activeOffsetY([-EXPAND_GRAB, 1000])
         .failOffsetX([-EXPAND_GRAB, EXPAND_GRAB])
-        .onStart(() => {
-          sheetP.value = 1;
-          runOnJS(onBeginExpandDrag)();
+        .onStart(e => {
+          // No runOnJS here. Anything that touched React at this instant
+          // landed its native commit on the UI thread in the middle of the
+          // gesture — the stutter at the start of every pull. The panel is
+          // mounted and laid out already; the finger needs nothing but sheetP.
+          //
+          // Measured from HERE, not from touch-down: translationY already
+          // holds the 14px it took to activate (more on a fast flick), which
+          // the panel used to jump by on its first frame. And from the
+          // panel's CURRENT proportion rather than a hard 1, so catching a
+          // panel that is still settling closed carries on from where it is.
+          pullFrom.value = e.translationY;
+          pullStartP.value = sheetP.value;
+          pullAt.value = Date.now();
+          sheetP.value = pullStartP.value; // stops any settle still running
         })
         .onUpdate(e => {
           // translationY is negative going up, so this walks the proportion
-          // from 1 (closed) toward 0 (open) across the SPAN — the distance
-          // over which the cover actually changes size. Measuring the drag
-          // against a whole screen height meant the first 40% of a pull moved
-          // the panel while changing nothing anyone could see.
+          // toward 0 (open) across the SPAN — the distance over which the
+          // cover actually changes size. Measuring the drag against a whole
+          // screen height meant the first 40% of a pull moved the panel while
+          // changing nothing anyone could see.
           const span = spanBetween(miniArt.value, bigArt.value);
-          sheetP.value = Math.min(1, Math.max(0, 1 + e.translationY / span));
+          const dy = e.translationY - pullFrom.value;
+          sheetP.value = Math.min(1, Math.max(0, pullStartP.value + dy / span));
         })
         .onEnd((e, success) => {
+          // A tap whose thumb drifted up past EXPAND_GRAB activates this pull
+          // and cancels the tap, then ends a hair from closed and settled back
+          // down — a tap that did nothing. Short and quick is a tap, so it
+          // opens; a deliberate pull-and-return takes longer and still cancels.
+          const tapLike =
+            Date.now() - pullAt.value < 250 && e.translationY > -32;
           // A third of the way, or a firm flick. Anything less goes back — a
           // gesture you abandoned must not commit.
           const open =
-            success && (sheetP.value < 0.7 || e.velocityY < -700);
+            success && (tapLike || sheetP.value < 0.7 || e.velocityY < -700);
           runOnJS(onEndExpandDrag)(open, e.velocityY);
         }),
-    [onBeginExpandDrag, onEndExpandDrag],
+    [onEndExpandDrag, pullFrom, pullStartP, pullAt],
   );
 
   const barGesture = useMemo(
@@ -434,7 +456,9 @@ export const PlayerBar = React.memo(function PlayerBar({
                   <Marquee
                     text={cleanText(String(active.artist ?? ''))}
                     style={styles.artist}
-                    ticker={splitArtists(String(active.artist ?? '')).length > 1}
+                    ticker={
+                      splitArtists(String(active.artist ?? '')).length > 1
+                    }
                   />
                 )}
               </View>

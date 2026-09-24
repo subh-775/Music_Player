@@ -268,9 +268,9 @@ export function surfaceRect(
   };
 }
 
-/** Park the panel closed with no animation — for opening by TAP, where the
- *  settle should start from a known place rather than from wherever a previous
- *  gesture left it. */
+/** Park the panel closed with no animation — for a close that is not a
+ *  dismissal (navigating to an artist behind the player), where there is
+ *  nothing to watch slide away. */
 export function resetPlayer(): void {
   sheetP.value = 1;
 }

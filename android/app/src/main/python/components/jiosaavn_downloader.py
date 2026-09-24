@@ -320,6 +320,7 @@ class JioSaavnClient:
         Returns:
             DownloadResult with success status and metadata
         """
+        part_path = output_path + ".part"
         # Try up to 2 times with fresh streaming URLs
         for attempt in range(2):
             streaming_url = self.get_streaming_url(song_url, bitrate)
@@ -351,7 +352,12 @@ class JioSaavnClient:
                 # Ensure output directory exists
                 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-                with open(output_path, "wb") as f:
+                # Written beside the destination and moved into place only once
+                # it is whole. Writing straight to output_path left a truncated
+                # .m4a behind whenever the process died mid-download (the OS
+                # reclaiming it, a swipe-away) — and the library scan listed
+                # that fragment as a finished download.
+                with open(part_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=65536):
                         if chunk:
                             f.write(chunk)
@@ -359,15 +365,28 @@ class JioSaavnClient:
                             if progress_callback and total_size > 0:
                                 progress_callback(downloaded, total_size)
 
+                # A connection that closes cleanly but early ends the loop
+                # exactly like a finished one; only the byte count tells them
+                # apart.
+                if total_size > 0 and downloaded != total_size:
+                    os.remove(part_path)
+                    if attempt == 0:
+                        continue  # Try again
+                    return DownloadResult(
+                        success=False,
+                        error=f"Download incomplete ({downloaded} of {total_size} bytes)",
+                    )
+
                 # Verify file
-                file_size = os.path.getsize(output_path)
+                file_size = os.path.getsize(part_path)
                 if file_size == 0:
-                    os.remove(output_path)
+                    os.remove(part_path)
                     if attempt == 0:
                         continue  # Try again
                     return DownloadResult(
                         success=False, error="Downloaded file is empty"
                     )
+                os.replace(part_path, output_path)
 
                 # Probe audio properties with ffprobe if available
                 probe_info = self._probe_audio(output_path)
@@ -381,14 +400,14 @@ class JioSaavnClient:
                 )
 
             except requests.RequestException as e:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
+                if os.path.exists(part_path):
+                    os.remove(part_path)
                 if attempt == 0 and "404" in str(e):
                     continue  # Try once more with fresh URL
                 return DownloadResult(success=False, error=f"Download failed: {str(e)}")
             except Exception:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
+                if os.path.exists(part_path):
+                    os.remove(part_path)
                 if attempt == 0:
                     continue
                 return DownloadResult(

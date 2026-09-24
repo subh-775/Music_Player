@@ -108,6 +108,24 @@ export async function getArtworkColor(raw: string): Promise<string | null> {
   if (cache.has(url)) {
     return cache.get(url) ?? null;
   }
+  // One download per cover however many callers ask at once. The mini player
+  // and the full player look up the same cover at the same moment; without
+  // this each started its own native fetch.
+  const pending = inflight.get(url);
+  if (pending) {
+    return pending;
+  }
+  const p = fetchColor(url).finally(() => inflight.delete(url));
+  inflight.set(url, p);
+  return p;
+}
+
+const inflight = new Map<string, Promise<string | null>>();
+
+async function fetchColor(url: string): Promise<string | null> {
+  if (typeof native.artworkColor !== 'function') {
+    return null;
+  }
   try {
     const color = await native.artworkColor(url);
     cache.set(url, color ?? null);
@@ -152,5 +170,16 @@ export function useArtworkColor(url?: string): string | null {
     };
   }, [url]);
 
+  // A cache hit is answered DURING render, not after an effect. The state
+  // above is seeded only at mount, so when `url` changed on a mounted
+  // component the first render showed null — plain background — and the
+  // colour arrived a render later: the black flash at the start of every
+  // player open, even though the colour was already known.
+  if (url) {
+    const hit = cache.get(thumbArtwork(url));
+    if (hit !== undefined) {
+      return hit;
+    }
+  }
   return color;
 }
