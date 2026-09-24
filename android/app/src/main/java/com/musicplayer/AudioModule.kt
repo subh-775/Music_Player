@@ -799,7 +799,7 @@ class AudioModule(private val ctx: ReactApplicationContext) :
                 cancelVolWork() // a fade-in still running must not fight this
                 startOverlapRamp(mp, remaining.toInt())
                 cfStartedIdx = idx
-                Log.i(TAG, "crossfade: overlap ${ms}ms")
+                Log.i(TAG, "crossfade: overlap ${remaining}ms")
             } catch (e: Exception) {
                 Log.w(TAG, "crossfade start failed: ${e.message}")
                 stopCfInternal()
