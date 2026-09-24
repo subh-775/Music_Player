@@ -99,6 +99,24 @@ jobs:
       - name: Build APK
         working-directory: android
         run: |
+          # Gradle through a tee, so a failure can be RAISED as annotations.
+          # Job logs need a signed-in GitHub session to read, but a check
+          # run's annotations are public — so the Kotlin compiler's `e:` lines
+          # and Gradle's "What went wrong" become readable from the API by
+          # anyone diagnosing a red tag, with no login. GitHub keeps ten error
+          # annotations per step, so the most specific lines go first.
+          gradle() {
+            set +e
+            ./gradlew "$@" --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+            local status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -ne 0 ]; then
+              { grep -E '^e: ' "$RUNNER_TEMP/gradle.log"
+                grep -E -A3 'What went wrong' "$RUNNER_TEMP/gradle.log"
+              } | head -10 | sed -e 's/%/%25/g' -e 's/^/::error::/'
+            fi
+            return "$status"
+          }
           if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
             # Derive versionName/versionCode from the tag (v1.2.3 -> 1.2.3), so
             # the installed app reports the release version and the in-app
@@ -125,9 +143,9 @@ jobs:
             export APP_VERSION_NAME="$VER"
             export APP_VERSION_CODE="$(( MA * 10000 + MI * 100 + PA ))"
             echo "Building release $APP_VERSION_NAME (code $APP_VERSION_CODE)"
-            ./gradlew assembleRelease --no-daemon --stacktrace
+            gradle assembleRelease
           else
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            gradle assembleDebug
           fi
 
       - name: Stage APK
