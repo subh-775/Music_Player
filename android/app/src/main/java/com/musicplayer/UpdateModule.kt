@@ -12,6 +12,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -149,31 +150,40 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
     @Volatile private var lastCheckError: String = ""
 
     /**
-     * A test build (the rc build type, com.musicplayer.rc) never updates.
-     * /releases/latest is the REAL app's release: offering it here would
-     * download Relaxify's APK and hand it to the installer from inside a test
-     * app — installing or replacing the real app, the one thing a test build
-     * must never be able to touch.
+     * Two update channels, one per identity.
+     *
+     *   - The real app reads /releases/latest, which GitHub never answers with
+     *     a pre-release, and takes the release's APK.
+     *   - A test build (the rc build type, com.musicplayer.rc) reads the
+     *     release LIST and takes the newest PRE-release that carries an asset
+     *     named exactly RC_ASSET: its own channel. It could never be offered
+     *     the real app's APK from here, and downloadAndInstall refuses anything
+     *     that is not this app's own package besides.
      */
-    private fun doCheck(): Release? = if (BuildConfig.IS_RC) {
-        lastCheckError = "Test build: updates are off"
-        null
-    } else try {
+    private fun doCheck(): Release? {
         lastCheckError = ""
-        val conn = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 8000
-            readTimeout = 8000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            // GitHub rate-limits unauthenticated calls per IP, and answers 403
-            // when a client sends no User-Agent at all.
-            setRequestProperty("User-Agent", "Music_Player")
-        }
-        if (conn.responseCode != 200) {
-            lastCheckError = "GitHub returned HTTP ${conn.responseCode}"
-            null
-        } else {
-            val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        return try {
+            val api = if (BuildConfig.IS_RC) RC_RELEASES_API else RELEASES_API
+            val conn = (URL(api).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8000
+                readTimeout = 8000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                // GitHub rate-limits unauthenticated calls per IP, and answers
+                // 403 when a client sends no User-Agent at all.
+                setRequestProperty("User-Agent", "Music_Player")
+            }
+            if (conn.responseCode != 200) {
+                lastCheckError = "GitHub returned HTTP ${conn.responseCode}"
+                return null
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
+            val json = if (BuildConfig.IS_RC) {
+                // No test build published at all is "up to date", not an error.
+                newestRcRelease(JSONArray(body)) ?: return null
+            } else {
+                JSONObject(body)
+            }
             val tag = json.optString("tag_name").removePrefix("v")
             val assets = json.optJSONArray("assets")
             var apkUrl = ""
@@ -181,26 +191,25 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
             if (assets != null) {
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
-                    if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
-                        val candidate = a.optString("browser_download_url")
-                        // The download URL is taken from a network response, so
-                        // it is input, not configuration. Nothing downstream
-                        // checks what it points at: downloadAndInstall fetches
-                        // whatever it is handed and passes the result to the
-                        // package installer. A release signed with a stable key
-                        // makes a swapped APK unusable, but the check costs one
-                        // comparison and does not depend on that holding.
-                        if (!isTrustedApkUrl(candidate)) {
-                            Log.w(TAG, "ignoring release asset on untrusted host")
-                            continue
-                        }
-                        apkUrl = candidate
-                        // Free: the asset we already picked carries it. It is
-                        // the one fact that decides whether someone taps Update
-                        // while on mobile data.
-                        apkSize = a.optLong("size", 0L)
-                        break
+                    if (!isOwnAsset(a.optString("name"))) continue
+                    val candidate = a.optString("browser_download_url")
+                    // The download URL is taken from a network response, so it
+                    // is input, not configuration. Nothing downstream checks
+                    // what it points at: downloadAndInstall fetches whatever it
+                    // is handed and passes the result to the package
+                    // installer. A release signed with a stable key makes a
+                    // swapped APK unusable, but the check costs one comparison
+                    // and does not depend on that holding.
+                    if (!isTrustedApkUrl(candidate)) {
+                        Log.w(TAG, "ignoring release asset on untrusted host")
+                        continue
                     }
+                    apkUrl = candidate
+                    // Free: the asset we already picked carries it. It is the
+                    // one fact that decides whether someone taps Update while
+                    // on mobile data.
+                    apkSize = a.optLong("size", 0L)
+                    break
                 }
             }
             val installed = installedVersion().ifBlank { "0" }
@@ -209,20 +218,43 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 null
             } else if (isNewer(tag, installed)) {
                 // org.json quirk: when "body" is present but JSON null (a
-                // GitHub release with no description), optString() coerces the
-                // NULL sentinel to the literal STRING "null" rather than
-                // returning "" — which is why the popup read "null" as if it
-                // were real release notes. isNull() catches that case first.
+                // GitHub release with no description), optString() coerces
+                // the NULL sentinel to the literal STRING "null" rather than
+                // returning "". isNull() catches that case first.
                 val notes = if (json.isNull("body")) "" else json.optString("body")
                 Release(tag, apkUrl, notes, apkSize)
             } else {
-                null // genuinely up to date — NOT an error
+                null // genuinely up to date, NOT an error
+            }
+        } catch (e: Exception) {
+            lastCheckError = e.message ?: e.javaClass.simpleName
+            Log.w(TAG, "update check failed: ${e.message}")
+            null
+        }
+    }
+
+    /** The asset this build installs: the test APK for a test build, and
+     *  never the test APK for the real app. */
+    private fun isOwnAsset(name: String): Boolean =
+        if (BuildConfig.IS_RC) {
+            name == RC_ASSET
+        } else {
+            name.endsWith(".apk", ignoreCase = true) &&
+                !name.equals(RC_ASSET, ignoreCase = true)
+        }
+
+    /** Newest first, as GitHub lists them: the first non-draft PRE-release
+     *  carrying the test APK. Older pre-releases without it are skipped. */
+    private fun newestRcRelease(list: JSONArray): JSONObject? {
+        for (i in 0 until list.length()) {
+            val r = list.getJSONObject(i)
+            if (!r.optBoolean("prerelease") || r.optBoolean("draft")) continue
+            val assets = r.optJSONArray("assets") ?: continue
+            for (j in 0 until assets.length()) {
+                if (assets.getJSONObject(j).optString("name") == RC_ASSET) return r
             }
         }
-    } catch (e: Exception) {
-        lastCheckError = e.message ?: e.javaClass.simpleName
-        Log.w(TAG, "update check failed: ${e.message}")
-        null
+        return null
     }
 
     /**
@@ -245,18 +277,28 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
         false
     }
 
-    /** "1.10.0" must beat "1.9.0", so compare numerically part-by-part. */
+    /**
+     * "1.10.0" beats "1.9.0" (numeric, part by part); "1.2.15-rc3" beats
+     * "1.2.15-rc2"; and a release beats its own candidates: "1.2.15" is newer
+     * than "1.2.15-rc3", because a version with no suffix counts as the top of
+     * its own line.
+     */
     private fun isNewer(remote: String, installed: String): Boolean {
-        fun parts(v: String) = v.trim().split(".", "-")
-            .mapNotNull { it.takeWhile(Char::isDigit).toIntOrNull() }
-        val r = parts(remote)
-        val i = parts(installed)
+        fun base(v: String) = v.trim().substringBefore('-').split(".")
+            .map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        fun candidate(v: String): Int {
+            val t = v.trim()
+            if ('-' !in t) return Int.MAX_VALUE
+            return t.substringAfter('-').filter(Char::isDigit).toIntOrNull() ?: 0
+        }
+        val r = base(remote)
+        val i = base(installed)
         for (n in 0 until maxOf(r.size, i.size)) {
             val a = r.getOrElse(n) { 0 }
             val b = i.getOrElse(n) { 0 }
             if (a != b) return a > b
         }
-        return false
+        return candidate(remote) > candidate(installed)
     }
 
     private fun downloadAndInstall(release: Release) {
@@ -316,6 +358,19 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 emit("mp.update.progress", -1)
                 return
             }
+            // The last line of defence, whatever the release said: the APK must
+            // be THIS app. A test build can then only ever install a test build
+            // and the real app only the real app. However the asset was named
+            // or chosen, nothing reaches the installer that would replace the
+            // other one.
+            @Suppress("DEPRECATION")
+            val pkg = ctx.packageManager.getPackageArchiveInfo(out.path, 0)?.packageName
+            if (pkg != ctx.packageName) {
+                Log.e(TAG, "update is $pkg, not ${ctx.packageName}: refused")
+                out.delete()
+                emit("mp.update.progress", -1)
+                return
+            }
             emit("mp.update.progress", 100)
 
             val uri: Uri = FileProvider.getUriForFile(
@@ -339,5 +394,10 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
         private const val TAG = "MusicPlayerUpd"
         private const val RELEASES_API =
             "https://api.github.com/repos/subh-775/Music_Player/releases/latest"
+        /** Test builds: the release list, newest first; see newestRcRelease. */
+        private const val RC_RELEASES_API =
+            "https://api.github.com/repos/subh-775/Music_Player/releases?per_page=20"
+        /** The test build's asset name: CI's Stage APK step for the rc variant. */
+        private const val RC_ASSET = "Relaxify-RC.apk"
     }
 }
