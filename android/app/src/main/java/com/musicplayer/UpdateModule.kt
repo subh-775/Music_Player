@@ -148,7 +148,17 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
     /** Why the last check found nothing, when the reason wasn't "up to date". */
     @Volatile private var lastCheckError: String = ""
 
-    private fun doCheck(): Release? = try {
+    /**
+     * A test build (the rc build type, com.musicplayer.rc) never updates.
+     * /releases/latest is the REAL app's release: offering it here would
+     * download Relaxify's APK and hand it to the installer from inside a test
+     * app — installing or replacing the real app, the one thing a test build
+     * must never be able to touch.
+     */
+    private fun doCheck(): Release? = if (BuildConfig.IS_RC) {
+        lastCheckError = "Test build: updates are off"
+        null
+    } else try {
         lastCheckError = ""
         val conn = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8000

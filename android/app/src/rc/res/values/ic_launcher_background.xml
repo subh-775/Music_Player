@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Test builds: amber instead of Relaxify's green, so the two icons are
+       told apart at a glance in the drawer. -->
+  <color name="ic_launcher_background">#E08A1E</color>
+</resources>

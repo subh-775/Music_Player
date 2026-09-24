@@ -93,8 +93,12 @@ jobs:
       - name: Decide variant
         id: v
         run: |
-          # Tag push -> release; manual run -> the chosen input (default debug).
+          # Tag push -> release; a pre-release tag (vX.Y.Z-anything) -> the
+          # rc TEST variant, which installs as its own app (com.musicplayer.rc,
+          # "Relaxify RC") and can never replace or touch the real one; manual
+          # run -> the chosen input (default debug).
           case "$GITHUB_REF_NAME" in
+            v*-*) echo "variant=rc" >> "$GITHUB_OUTPUT" ;;
             v*) echo "variant=release" >> "$GITHUB_OUTPUT" ;;
             *)  echo "variant=${{ inputs.variant }}" >> "$GITHUB_OUTPUT" ;;
           esac
@@ -120,7 +124,8 @@ jobs:
             fi
             return "$status"
           }
-          if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
+          VARIANT="${{ steps.v.outputs.variant }}"
+          if [ "$VARIANT" = "release" ] || [ "$VARIANT" = "rc" ]; then
             # Derive versionName/versionCode from the tag (v1.2.3 -> 1.2.3), so
             # the installed app reports the release version and the in-app
             # updater compares correctly.
@@ -148,8 +153,12 @@ jobs:
             PA="$(echo "$BASE" | cut -d. -f3)"; PA="${PA:-0}"
             export APP_VERSION_NAME="$VER"
             export APP_VERSION_CODE="$(( MA * 10000 + MI * 100 + PA ))"
-            echo "Building release $APP_VERSION_NAME (code $APP_VERSION_CODE)"
-            gradle assembleRelease
+            echo "Building $VARIANT $APP_VERSION_NAME (code $APP_VERSION_CODE)"
+            if [ "$VARIANT" = "rc" ]; then
+              gradle assembleRc
+            else
+              gradle assembleRelease
+            fi
           else
             gradle assembleDebug
           fi
@@ -160,6 +169,11 @@ jobs:
           if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
             SRC=android/app/build/outputs/apk/release/app-release.apk
             DEST="Relaxify.apk"
+          elif [ "${{ steps.v.outputs.variant }}" = "rc" ]; then
+            # Never "Relaxify.apk": a test build must not be mistaken for the
+            # real one, by a person or by anything matching on the name.
+            SRC=android/app/build/outputs/apk/rc/app-rc.apk
+            DEST="Relaxify-RC.apk"
           else
             SRC=android/app/build/outputs/apk/debug/app-debug.apk
             DEST="Relaxify-debug.apk"
