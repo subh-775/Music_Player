@@ -40,6 +40,7 @@ import {getTrackId, normalizeTracks} from '../tracks';
 import {TrackRow, listWindowing} from '../components/TrackRow';
 import {forgetSearch, rememberSearch, useSearchHistory} from '../searchHistory';
 import {BOTTOM_INSET} from '../layout';
+import {MenuMark} from '../components/MenuMark';
 
 /** A public Spotify playlist/album link (or spotify: URI). */
 export function isSpotifyUrl(text: string): boolean {
@@ -86,6 +87,7 @@ export const SearchScreen = React.memo(function SearchScreen({
   onMenu,
   onOpenArtist,
   onOpenBrowse,
+  onOpenMenu,
 }: {
   /** Whether the Search tab is the one on screen. The tab stays MOUNTED when
    *  you leave it (that's what keeps it instant to come back to), so leaving is
@@ -97,6 +99,8 @@ export const SearchScreen = React.memo(function SearchScreen({
   onOpenArtist?: (name: string) => void;
   /** A genre tile — resolved and opened by the app, same as a Home card. */
   onOpenBrowse: (item: HomeItem) => void;
+  /** The mark at the top-left opens the drawer, as it does on Home. */
+  onOpenMenu: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -273,7 +277,10 @@ export const SearchScreen = React.memo(function SearchScreen({
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Search</Text>
+      <View style={styles.head}>
+        <MenuMark onPress={onOpenMenu} />
+        <Text style={styles.title}>Search</Text>
+      </View>
 
       <View style={styles.field}>
         <SearchIcon size={20} color={C.bg} strokeWidth={2.4} />
@@ -522,14 +529,18 @@ export const SearchScreen = React.memo(function SearchScreen({
 });
 
 const styles = StyleSheet.create({
-  wrap: {flex: 1, backgroundColor: C.bg},
-  title: {
-    ...T.screenTitle,
-    color: C.text,
+  // Transparent: the window's black is the background (see styles.xml).
+  wrap: {flex: 1},
+  // The same row as Library's bar: mark, then the title.
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     paddingHorizontal: S.gutter,
     paddingTop: 14,
     paddingBottom: 12,
   },
+  title: {...T.screenTitle, color: C.text},
   field: {
     flexDirection: 'row',
     alignItems: 'center',

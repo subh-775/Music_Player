@@ -35,7 +35,7 @@ import {
   playlistToCollection,
   type Collection,
 } from '../collections';
-import {useUpdateAvailable} from '../update';
+import {MenuMark} from '../components/MenuMark';
 import {
   DRAWER_EDGE,
   DRAWER_GRAB,
@@ -137,7 +137,6 @@ export const HomeScreen = React.memo(function HomeScreen({
   const recent = useRecentlyPlayed();
   const playlists = usePlaylists();
   const likes = useLikes();
-  const updateWaiting = useUpdateAvailable();
   // Subscribed, so cached rows appear the moment disk hydration finishes even
   // if that lands after first render.
   const cachedRows = useStoreValue(homeCache);
@@ -295,28 +294,8 @@ export const HomeScreen = React.memo(function HomeScreen({
           belongs on the left — a right-hand button that opens a left-hand panel
           reads backwards, and it's the far corner for a right thumb. */}
       <View style={styles.header}>
-        {/* The mark IS the menu button: it opens the drawer, which carries
-            the same mark at its top, so the tap lands where it points. */}
-        <TouchableOpacity
-          onPress={onOpenMenu}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Open menu">
-          <Image
-            source={MARK}
-            style={styles.mark}
-            accessibilityIgnoresInvertColors
-          />
-          {/* A waiting update has to stay findable after the popup is
-              dismissed — this is the only thing that says so. */}
-          {updateWaiting && (
-            <View
-              style={styles.dot}
-              accessibilityLabel="Update available"
-              accessible
-            />
-          )}
-        </TouchableOpacity>
+        {/* The mark IS the menu button — see MenuMark. */}
+        <MenuMark onPress={onOpenMenu} />
         <View style={styles.headerText}>
           <Greeting />
         </View>
@@ -511,9 +490,6 @@ function Card({item, onPick}: {item: HomeItem; onPick: (i: HomeItem) => void}) {
 
 const CARD = 138;
 
-/** The app's own mark, as in the menu and on the splash. */
-const MARK = require('../assets/app-icon-bl.png');
-
 /**
  * Every row comes to rest with a card on the page margin.
  *
@@ -543,18 +519,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerText: {flex: 1, minWidth: 0},
-  mark: {width: 38, height: 38, borderRadius: 19},
-  dot: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: C.accent,
-    borderWidth: 1.5,
-    borderColor: C.bg,
-  },
   title: {
     ...T.screenTitle,
     color: C.text,

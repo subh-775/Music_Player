@@ -170,6 +170,7 @@ export function Sheet({
   style,
   dragEnabled = true,
   scrollY,
+  lock,
 }: {
   open: boolean;
   onClose: () => void;
@@ -200,6 +201,14 @@ export function Sheet({
    * does further downward travel move the sheet.
    */
   scrollY?: SharedValue<number>;
+  /**
+   * While true, the sheet's drag stands down — dragEnabled's job, but on the
+   * UI thread. For a lock that flips at the START of a gesture inside the
+   * sheet (a queue row being lifted), a React prop arrives a render late and
+   * costs a render of the owner; a shared value is read by the very gesture it
+   * governs. Only consulted on the scroll-aware (manual) path.
+   */
+  lock?: SharedValue<boolean>;
 }) {
   // The live window, not a module-load snapshot: a fold opening or a rotation
   // changes it, and a stale "gone" position leaves the sheet parked halfway up
@@ -326,6 +335,9 @@ export function Sheet({
           if (!t) {
             return;
           }
+          if (lock && lock.value) {
+            return; // a row inside owns this touch — never take it
+          }
           const dx = t.absoluteX - startX.value;
           const dy = t.absoluteY - startY.value;
           if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
@@ -365,6 +377,7 @@ export function Sheet({
     [
       dragEnabled,
       scrollY,
+      lock,
       height,
       HIDE_Y,
       close,

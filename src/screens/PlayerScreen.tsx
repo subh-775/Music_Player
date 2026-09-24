@@ -20,6 +20,7 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -57,6 +58,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useDerivedValue,
+  useAnimatedReaction,
   useSharedValue,
   withSpring,
   withTiming,
@@ -91,6 +93,9 @@ import {
   morphTransform,
   resetPlayer,
   settlePlayer,
+  closePlayerSheet,
+  isPlayerClosing,
+  panelDrawn,
   sheetP,
   sheetRect,
   spanBetween,
@@ -157,20 +162,25 @@ const SEG_W = 40;
  */
 export const PlayerScreen = React.memo(function PlayerScreen({
   visible,
-  dragging = false,
   onClose,
   onAddToPlaylist,
   onOpenArtist,
 }: {
   visible: boolean;
-  /** True while a finger on the mini player is driving `sheetP` directly. The
-   *  open animation must not run against it — see the effect below. */
-  dragging?: boolean;
   onClose: () => void;
   onAddToPlaylist: (track: Track) => void;
   onOpenArtist: (credit: string) => void;
 }) {
   const active = useActiveTrack();
+  // The page behind may only stop drawing while this panel is really there —
+  // see panelDrawn. Layout effect, so it flips in the same commit as the
+  // panel appearing or vanishing rather than a frame after it.
+  useLayoutEffect(() => {
+    panelDrawn.value = !!active;
+    return () => {
+      panelDrawn.value = false;
+    };
+  }, [active]);
   const playing = useIsPlaying();
   const output = useAudioOutput();
 
@@ -249,8 +259,9 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   const rate = clampRate(useSettings().playbackRate);
   const fastRate = !isRate(rate, 1);
   /** True while a queue row is lifted — the sheet's own drag stands down, or it
-   *  wins a 12px-vs-12px tie it has no business winning. */
-  const [rowDragging, setRowDragging] = useState(false);
+   *  wins a 12px-vs-12px tie it has no business winning. A shared value, so
+   *  lifting a row does not re-render this whole screen (see QueuePane). */
+  const queueDragLock = useSharedValue(false);
   /** Where the queue list is scrolled to, so the sheet knows when the pull
    *  belongs to it and not to the list. */
   const queueScrollY = useSharedValue(0);
@@ -402,57 +413,57 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     });
   }, []);
 
-  /** True from the moment close() starts its settle until that settle ends or
-   *  is overtaken — so the app can be told at once without its `visible`
-   *  change snapping the panel shut underneath the animation. */
-  const closingRef = useRef(false);
+  /**
+   * Parked = the panel is most of the way closed (past 0.85, just before the
+   * mini player starts fading back in at 0.88), whatever `visible` says.
+   *
+   * `visible` only turns false once a close has FINISHED — and it has to stay
+   * that way: telling the app at the start of the close put a large commit
+   * (App re-render, lyrics/progress/marquee all switching off) into the middle
+   * of the animation, which is exactly the lag the drag-down picked up in
+   * 1.2.14. But until then this full-screen view took every touch, while the
+   * mini player was already back on screen underneath it — the "tapping the
+   * mini player sometimes does nothing" report.
+   *
+   * So touch follows the panel's POSITION instead, noticed on the UI thread
+   * and handed to React only when the line is crossed: one small prop change,
+   * once per open or close, and never the whole `visible` fan-out.
+   */
+  const [parked, setParked] = useState(true);
+  useAnimatedReaction(
+    () => sheetP.value > 0.85,
+    (now, prev) => {
+      if (now !== prev) {
+        runOnJS(setParked)(now);
+      }
+    },
+  );
 
   useEffect(() => {
     if (visible) {
-      // `dragging` is the mini player's pull. When the finger is already
-      // driving sheetP, animating it to 0 from here would yank the panel out
-      // from under it — the open must stay where the thumb is until it lifts.
-      //
-      // The `> 0` guard matters on the way out of a drag: clearing `dragging`
-      // re-runs this effect, and without it an abandoned pull (which is
-      // settling back DOWN) would be turned into an open.
-      if (!dragging && sheetP.value > 0) {
+      if (sheetP.value > 0) {
         settlePlayer(true, 0, measureArt);
-      } else if (!dragging) {
-        // Already open — take the measurement the morph needs while the sheet
-        // is provably at rest.
+      } else {
+        // Already open (a pull that has just settled) — take the measurement
+        // the morph needs while the sheet is provably at rest.
         measureArt();
       }
-    } else if (!closingRef.current) {
+    } else if (!isPlayerClosing()) {
       // A close that came from somewhere other than close() — navigating to
       // an artist, say — parks the panel at once. close() runs its own settle.
       resetPlayer();
     }
-  }, [visible, dragging, measureArt]);
+  }, [visible, measureArt]);
 
   /**
-   * Slide the rest of the way out — and tell the app NOW, not at the end.
-   *
-   * The app used to hear about it only once the 440ms settle had finished.
-   * Until then `visible` stayed true, and this full-screen view kept
-   * pointerEvents 'auto' at zIndex 30 while the mini player was already fading
-   * back in underneath it (from about halfway through). Every tap on the bar
-   * in that window landed on an invisible panel: the "clicking the mini player
-   * sometimes doesn't open it" report. Closed-as-far-as-touch-goes starts when
-   * the close does; the settle carries on regardless, and a tap during it
-   * reopens from wherever the panel has got to.
+   * Slide the rest of the way out, THEN tell the app — nothing in React
+   * changes during the animation. (Touch is handled separately: see `parked`.)
    *
    * `velocity` is px/s, straight from the gesture. A firm flick finishes quicker
    * than a slow drag, so the sheet keeps the speed the finger gave it.
    */
   const close = useCallback(
-    (velocity = 0) => {
-      closingRef.current = true;
-      settlePlayer(false, velocity, () => {
-        closingRef.current = false;
-      });
-      finishClose();
-    },
+    (velocity = 0) => closePlayerSheet(velocity, finishClose),
     [finishClose],
   );
 
@@ -924,7 +935,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
       style={[styles.host, hostStyle]}
       // A parked player is still in the tree; it must not eat touches meant for
       // the app behind it, nor be read out by a screen reader.
-      pointerEvents={visible ? 'auto' : 'none'}
+      pointerEvents={visible && !parked ? 'auto' : 'none'}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}>
       <Animated.View ref={wrapRef} style={[styles.wrap, sheetStyle]}>
         {/* The panel's SURFACE, as its own view rather than a colour on the
@@ -1278,7 +1289,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
         <Sheet
           open={queueOpen}
           onClose={() => setQueueOpen(false)}
-          dragEnabled={!rowDragging}
+          lock={queueDragLock}
           scrollY={queueScrollY}
           style={styles.queueSheet}>
           {/* Title, subtitle and the pinned now-playing row all live INSIDE
@@ -1286,11 +1297,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
               header has to sit above the scroll region rather than beside it.
               The chevron is gone: the sheet's own handle, the scrim and back
               all already close it. */}
-          <QueuePane
-            onDragBegin={() => setRowDragging(true)}
-            onDragEnd={() => setRowDragging(false)}
-            scrollY={queueScrollY}
-          />
+          <QueuePane dragLock={queueDragLock} scrollY={queueScrollY} />
         </Sheet>
       </Animated.View>
     </Animated.View>

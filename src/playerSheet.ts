@@ -72,6 +72,17 @@ export const FALLBACK_SPAN = Math.max(SCREEN.width, SCREEN.height);
  */
 export const sheetP: SharedValue<number> = makeMutable(1);
 
+/**
+ * The full player's panel is actually on screen (it has a track to draw).
+ *
+ * The app stops drawing the page under a FULLY OPEN player (App's
+ * pageBehindPlayer), and that must never be decided by sheetP alone: with no
+ * track the panel renders nothing at all, and a sheetP left at "open" would
+ * then hide the page behind an empty screen. Only a panel that is really there
+ * may hide what is behind it.
+ */
+export const panelDrawn: SharedValue<boolean> = makeMutable(false);
+
 /** How far the finger must travel before a drag counts as an open rather than
  *  a stray touch on its way to a button. The SAME number the skip swipe uses
  *  horizontally, so a diagonal resolves to whichever way it is leaning. */
@@ -301,4 +312,42 @@ export function settlePlayer(
       }
     },
   );
+}
+
+/**
+ * A close that is still sliding. Module state, because the thing that has to
+ * know is the MINI PLAYER — a tap on it during the tail of a close must turn
+ * the panel round, and the app has not been told the panel is closed yet (it
+ * is told when the slide ends, so nothing in React runs during it).
+ */
+let closing = false;
+
+/** Slide the panel closed, then call onClosed — unless something reopens it
+ *  first (reopenIfClosing, or a pull taking hold of it). */
+export function closePlayerSheet(velocity: number, onClosed: () => void): void {
+  closing = true;
+  settlePlayer(false, velocity, finished => {
+    if (!closing) {
+      return; // overtaken by a reopen
+    }
+    closing = false;
+    if (finished) {
+      onClosed();
+    }
+  });
+}
+
+export function isPlayerClosing(): boolean {
+  return closing;
+}
+
+/** A tap on the mini player while a close is still running: reverse it, from
+ *  wherever it has got to. Returns false when there was nothing to reverse. */
+export function reopenIfClosing(): boolean {
+  if (!closing) {
+    return false;
+  }
+  closing = false;
+  settlePlayer(true);
+  return true;
 }

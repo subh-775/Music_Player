@@ -54,6 +54,7 @@ import {listWindowing} from '../components/TrackRow';
 import {BOTTOM_INSET} from '../layout';
 import Animated, {useAnimatedRef} from 'react-native-reanimated';
 import {FastScroll, useFastScroll} from '../components/FastScroll';
+import {MenuMark} from '../components/MenuMark';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
 
@@ -86,9 +87,12 @@ function idOf(c: Collection): string {
  */
 export const LibraryScreen = React.memo(function LibraryScreen({
   onOpen,
+  onOpenMenu,
   visible = true,
 }: {
   onOpen: (c: Collection) => void;
+  /** The mark at the top-left opens the drawer, as it does on Home. */
+  onOpenMenu: () => void;
   /** The tab stays mounted now; this flags when it's actually on screen so
    *  downloads can re-scan quietly without a full-screen spinner. */
   visible?: boolean;
@@ -280,6 +284,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
   return (
     <View style={styles.wrap}>
       <View style={styles.bar}>
+        <MenuMark onPress={onOpenMenu} />
         <Text style={styles.title}>Your Library</Text>
         <TouchableOpacity
           onPress={() => setCreating(true)}
@@ -544,7 +549,8 @@ export const LibraryScreen = React.memo(function LibraryScreen({
 });
 
 const styles = StyleSheet.create({
-  wrap: {flex: 1, backgroundColor: C.bg},
+  // Transparent: the window's black is the background (see styles.xml).
+  wrap: {flex: 1},
   bar: {
     flexDirection: 'row',
     alignItems: 'center',

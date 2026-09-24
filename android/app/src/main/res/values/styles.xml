@@ -4,6 +4,14 @@
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <!-- THE app background, and the only full-screen one. The theme's
+             default window fill was painted under two identical black React
+             roots and each tab's own black wrapper: the same pixels filled
+             three or four times every frame (Debug GPU overdraw showed the
+             empty page green end to end), which at 120 Hz was enough to make
+             plain list scrolling miss frames on the GPU. The React views are
+             transparent now and this paints the black once. -->
+        <item name="android:windowBackground">@android:color/black</item>
     </style>
 
 </resources>

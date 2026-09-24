@@ -25,7 +25,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withSequence,
   withTiming,
   type AnimatedRef,
   type SharedValue,
@@ -64,11 +63,13 @@ export function useFastScroll() {
     contentH.value = e.contentSize.height;
     viewH.value = e.layoutMeasurement.height;
     if (!dragging.value) {
-      // Restarted on every event, so it fades HIDE_AFTER_MS after the LAST one.
-      shown.value = withSequence(
-        withTiming(1, {duration: 120}),
-        withDelay(HIDE_AFTER_MS, withTiming(0, {duration: 260})),
-      );
+      // FULL at once, on the first scroll event in either direction — no
+      // fade-in. A fade (and the slide that went with it) meant the thumb
+      // arrived grey and half-there, and became grabbable only once it had
+      // finished growing. Restarted on every event, so it goes away
+      // HIDE_AFTER_MS after the LAST one; withDelay holds it at 1 until then.
+      shown.value = 1;
+      shown.value = withDelay(HIDE_AFTER_MS, withTiming(0, {duration: 260}));
     }
   });
 
@@ -102,7 +103,7 @@ export function FastScroll({
 
   useAnimatedReaction(
     () =>
-      shown.value > 0.05 &&
+      shown.value > 0.5 &&
       contentH.value - viewH.value > viewH.value * WORTH_SCREENS,
     (on, prev) => {
       if (on !== prev) {
@@ -123,11 +124,7 @@ export function FastScroll({
     const worth = max > vh * WORTH_SCREENS;
     return {
       opacity: worth ? shown.value : 0,
-      transform: [
-        {translateY: EDGE + Math.min(len, Math.max(0, top))},
-        // Slides in from the edge as it appears.
-        {translateX: (1 - shown.value) * 20},
-      ],
+      transform: [{translateY: EDGE + Math.min(len, Math.max(0, top))}],
     };
   });
 
@@ -142,7 +139,7 @@ export function FastScroll({
       startTop.value = top;
       dragTop.value = top;
       dragging.value = true;
-      shown.value = withTiming(1, {duration: 80});
+      shown.value = 1;
     })
     .onUpdate(e => {
       const vh = viewH.value;
