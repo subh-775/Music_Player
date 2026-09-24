@@ -1,39 +1,38 @@
 /**
- * "Listen up Buddy" is coloured letter by letter, freshly per launch — and it
- * must never put the same colour on two neighbouring letters, or the line
- * reads as blocks of colour instead of a run of it.
+ * "Listen" and "Buddy" each wear one colour that keeps changing. A change must
+ * always be visible (never the colour the word already has) and the two words
+ * must never end up wearing the same colour.
  */
 import {expect, jest, test} from '@jest/globals';
 
 jest.mock('react-native', () => ({
-  Animated: {Value: class {}},
+  Animated: {Value: class {}, Text: 'Text', View: 'View'},
   Easing: {},
   StyleSheet: {create: (s: unknown) => s},
-  Text: 'Text',
+  View: 'View',
 }));
 
 // NB: below the mock — jest hoists jest.mock().
-import {letterColors} from '../src/components/Greeting';
+import {WORD_PALETTE, nextColor} from '../src/components/Greeting';
 
-const PALETTE = ['#a', '#b', '#c', '#d', '#e', '#f', '#g', '#h', '#i'];
-
-test('every letter is coloured, spaces are not, neighbours always differ', () => {
-  for (let seed = 1; seed <= 200; seed++) {
-    let x = seed;
-    const rand = () => ((x = (x * 16807) % 2147483647) - 1) / 2147483646;
-    const colors = letterColors('Listen up Buddy', PALETTE, rand);
-    const letters = colors.filter((c, i) => 'Listen up Buddy'[i] !== ' ');
-    expect(letters.every(c => PALETTE.includes(c))).toBe(true);
-    expect(colors[6]).toBe('');
-    expect(colors[9]).toBe('');
-    for (let i = 1; i < letters.length; i++) {
-      expect(letters[i]).not.toBe(letters[i - 1]);
+test('a new colour is never the current one, nor the other word’s', () => {
+  for (const current of WORD_PALETTE) {
+    for (const other of WORD_PALETTE) {
+      for (const r of [0, 0.25, 0.5, 0.75, 0.9999]) {
+        const c = nextColor(current, other, WORD_PALETTE, () => r);
+        expect(WORD_PALETTE).toContain(c);
+        expect(c).not.toBe(current);
+        expect(c).not.toBe(other);
+      }
     }
   }
 });
 
-test('different launches get different arrangements', () => {
-  const a = letterColors('Listen up Buddy', PALETTE, () => 0.1).join();
-  const b = letterColors('Listen up Buddy', PALETTE, () => 0.9).join();
-  expect(a).not.toBe(b);
+test('the first colour of a launch can be any in the palette', () => {
+  const seen = new Set(
+    [0, 0.12, 0.23, 0.34, 0.45, 0.56, 0.67, 0.78, 0.99].map(r =>
+      nextColor(null, null, WORD_PALETTE, () => r),
+    ),
+  );
+  expect(seen.size).toBe(WORD_PALETTE.length);
 });

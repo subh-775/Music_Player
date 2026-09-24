@@ -1,3 +1,83 @@
+diff --git a/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx b/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
+index 7c88afc..2cca29c 100644
+--- a/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
+@@ -19,6 +19,7 @@ import {
+ } from "react-native-gesture-handler";
+ import Animated, {
+   runOnJS,
++  runOnUI,
+   useAnimatedReaction,
+   useAnimatedScrollHandler,
+   useSharedValue,
+@@ -71,6 +72,7 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+     activeIndexAnim,
+     containerSize,
+     scrollOffset,
++    scrollInit,
+     scrollViewSize,
+     spacerIndexAnim,
+     horizontalAnim,
+@@ -148,15 +150,33 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+     if (disabled.value) return;
+     const index = keyToIndexRef.current.get(activeKey);
+     const cellData = cellDataRef.current.get(activeKey);
+-    if (cellData) {
+-      activeCellOffset.value = cellData.measurements.offset;
+-      activeCellSize.value = cellData.measurements.size;
+-    }
++    const offset = cellData ? cellData.measurements.offset : -1;
++    const size = cellData ? cellData.measurements.size : -1;
+ 
+     const { onDragBegin } = propsRef.current;
+     if (index !== undefined) {
+-      spacerIndexAnim.value = index;
+-      activeIndexAnim.value = index;
++      // Everything the lift depends on, written in ONE step on the UI thread.
++      //
++      // These used to be separate writes from JS, and the scroll origin was
++      // not among them at all: a reaction to activeIndexAnim filled it in on a
++      // later frame. The lifted row's position is (scroll - scrollInit) +
++      // touchTranslate, so until that reaction caught up it read a scrollInit
++      // left over from an earlier drag (or 0) — and the row jumped by however
++      // far the list had scrolled since, far up or far down, with the finger
++      // perfectly still. A touchTranslate left by the previous drop's spring
++      // did the same. Written together here, no frame can see a half-lifted
++      // row.
++      runOnUI(() => {
++        "worklet";
++        touchTranslate.value = 0;
++        scrollInit.value = scrollOffset.value;
++        if (offset >= 0) {
++          activeCellOffset.value = offset;
++          activeCellSize.value = size;
++        }
++        spacerIndexAnim.value = index;
++        activeIndexAnim.value = index;
++      })();
+       setActiveKey(activeKey);
+       onDragBegin?.(index);
+     }
+diff --git a/node_modules/react-native-draggable-flatlist/src/context/animatedValueContext.tsx b/node_modules/react-native-draggable-flatlist/src/context/animatedValueContext.tsx
+index c62360d..b1b74f8 100644
+--- a/node_modules/react-native-draggable-flatlist/src/context/animatedValueContext.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/context/animatedValueContext.tsx
+@@ -175,6 +175,7 @@ function useSetupAnimatedValues<T>() {
+       placeholderOffset,
+       resetTouchedCell,
+       scrollOffset,
++      scrollInit,
+       scrollViewSize,
+       spacerIndexAnim,
+       touchPositionDiff,
+@@ -198,6 +199,7 @@ function useSetupAnimatedValues<T>() {
+       placeholderOffset,
+       resetTouchedCell,
+       scrollOffset,
++      scrollInit,
+       scrollViewSize,
+       spacerIndexAnim,
+       touchPositionDiff,
 diff --git a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
 index d3add83..4e1e4ce 100644
 --- a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
