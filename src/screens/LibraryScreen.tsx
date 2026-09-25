@@ -26,7 +26,7 @@ import {
   Search as SearchIcon,
   Trash2,
   X,
-} from 'lucide-react-native';
+} from '../icons';
 import {C, S, T} from '../theme';
 import {PinGlyph} from '../components/PinGlyph';
 import {getLocalLibrary, type Track} from '../backend';

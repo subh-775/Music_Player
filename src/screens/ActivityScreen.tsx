@@ -18,7 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ChevronLeft} from 'lucide-react-native';
+import {ChevronLeft} from '../icons';
 import {C, S, T} from '../theme';
 import {TrackRow, listWindowing} from '../components/TrackRow';
 import {useStats, useWeek, type WeekStat} from '../stats';

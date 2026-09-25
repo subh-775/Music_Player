@@ -37,7 +37,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
-import {Headphones, Pause, Play} from 'lucide-react-native';
+import {Headphones, Pause, Play} from '../icons';
 import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {Marquee} from './Marquee';

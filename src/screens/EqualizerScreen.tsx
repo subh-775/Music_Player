@@ -17,8 +17,8 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
-import * as Lucide from 'lucide-react-native';
-import {ChevronLeft} from 'lucide-react-native';
+import * as Icons from '../icons';
+import {ChevronLeft} from '../icons';
 import {C, S, T} from '../theme';
 import {
   EQ_BANDS,
@@ -29,6 +29,7 @@ import {
   normalizeGains,
   presetGains,
   shapedGains,
+  type EqPreset,
 } from '../eq';
 import {useSettings, writeSetting, writeSettings} from '../store';
 import {
@@ -57,9 +58,9 @@ import {BOTTOM_INSET} from '../layout';
 
 /** Renders a preset's glyph by name — the preset list owns which icon it uses,
  *  so adding a preset never means editing this screen too. */
-function PresetIcon({name, color}: {name: string; color: string}) {
-  const Icon = (Lucide as unknown as Record<string, typeof ChevronLeft>)[name];
-  return Icon ? <Icon size={19} color={color} /> : null;
+function PresetIcon({name, color}: {name: EqPreset['icon']; color: string}) {
+  const Icon = Icons[name];
+  return <Icon size={19} color={color} />;
 }
 
 const SLIDER_H = 150;

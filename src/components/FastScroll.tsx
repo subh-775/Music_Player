@@ -29,7 +29,7 @@ import Animated, {
   type AnimatedRef,
   type SharedValue,
 } from 'react-native-reanimated';
-import {ChevronDown, ChevronUp} from 'lucide-react-native';
+import {ChevronDown, ChevronUp} from '../icons';
 
 const THUMB = 46;
 /** Breathing room above and below the thumb's travel. */

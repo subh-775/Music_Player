@@ -22,7 +22,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Clock, Search as SearchIcon, X} from 'lucide-react-native';
+import {Clock, Search as SearchIcon, X} from '../icons';
 import {C, S, T} from '../theme';
 import {
   getGenres,

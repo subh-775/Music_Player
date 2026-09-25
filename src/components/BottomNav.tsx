@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {Home, Search, Library} from 'lucide-react-native';
+import {Home, Search, Library} from '../icons';
 import {C} from '../theme';
 
 export type Tab = 'home' | 'search' | 'library';

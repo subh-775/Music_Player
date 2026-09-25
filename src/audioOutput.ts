@@ -7,7 +7,7 @@
  * and every caller simply renders nothing — no crash, no empty label.
  */
 import {useEffect, useState} from 'react';
-import {NativeModules} from 'react-native';
+import {AppState, NativeModules} from 'react-native';
 
 type AudioNative = {getAudioOutput?: () => Promise<string | null>};
 
@@ -32,24 +32,45 @@ export async function getAudioOutput(): Promise<string | null> {
  * lifecycle to get wrong. Native tracks connect/disconnect order itself (see
  * AudioModule.seenAt); this just asks often enough that SWITCHING between two
  * paired headsets mid-song updates the name while you're still looking at it.
+ *
+ * ONE poll for every caller (the mini player, the full player and the queue
+ * all show the name), and only while the app is in the foreground: nobody
+ * reads the label with the screen off, and each poll kept its own timer
+ * running through a whole background listening session.
  */
+let current: string | null = null;
+const subscribers = new Set<(name: string | null) => void>();
+let timer: ReturnType<typeof setInterval> | null = null;
+
+function tick() {
+  getAudioOutput().then(v => {
+    current = v;
+    subscribers.forEach(s => s(v));
+  });
+}
+
+function sync() {
+  const want = subscribers.size > 0 && AppState.currentState !== 'background';
+  if (want && !timer) {
+    tick();
+    timer = setInterval(tick, 1500);
+  } else if (!want && timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+AppState.addEventListener('change', sync);
+
 export function useAudioOutput(): string | null {
-  const [name, setName] = useState<string | null>(null);
+  const [name, setName] = useState(current);
 
   useEffect(() => {
-    let alive = true;
-    const tick = () => {
-      getAudioOutput().then(v => {
-        if (alive) {
-          setName(v);
-        }
-      });
-    };
-    tick();
-    const id = setInterval(tick, 1500);
+    subscribers.add(setName);
+    sync();
     return () => {
-      alive = false;
-      clearInterval(id);
+      subscribers.delete(setName);
+      sync();
     };
   }, []);
 

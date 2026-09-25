@@ -20,7 +20,7 @@ import {
   Radio,
   RefreshCw,
   SlidersHorizontal,
-} from 'lucide-react-native';
+} from '../icons';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 // Aliased: this file already has react-native's own Animated, for the refresh
 // glyph's rotation loop. Two different `Animated`s in one file is a bug waiting

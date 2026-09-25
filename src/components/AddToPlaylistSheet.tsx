@@ -22,7 +22,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Check, Heart, Plus, Search} from 'lucide-react-native';
+import {Check, Heart, Plus, Search} from '../icons';
 import {C, S, T} from '../theme';
 import type {Track} from '../backend';
 import {cleanText} from '../tracks';

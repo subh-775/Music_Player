@@ -9,7 +9,7 @@
  */
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {AlertTriangle, ArrowRight, Download} from 'lucide-react-native';
+import {AlertTriangle, ArrowRight, Download} from '../icons';
 import {C, S} from '../theme';
 import {appVersion} from '../backend';
 import {dismissUpdate, startUpdateInstall, useUpdate} from '../update';
