@@ -14,7 +14,7 @@ jest.mock('react-native', () => ({
 }));
 
 // NB: below the mock — jest hoists jest.mock().
-import {PAIRS, nextPair} from '../src/components/Greeting';
+import {PAIRS, fitSize, nextPair} from '../src/components/Greeting';
 
 const RANDS = [0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 0.9999];
 
@@ -40,4 +40,17 @@ test('every pair is two different colours', () => {
   for (const [a, b] of PAIRS) {
     expect(a).not.toBe(b);
   }
+});
+
+test('the line fits its room: full size on wide phones, smaller on narrow ones', () => {
+  // Rooms Home's header leaves (screen width less gutters, the mark and its
+  // balancing spacer) on 432, 392 and 360 dp phones.
+  expect(fitSize(300)).toBe(32);
+  expect(fitSize(260)).toBe(32);
+  const narrow = fitSize(228);
+  expect(narrow).toBeLessThan(32);
+  // It must actually fit: the line's width at that size, plus the two gaps.
+  expect(narrow * 7.381 + 16).toBeLessThanOrEqual(228);
+  // Before layout (width 0) it renders at the full size rather than 0.
+  expect(fitSize(0)).toBe(32);
 });

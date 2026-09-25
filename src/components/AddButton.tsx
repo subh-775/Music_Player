@@ -18,7 +18,7 @@
  */
 import React, {useCallback} from 'react';
 import {StyleProp, TouchableOpacity, ViewStyle} from 'react-native';
-import {CircleCheck, CirclePlus} from 'lucide-react-native';
+import {CircleCheck, CirclePlus} from '../icons';
 import {C} from '../theme';
 import type {Track} from '../backend';
 import {useLike} from '../store';

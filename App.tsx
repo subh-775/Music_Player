@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import {ErrorBoundary} from './src/ErrorBoundary';
-import {HomeScreen, type QuickDest} from './src/screens/HomeScreen';
+import {HomeScreen} from './src/screens/HomeScreen';
 import {ActivityScreen} from './src/screens/ActivityScreen';
 import {SearchScreen} from './src/screens/SearchScreen';
 import {LibraryScreen} from './src/screens/LibraryScreen';
@@ -64,12 +64,7 @@ import {
   type HomeItem,
   type Track,
 } from './src/backend';
-import {
-  downloadsCollection,
-  likedCollection,
-  playlistToCollection,
-} from './src/collections';
-import {readPlaylists} from './src/playlists';
+import {downloadsCollection} from './src/collections';
 import {overlayDownloadArtwork} from './src/downloads';
 import {
   playTrack,
@@ -77,7 +72,7 @@ import {
   setupPlayer,
   startCrossfadeWatcher,
 } from './src/player';
-import {hydrate, readSettings, useLikes} from './src/store';
+import {hydrate, readSettings} from './src/store';
 import {flushAll} from './src/storage';
 import {normalizeTracks, splitArtists} from './src/tracks';
 import {type Collection} from './src/collections';
@@ -134,7 +129,6 @@ function Shell() {
   const [libraryNonce, setLibraryNonce] = useState(0);
   /** The drawer's Recents / Your activity pages. null = closed. */
   const [activity, setActivity] = useState<'recents' | 'stats' | null>(null);
-  const likes = useLikes();
   const updateWaiting = useUpdateAvailable();
   const exitArmedAt = useRef(0);
 
@@ -362,31 +356,6 @@ function Shell() {
       setCollection(null);
     }
   }, []);
-
-  const openQuick = useCallback(
-    async (dest: QuickDest) => {
-      if (dest.kind === 'liked') {
-        openCollection(likedCollection(likes));
-        return;
-      }
-      if (dest.kind === 'downloads') {
-        try {
-          const {tracks} = await getLocalLibrary();
-          // Same as the Library tab: the disk scan carries no artwork, so lay
-          // back the covers remembered at download time.
-          openCollection(downloadsCollection(overlayDownloadArtwork(tracks)));
-        } catch {
-          toast("Couldn't read your downloads.");
-        }
-        return;
-      }
-      const p = readPlaylists().find(x => x.id === dest.id);
-      if (p) {
-        openCollection(playlistToCollection(p));
-      }
-    },
-    [likes, openCollection],
-  );
 
   const switchTab = useCallback((next: Tab) => {
     setTab(next);
@@ -671,7 +640,6 @@ function Shell() {
             onOpenMenu={openDrawer}
             onBeginDrag={beginDrawerDrag}
             onEndDrag={endDrawerDrag}
-            onOpenQuick={openQuick}
             onReady={onHomeReady}
             visible={tab === 'home'}
           />

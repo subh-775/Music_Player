@@ -1,5 +1,5 @@
 /**
- * "Listen up Buddy" — the header on Home.
+ * "Listen up Buddy!" — the header on Home, centred.
  *
  * "Listen" and "Buddy" wear a matched pair of colours, "up" stays white. The
  * pair changes only when you arrive: each launch, and each time you come back
@@ -20,7 +20,14 @@
  * like arriving somewhere rather than a list appearing.
  */
 import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
+import {
+  Animated,
+  Easing,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 import {C} from '../theme';
 
 /** [Listen, Buddy]. Each pair is complementary or split-complementary, and
@@ -35,6 +42,24 @@ export const PAIRS: [string, string][] = [
   ['#FFD23F', '#7B8CFF'], // sun · periwinkle
   ['#00B4FF', '#8AE234'], // sky · lime
 ];
+
+/** The largest size the line is set at; narrower phones get less. */
+const MAX_SIZE = 32;
+/** The line's width at font size 1, word gaps excluded: "Listen", "up" and
+ *  "Buddy!" in Plus Jakarta Sans ExtraBold with this tracking, measured from
+ *  the font file. */
+const LINE_EM = 7.381;
+const WORD_GAP = 8;
+
+/** The font size that fits the line in `room` dp: MAX_SIZE on most phones,
+ *  smaller where the screen is narrow, never wrapped or clipped. Exported for
+ *  the test. */
+export function fitSize(room: number): number {
+  if (!(room > 0)) {
+    return MAX_SIZE;
+  }
+  return Math.min(MAX_SIZE, Math.floor((room - 2 * WORD_GAP) / LINE_EM));
+}
 
 /**
  * The index of the next pair: any pair except the current one. Exported for
@@ -83,11 +108,23 @@ export function Greeting({visible = true}: {visible?: boolean}) {
 
   const [listen, buddy] = PAIRS[pair];
 
+  // Sized to the room it is given (see fitSize). Before the first layout it
+  // is set at the full size; the fade-in covers the one-frame adjustment.
+  const [size, setSize] = useState(MAX_SIZE);
+  const onBox = (e: LayoutChangeEvent) =>
+    setSize(fitSize(e.nativeEvent.layout.width));
+  const word = {
+    fontSize: size,
+    lineHeight: Math.round(size * 1.28),
+    letterSpacing: -size * (1.1 / 32),
+  };
+
   return (
     <Animated.View
       accessible
       accessibilityRole="header"
-      accessibilityLabel="Listen up Buddy"
+      accessibilityLabel="Listen up Buddy!"
+      onLayout={onBox}
       style={[
         styles.wrap,
         {
@@ -103,9 +140,19 @@ export function Greeting({visible = true}: {visible?: boolean}) {
         },
       ]}>
       <View style={styles.line}>
-        <Text style={[styles.word, {color: listen}]}>Listen</Text>
-        <Text style={[styles.word, styles.up]}>up</Text>
-        <Text style={[styles.word, {color: buddy}]}>Buddy</Text>
+        <Text
+          style={[styles.word, word, {color: listen}]}
+          maxFontSizeMultiplier={1}>
+          Listen
+        </Text>
+        <Text style={[styles.word, word, styles.up]} maxFontSizeMultiplier={1}>
+          up
+        </Text>
+        <Text
+          style={[styles.word, word, {color: buddy}]}
+          maxFontSizeMultiplier={1}>
+          Buddy!
+        </Text>
       </View>
     </Animated.View>
   );
@@ -113,10 +160,19 @@ export function Greeting({visible = true}: {visible?: boolean}) {
 
 const styles = StyleSheet.create({
   wrap: {flex: 1, minWidth: 0},
+  // Centred in its box; the box itself is centred on the screen by Home's
+  // header (the mark on the left, a spacer of the same width on the right).
   // A word gap, not a space character: each word is its own Text.
-  line: {flexDirection: 'row', alignItems: 'baseline', gap: 8},
-  // Each word states its weight itself — see the note at the top. lineHeight
-  // gives the 'y' descender room; Android crops it otherwise.
-  word: {fontSize: 32, lineHeight: 41, fontWeight: '900', letterSpacing: -1.1},
+  line: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: WORD_GAP,
+  },
+  // Each word states its weight itself — see the note at the top. The size,
+  // line height (room for the 'y' descender) and tracking come from fitSize.
+  // maxFontSizeMultiplier={1} on each word: a display line sized to fit
+  // exactly must not be scaled up by the system font size.
+  word: {fontWeight: '900'},
   up: {color: C.text},
 });

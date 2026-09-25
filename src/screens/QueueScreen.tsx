@@ -34,7 +34,7 @@ import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
-import {Headphones, Menu, Shuffle} from 'lucide-react-native';
+import {Headphones, Menu, Shuffle} from '../icons';
 import type {Track as RNTPTrack} from 'react-native-track-player';
 import {C, S, T} from '../theme';
 import {

@@ -24,7 +24,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import {Gauge, Minus, Plus} from 'lucide-react-native';
+import {Gauge, Minus, Plus} from '../icons';
 import {C, S, T} from '../theme';
 import {Sheet} from './Sheet';
 import {playbackRate, setPlaybackRate} from '../player';

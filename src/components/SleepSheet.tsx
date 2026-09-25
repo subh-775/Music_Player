@@ -12,7 +12,7 @@
  */
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {Check, Moon} from 'lucide-react-native';
+import {Check, Moon} from '../icons';
 import {C, S, T} from '../theme';
 import {
   cancelSleepTimer,

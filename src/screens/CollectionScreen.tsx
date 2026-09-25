@@ -36,7 +36,7 @@ import {
   Square,
   SquareX,
   Trash2,
-} from 'lucide-react-native';
+} from '../icons';
 import {C, S, T} from '../theme';
 import {deleteDownload, type Track} from '../backend';
 import {formatTotalDuration, getBestArtworkUrl, getTrackId} from '../tracks';

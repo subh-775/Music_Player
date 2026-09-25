@@ -16,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ChevronLeft, Pause, Play} from 'lucide-react-native';
+import {ChevronLeft, Pause, Play} from '../icons';
 import {C, S, T} from '../theme';
 import {getArtist, type ArtistProfile, type Track} from '../backend';
 import {normalizeTracks} from '../tracks';

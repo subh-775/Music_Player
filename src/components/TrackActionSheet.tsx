@@ -28,7 +28,7 @@ import {
   Loader,
   Trash2,
   User,
-} from 'lucide-react-native';
+} from '../icons';
 import {C, S, T} from '../theme';
 import {deleteDownload, type Track} from '../backend';
 import {enqueueDownload, forgetDownloads} from '../downloads';

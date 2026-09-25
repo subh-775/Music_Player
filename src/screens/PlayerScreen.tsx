@@ -50,7 +50,7 @@ import {
   SkipBack,
   SkipForward,
   Timer,
-} from 'lucide-react-native';
+} from '../icons';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Svg, {Defs, RadialGradient, Rect, Stop} from 'react-native-svg';
 import Animated, {

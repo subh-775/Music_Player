@@ -13,7 +13,7 @@
  * the app crashing.
  */
 import {useEffect, useState, useSyncExternalStore} from 'react';
-import {Image} from 'react-native';
+import {AppState, Image} from 'react-native';
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
@@ -21,6 +21,7 @@ import TrackPlayer, {
   RepeatMode,
   State,
   usePlaybackState,
+  useProgress as useProgressPolled,
   type Track as RNTPTrack,
 } from 'react-native-track-player';
 import {apiUrl, getRadio, getStreamInfo, type Track} from './backend';
@@ -320,7 +321,9 @@ export async function setupPlayer(): Promise<boolean> {
         // refuses to drag.
         Capability.SeekTo,
       ],
-      progressUpdateEventInterval: 1,
+      // No progressUpdateEventInterval: nothing listens for that event, and it
+      // woke JS every second of playback, screen off included. The bars read
+      // position with useProgress, which polls only while they are mounted.
     });
     await TrackPlayer.setRepeatMode(RepeatMode.Off);
 
@@ -1558,4 +1561,24 @@ export {TrackPlayer, State, Event, RepeatMode};
 // into the library directly — which is what lets the guards above stay honest.
 // NOTE: useActiveTrack is OURS (defined above), not RNTP's — it publishes
 // optimistically on a committed gesture instead of waiting for the engine event.
-export {usePlaybackState, useProgress} from 'react-native-track-player';
+export {usePlaybackState} from 'react-native-track-player';
+
+function onAppState(cb: () => void) {
+  const sub = AppState.addEventListener('change', cb);
+  return () => sub.remove();
+}
+
+/**
+ * useProgress, parked while the app is in the background. Nothing on screen
+ * reads a position then, and every caller (the mini player's hairline, the
+ * full player's bar) otherwise kept asking the engine through a whole
+ * screen-off listening session. Back in the foreground the interval changes
+ * back, which restarts the poll with an immediate read.
+ */
+export function useProgress(interval: number) {
+  const background = useSyncExternalStore(
+    onAppState,
+    () => AppState.currentState === 'background',
+  );
+  return useProgressPolled(background ? 3600000 : interval);
+}

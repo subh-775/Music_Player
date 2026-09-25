@@ -23,9 +23,10 @@ export const FLAT = [0, 0, 0, 0, 0, 0, 0, 0];
 export type EqPreset = {
   id: string;
   label: string;
-  /** A lucide-react-native export name. Kept beside the curve so a preset is
-   *  defined in exactly one place — id, label, curve and glyph together. */
-  icon: string;
+  /** An icon's name in src/icons.ts (checked by the compiler). Kept beside
+   *  the curve so a preset is defined in exactly one place — id, label, curve
+   *  and glyph together. */
+  icon: keyof typeof import('./icons');
   gains: number[] | null;
 };
 
@@ -33,16 +34,66 @@ export type EqPreset = {
  *  which is why that lives in settings (eqGains) rather than here. */
 export const EQ_PRESETS: EqPreset[] = [
   {id: 'flat', label: 'Flat', icon: 'Minus', gains: FLAT},
-  {id: 'rock', label: 'Rock', icon: 'Guitar', gains: [5, 3, -1, -2, 1, 3, 4, 4]},
-  {id: 'metal', label: 'Metal', icon: 'Flame', gains: [6, 4, -2, -3, 2, 5, 5, 3]},
-  {id: 'pop', label: 'Pop', icon: 'Sparkles', gains: [-1, 2, 4, 4, 2, -1, -1, -2]},
-  {id: 'hiphop', label: 'Hip-Hop', icon: 'Drum', gains: [7, 5, 1, -1, -1, 1, 2, 3]},
-  {id: 'electronic', label: 'Electronic', icon: 'Radio', gains: [6, 4, 0, -2, 1, 2, 5, 6]},
-  {id: 'classical', label: 'Classical', icon: 'Piano', gains: [4, 3, -1, -2, -1, 2, 3, 4]},
-  {id: 'jazz', label: 'Jazz', icon: 'Music4', gains: [3, 2, 1, 2, -1, -1, 2, 3]},
-  {id: 'vocal', label: 'Vocal', icon: 'Mic2', gains: [-3, -2, 2, 5, 5, 3, 0, -2]},
-  {id: 'bass', label: 'Bass Boost', icon: 'Speaker', gains: [9, 7, 4, 1, 0, 0, 0, 0]},
-  {id: 'treble', label: 'Treble Boost', icon: 'AudioLines', gains: [0, 0, 0, 0, 2, 5, 7, 8]},
+  {
+    id: 'rock',
+    label: 'Rock',
+    icon: 'Guitar',
+    gains: [5, 3, -1, -2, 1, 3, 4, 4],
+  },
+  {
+    id: 'metal',
+    label: 'Metal',
+    icon: 'Flame',
+    gains: [6, 4, -2, -3, 2, 5, 5, 3],
+  },
+  {
+    id: 'pop',
+    label: 'Pop',
+    icon: 'Sparkles',
+    gains: [-1, 2, 4, 4, 2, -1, -1, -2],
+  },
+  {
+    id: 'hiphop',
+    label: 'Hip-Hop',
+    icon: 'Drum',
+    gains: [7, 5, 1, -1, -1, 1, 2, 3],
+  },
+  {
+    id: 'electronic',
+    label: 'Electronic',
+    icon: 'Radio',
+    gains: [6, 4, 0, -2, 1, 2, 5, 6],
+  },
+  {
+    id: 'classical',
+    label: 'Classical',
+    icon: 'Piano',
+    gains: [4, 3, -1, -2, -1, 2, 3, 4],
+  },
+  {
+    id: 'jazz',
+    label: 'Jazz',
+    icon: 'Music4',
+    gains: [3, 2, 1, 2, -1, -1, 2, 3],
+  },
+  {
+    id: 'vocal',
+    label: 'Vocal',
+    icon: 'Mic2',
+    gains: [-3, -2, 2, 5, 5, 3, 0, -2],
+  },
+  {
+    id: 'bass',
+    label: 'Bass Boost',
+    icon: 'Speaker',
+    gains: [9, 7, 4, 1, 0, 0, 0, 0],
+  },
+  {
+    id: 'treble',
+    label: 'Treble Boost',
+    icon: 'AudioLines',
+    gains: [0, 0, 0, 0, 2, 5, 7, 8],
+  },
   {id: 'custom', label: 'Custom', icon: 'SlidersHorizontal', gains: null},
 ];
 

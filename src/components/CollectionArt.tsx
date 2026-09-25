@@ -8,7 +8,7 @@
  */
 import React from 'react';
 import {Image, StyleSheet, View} from 'react-native';
-import {ArrowDownToLine, Heart, Music2, User} from 'lucide-react-native';
+import {ArrowDownToLine, Heart, Music2, User} from '../icons';
 import {C} from '../theme';
 import {getBestArtworkUrl, thumbArtwork} from '../tracks';
 import {type Collection} from '../collections';

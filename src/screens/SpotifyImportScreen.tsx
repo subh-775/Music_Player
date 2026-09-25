@@ -16,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Check, ChevronLeft, Play, Plus} from 'lucide-react-native';
+import {Check, ChevronLeft, Play, Plus} from '../icons';
 import {C, S, T} from '../theme';
 import type {Track} from '../backend';
 import {cleanText, getTrackId, normalizeTracks} from '../tracks';

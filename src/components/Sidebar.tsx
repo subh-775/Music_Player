@@ -41,7 +41,7 @@ import {
   Clock,
   Settings as SettingsIcon,
   SlidersHorizontal,
-} from 'lucide-react-native';
+} from '../icons';
 import {C, S, T} from '../theme';
 import {appVersion} from '../backend';
 import {useUpdateAvailable} from '../update';

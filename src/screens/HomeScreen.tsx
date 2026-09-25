@@ -19,23 +19,10 @@ import {
 } from '../backend';
 import {Greeting} from '../components/Greeting';
 import {useRecentlyPlayed} from '../recentlyPlayed';
-import {
-  getBestArtworkUrl,
-  cleanText,
-  getTrackId,
-  upgradeArtwork,
-} from '../tracks';
+import {upgradeArtwork} from '../tracks';
 import {createStore, asArray, useStoreValue} from '../storage';
-import {usePlaylists} from '../playlists';
-import {useLikes} from '../store';
-import {CollectionArt} from '../components/CollectionArt';
-import {
-  downloadsCollection,
-  likedCollection,
-  playlistToCollection,
-  type Collection,
-} from '../collections';
 import {MenuMark} from '../components/MenuMark';
+import {RecentsGrid} from '../components/RecentsGrid';
 import {
   DRAWER_EDGE,
   DRAWER_GRAB,
@@ -75,13 +62,6 @@ const homeCache = createStore<HomeRow[]>('mp.homeRows.v1', [], raw =>
   trimForCache(asArray<HomeRow>(raw)),
 );
 
-/** What a quick-access tile points at. Home doesn't own the tracklists — the
- *  app resolves the id, the same way it resolves a library row. */
-export type QuickDest =
-  | {kind: 'liked'}
-  | {kind: 'downloads'}
-  | {kind: 'playlist'; id: string};
-
 type Props = {
   onPickTrack: (item: HomeItem) => void;
   onPlayTrack: (track: Track, context: Track[]) => void;
@@ -90,7 +70,6 @@ type Props = {
   onBeginDrag: () => void;
   /** The finger lifted: settle open or closed, carrying its speed. */
   onEndDrag: (open: boolean, velocity: number) => void;
-  onOpenQuick: (dest: QuickDest) => void;
   /** Home has something to show — the app lifts its splash on this. */
   onReady?: () => void;
   /** Whether the Home tab is the one on screen. The tab stays mounted when
@@ -135,13 +114,10 @@ export const HomeScreen = React.memo(function HomeScreen({
   onOpenMenu,
   onBeginDrag,
   onEndDrag,
-  onOpenQuick,
   onReady,
   visible,
 }: Props) {
   const recent = useRecentlyPlayed();
-  const playlists = usePlaylists();
-  const likes = useLikes();
   // Subscribed, so cached rows appear the moment disk hydration finishes even
   // if that lands after first render.
   const cachedRows = useStoreValue(homeCache);
@@ -188,12 +164,17 @@ export const HomeScreen = React.memo(function HomeScreen({
    * start, so that number is literally how many pixels of every vertical drag
    * in the band get swallowed before the list gets its touch.
    *
-   * And the list's own native handler is declared simultaneous, so a scroll
-   * that has begun is not cancelled if this pan activates a moment later.
-   * Note that this is `Gesture.Native()` and not a ref to the FlatList: RNGH
-   * resolves an external gesture through `ref.current.handlerTag`, and a plain
-   * React Native list has no handlerTag — passing its ref compiles, runs, and
-   * silently does nothing.
+   * One gesture at a time. The list is wrapped as `Gesture.Native()` so RNGH
+   * can arbitrate between the two: whichever activates first wins and the
+   * other is cancelled. A sideways pull owns the finger until it lets go (the
+   * page no longer scrolls under the opening drawer), and a scroll that has
+   * started never turns into a drawer. The two used to be declared
+   * simultaneous, which is what let one drag do both.
+   *
+   * The drawer is told it is opening on ACTIVATION (`onStart`), not on
+   * touch-down. A touch in the band that becomes a scroll fails this pan and
+   * never reaches `onEnd`, so a touch-down `begin` left the (closed) drawer
+   * marked open, taking the back button and touches meant for the page.
    */
   const beginRef = useRef(onBeginDrag);
   beginRef.current = onBeginDrag;
@@ -215,8 +196,7 @@ export const HomeScreen = React.memo(function HomeScreen({
         .hitSlop({left: 0, width: DRAWER_EDGE})
         .activeOffsetX([-1000, DRAWER_GRAB])
         .failOffsetY([-6, 6])
-        .simultaneousWithExternalGesture(listScroll)
-        .onBegin(() => {
+        .onStart(() => {
           drawerX.value = -DRAWER_W; // start from closed, whatever came before
           runOnJS(begin)();
         })
@@ -232,7 +212,7 @@ export const HomeScreen = React.memo(function HomeScreen({
             Math.abs(e.velocityX) / 1000,
           );
         }),
-    [begin, end, listScroll],
+    [begin, end],
   );
 
   const load = useCallback(async () => {
@@ -290,7 +270,7 @@ export const HomeScreen = React.memo(function HomeScreen({
    *
    * An element rather than a component: React reconciles it by type, so it
    * re-renders in place instead of remounting — passing an inline arrow as
-   * ListHeaderComponent is what tears the quick tiles down and rebuilds them
+   * ListHeaderComponent is what tears the Recents grid down and rebuilds it
    * on every parent render.
    *
    * The mark and the greeting are not in here: they are pinned above the list
@@ -298,66 +278,8 @@ export const HomeScreen = React.memo(function HomeScreen({
    */
   const header = (
     <>
-      {/* Quick access. The two things everyone opens most (Liked, Downloaded)
-          plus the newest playlists, one tap from the top of Home instead of a
-          trip through the Library tab. Two columns, so four fit above the fold
-          without pushing the content rows off screen. */}
-      <View style={styles.quickGrid}>
-        <QuickTile
-          collection={likedCollection(likes)}
-          sub={`${likes.length} song${likes.length === 1 ? '' : 's'}`}
-          onPress={() => onOpenQuick({kind: 'liked'})}
-        />
-        <QuickTile
-          collection={downloadsCollection([])}
-          sub="Offline"
-          onPress={() => onOpenQuick({kind: 'downloads'})}
-        />
-        {playlists.slice(0, 4).map(p => (
-          <QuickTile
-            key={p.id}
-            collection={playlistToCollection(p)}
-            sub={`${p.tracks?.length ?? 0} song${
-              (p.tracks?.length ?? 0) === 1 ? '' : 's'
-            }`}
-            onPress={() => onOpenQuick({kind: 'playlist', id: p.id})}
-          />
-        ))}
-      </View>
-
-      {recent.length > 0 && (
-        <View style={styles.row}>
-          <Text style={styles.rowTitle}>Recently played</Text>
-          <FlatList
-            horizontal
-            data={recent}
-            keyExtractor={t => getTrackId(t)}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rowList}
-            {...SNAP}
-            renderItem={({item}) => (
-              <TouchableOpacity
-                style={styles.card}
-                activeOpacity={0.7}
-                onPress={() => onPlayTrack(item, recent)}>
-                <View style={styles.artWrap}>
-                  {getBestArtworkUrl(item) ? (
-                    <Image
-                      source={{uri: getBestArtworkUrl(item)}}
-                      style={styles.art}
-                    />
-                  ) : (
-                    <View style={[styles.art, styles.artFallback]} />
-                  )}
-                </View>
-                <Text style={styles.cardTitle} numberOfLines={2}>
-                  {cleanText(item.title)}
-                </Text>
-              </TouchableOpacity>
-            )}
-          />
-        </View>
-      )}
+      {/* Recents: the last nine songs, as the YouTube Music speed dial. */}
+      <RecentsGrid recent={recent} onPlay={onPlayTrack} />
     </>
   );
 
@@ -386,6 +308,9 @@ export const HomeScreen = React.memo(function HomeScreen({
           <View style={styles.headerText}>
             <Greeting visible={visible} />
           </View>
+          {/* Balances the mark, so the greeting is centred on the SCREEN
+              rather than in the space the mark leaves. */}
+          <View style={styles.markSpacer} />
         </View>
         <GestureDetector gesture={listScroll}>
           <FlatList
@@ -405,39 +330,6 @@ export const HomeScreen = React.memo(function HomeScreen({
     </GestureDetector>
   );
 });
-
-/** The artwork square is CollectionArt, the same component the Library rows
- *  use — that's what gives Liked its purple heart tile, Downloads its green
- *  one, and a playlist its cover or 2×2 mosaic. The hand-rolled version here
- *  had none of that, so every tile came up as an empty grey box. */
-function QuickTile({
-  collection,
-  sub,
-  onPress,
-}: {
-  collection: Collection;
-  sub?: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={styles.quick}
-      activeOpacity={0.7}
-      onPress={onPress}>
-      <CollectionArt collection={collection} size={56} />
-      <View style={styles.quickText}>
-        <Text style={styles.quickLabel} numberOfLines={1}>
-          {collection.name}
-        </Text>
-        {!!sub && (
-          <Text style={styles.quickSub} numberOfLines={1}>
-            {sub}
-          </Text>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-}
 
 function Row({row, onPick}: {row: HomeRow; onPick: (i: HomeItem) => void}) {
   if (!row.items?.length) {
@@ -527,6 +419,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerText: {flex: 1, minWidth: 0},
+  // The mark's width (MenuMark: 38).
+  markSpacer: {width: 38},
   title: {
     ...T.screenTitle,
     color: C.text,
@@ -534,28 +428,6 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 4,
   },
-  quickGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: S.gutter,
-    gap: 8,
-    marginTop: 6,
-  },
-  // Two per line, whatever the screen width — the gap is fixed, so the tile
-  // takes half of what's left rather than a hardcoded width.
-  quick: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 56,
-    borderRadius: 6,
-    overflow: 'hidden',
-    backgroundColor: C.surfaceHi,
-  },
-  quickText: {flex: 1, minWidth: 0, paddingHorizontal: 10},
-  quickLabel: {color: C.text, fontSize: 13.5, fontWeight: '700'},
-  quickSub: {color: C.sub, fontSize: 11, marginTop: 2},
   row: {marginTop: 22},
   rowTitle: {
     ...T.rowTitle,

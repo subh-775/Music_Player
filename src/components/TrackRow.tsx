@@ -19,7 +19,7 @@ import {
   ArrowDownToLine,
   ListPlus,
   MoreVertical,
-} from 'lucide-react-native';
+} from '../icons';
 import {C, S, T} from '../theme';
 import {formatDuration, type Track} from '../backend';
 import {cleanText, getBestArtworkUrl, thumbArtwork} from '../tracks';
