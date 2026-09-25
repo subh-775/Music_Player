@@ -16,7 +16,7 @@ and they do not share data.
 1. Phone: **Developer options → USB debugging** on, plug into the PC, accept the
    "Allow USB debugging?" prompt.
 2. GitHub → Actions → **Build Android APK** → Run workflow → branch `mobile`,
-   variant **`debug`**. Download `Music_Player-debug.apk` and install it.
+   variant **`debug`**. Download `Relaxify-debug.apk` and install it.
 
 ## Every session after that
 

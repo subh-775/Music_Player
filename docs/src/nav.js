@@ -8,7 +8,7 @@
  */
 
 /** owner/name once, so a rename or a fork is one edit rather than six. */
-const SLUG = 'subh-775/Music_Player';
+const SLUG = 'subh-775/Relaxify';
 
 export const SITE = {
   name: 'Relaxify',

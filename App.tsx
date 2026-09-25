@@ -93,7 +93,7 @@ import {diag} from './src/diag';
  * built", which is not the question anyone taps Help to ask. Settings used to
  * point its About row at the repo for want of anywhere better.
  */
-const DOCS_URL = 'https://subh-775.github.io/Music_Player/';
+const DOCS_URL = 'https://subh-775.github.io/Relaxify/';
 
 function Shell() {
   const [tab, setTab] = useState<Tab>('home');
@@ -165,7 +165,7 @@ function Shell() {
     // First line of every session. Also the proof that the logcat bridge is
     // alive — if `adb logcat -s MPJS` shows nothing at all, the problem is the
     // logging, not the thing being investigated.
-    diag('boot', `Music_Player ${appVersion || '?'} starting`);
+    diag('boot', `Relaxify ${appVersion || '?'} starting`);
     askForNotifications();
     hydrate().then(applyAudioEffects);
     // Boot the engine, then restore the last session so the mini player is

@@ -11,7 +11,7 @@ import {ROUTES} from './src/nav.js';
  * GitHub Pages serves a project repo from /<repo>/, everything else from /.
  *
  * DOCS_BASE lets the same source target both without editing this file:
- *   GitHub Pages → DOCS_BASE=/Music_Player/  (set in .github/workflows/docs.yml)
+ *   GitHub Pages → DOCS_BASE=/Relaxify/  (set in .github/workflows/docs.yml)
  *   local dev    → unset, defaults to /
  *
  * Getting this wrong is silent: the page loads, every asset 404s, and you get a

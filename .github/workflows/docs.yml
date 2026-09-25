@@ -1,7 +1,7 @@
 name: Documentation
 
 # Builds docs/ and publishes it to GitHub Pages at
-# https://subh-775.github.io/Music_Player/ — the URL the app's Help entry opens.
+# https://subh-775.github.io/Relaxify/ — the URL the app's Help entry opens.
 #
 # Path-filtered on purpose: the release workflow fires on v* tags and this one
 # fires on docs changes, so neither can ever be waiting on the other. A docs
@@ -67,7 +67,7 @@ jobs:
         env:
           # GitHub Pages serves a project repo from /<repo>/. Getting this wrong
           # is silent — the page loads and every asset 404s.
-          DOCS_BASE: /Music_Player/
+          DOCS_BASE: /Relaxify/
 
       # No actions/configure-pages step, deliberately.
       #
