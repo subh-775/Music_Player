@@ -550,7 +550,7 @@ export function CollectionScreen({
         ListEmptyComponent={
           loading ? (
             <View style={styles.loadingBox}>
-              <ActivityIndicator color={C.accent} />
+              <ActivityIndicator size="large" color={C.accent} />
               <Text style={styles.empty}>Loading songs…</Text>
             </View>
           ) : (

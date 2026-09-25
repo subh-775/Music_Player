@@ -1,0 +1,5 @@
+<resources>
+    <!-- Test builds only (the rc build type): a name that can never be
+         mistaken for the real app on the home screen or in Settings. -->
+    <string name="app_name">Relaxify RC</string>
+</resources>

@@ -48,7 +48,13 @@ import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {Splash} from './src/components/Splash';
 import {Sidebar, type SidebarDest} from './src/components/Sidebar';
 import {resetDrawer, settleDrawer} from './src/drawer';
-import {resetPlayer, settlePlayer} from './src/playerSheet';
+import {
+  panelDrawn,
+  reopenIfClosing,
+  settlePlayer,
+  sheetP,
+} from './src/playerSheet';
+import Animated, {useAnimatedStyle} from 'react-native-reanimated';
 import {C} from './src/theme';
 import {
   appVersion,
@@ -123,8 +129,6 @@ function Shell() {
    *  both point at the one component. */
   const [eqOpen, setEqOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
-  /** True only while a finger on the mini player owns the sheet's position. */
-  const [playerDragging, setPlayerDragging] = useState(false);
   // null = not yet determined, false = this APK has no native audio engine.
   const [engine, setEngine] = useState<boolean | null>(null);
   const [libraryNonce, setLibraryNonce] = useState(0);
@@ -584,39 +588,69 @@ function Shell() {
     [openArtist, openCollection],
   );
   const closePlayer = useCallback(() => setPlayerOpen(false), []);
+
+  /**
+   * Nothing is drawn under a fully open player.
+   *
+   * The player is an opaque full-screen view over the page, but Android still
+   * drew the whole page beneath it — every row, every cover, the bars — on
+   * every frame the player redrew (a seekbar tick, a lyric line, a skip). On a
+   * 120 Hz screen that doubled the GPU work of the open player. At exactly
+   * "fully open" there is nothing to see behind it, so the page drops to
+   * opacity 0, which Android skips outright. It comes back the moment the
+   * panel moves, before any of it can show.
+   *
+   * On the UI thread from sheetP, not React state: no commit, no layout, and
+   * the switch lands in the same frame as the panel's own position. Two
+   * styles because Reanimated will not share one across views.
+   */
+  const pageBehindPlayer = useAnimatedStyle(() => ({
+    opacity: panelDrawn.value && sheetP.value < 0.001 ? 0 : 1,
+  }));
+  const barsBehindPlayer = useAnimatedStyle(() => ({
+    opacity: panelDrawn.value && sheetP.value < 0.001 ? 0 : 1,
+  }));
+  // The three app-level sheets, stable for the same reason as the above: they
+  // are memoised, and each re-render of one re-publishes its whole tree into
+  // SheetHost.
+  const closeTrackSheet = useCallback(() => setSheetTrack(null), []);
+  const openTrackArtist = useCallback(
+    (t: Track) => openArtistCredit(t.artist),
+    [openArtistCredit],
+  );
+  const closeAddTo = useCallback(() => setAddTo(null), []);
+  const closeArtistChoices = useCallback(() => setArtistChoices([]), []);
+  const pickArtistChoice = useCallback(
+    (name: string) => {
+      setArtistChoices([]);
+      openArtist(name); // closes the player too — the profile is behind it
+    },
+    [openArtist],
+  );
   const expandPlayer = useCallback(() => {
-    // Opening by TAP: park the sheet closed, then run it open. The drag path
-    // below skips the animation entirely, because the finger IS the animation
-    // — exactly the split openDrawer/beginDrawerDrag already make.
-    resetPlayer();
+    // A tap during the tail of a close turns the panel round; the app still
+    // thinks it is open (it hears about a close only when the slide ends).
+    if (reopenIfClosing()) {
+      return;
+    }
     setPlayerOpen(true);
   }, []);
 
   /**
-   * A pull UP on the mini player has begun.
+   * A pull UP on the mini player has ended.
    *
-   * Mount the full player WITHOUT animating it: PlayerBar has already parked
-   * the panel closed and is about to drive it frame by frame, and an open
-   * animation started here would fight the thumb for the same value. That is
-   * what `dragging` tells PlayerScreen.
+   * React hears about it only when the settle has FINISHED. Anything that
+   * touches App state during the motion — the pull itself, or its settle —
+   * re-renders this tree and flips the player to `visible` (lyrics fetch,
+   * progress clock, marquee, accessibility on a large tree) in the middle of
+   * the animation, and those frames are the stutter. The panel is permanently
+   * mounted and laid out, and the finger and the settle only need `sheetP`,
+   * which already lives on the UI thread.
    */
-  const beginPlayerDrag = useCallback(() => {
-    setPlayerDragging(true);
-    setPlayerOpen(true);
-  }, []);
-
-  /** The finger lifted. Carry its speed into the settle, and unmount only once
-   *  a close has actually finished — unmounting early would snap the panel
-   *  away mid-animation. */
   const endPlayerDrag = useCallback((open: boolean, velocity: number) => {
-    // `dragging` is cleared in the CALLBACK, not here. Clearing it now would
-    // re-run PlayerScreen's open effect while this settle is still running —
-    // and for an abandoned pull that settle is heading DOWN, so the effect
-    // would turn a cancel into an open.
     settlePlayer(open, velocity, finished => {
-      setPlayerDragging(false);
-      if (finished && !open) {
-        setPlayerOpen(false);
+      if (finished) {
+        setPlayerOpen(open);
       }
     });
   }, []);
@@ -625,7 +659,7 @@ function Shell() {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      <View style={styles.body}>
+      <Animated.View style={[styles.body, pageBehindPlayer]}>
         {/* All three tabs stay MOUNTED; switching shows/hides them. Unmounting
             threw away each screen's state, so coming back to Home replayed
             "Starting the music engine…" and Library re-fetched everything —
@@ -649,6 +683,7 @@ function Shell() {
             onMenu={openSheet}
             onOpenArtist={openArtist}
             onOpenBrowse={pickHomeItem}
+            onOpenMenu={openDrawer}
           />
         </View>
         <View style={tab === 'library' ? styles.tabShown : styles.tabHidden}>
@@ -656,6 +691,7 @@ function Shell() {
             key={libraryNonce}
             visible={tab === 'library'}
             onOpen={openFromLibrary}
+            onOpenMenu={openDrawer}
           />
         </View>
 
@@ -750,7 +786,7 @@ function Shell() {
             <EqualizerScreen onClose={() => setEqOpen(false)} />
           </View>
         )}
-      </View>
+      </Animated.View>
 
       {/*
         ONE outlet, app-wide.
@@ -782,18 +818,19 @@ function Shell() {
         The cost is that every scrolling surface has to end BOTTOM_INSET above
         the bottom; see src/layout.ts.
       */}
-      <View style={styles.bottomStack} pointerEvents="box-none">
+      <Animated.View
+        style={[styles.bottomStack, barsBehindPlayer]}
+        pointerEvents="box-none">
         <BodyFade />
         {engine && (
           <PlayerBar
             onExpand={expandPlayer}
-            onBeginExpandDrag={beginPlayerDrag}
             onEndExpandDrag={endPlayerDrag}
             onAddToPlaylist={setAddTo}
           />
         )}
         <BottomNav active={tab} onChange={switchTab} />
-      </View>
+      </Animated.View>
 
       {/* Where every <Sheet> in the app is actually drawn — see Sheet.tsx.
           Mounted after the bars and given a zIndex above the player, so a menu
@@ -803,27 +840,23 @@ function Shell() {
       <TrackActionSheet
         track={sheetTrack}
         from={sheetFrom}
-        onClose={() => setSheetTrack(null)}
+        onClose={closeTrackSheet}
         onAddToPlaylist={setAddTo}
-        onOpenArtist={t => openArtistCredit(t.artist)}
+        onOpenArtist={openTrackArtist}
         onOpenAlbum={openAlbumOf}
       />
 
-      <AddToPlaylistSheet track={addTo} onClose={() => setAddTo(null)} />
+      <AddToPlaylistSheet track={addTo} onClose={closeAddTo} />
 
       <ArtistPickerSheet
         names={artistChoices}
-        onClose={() => setArtistChoices([])}
-        onPick={name => {
-          setArtistChoices([]);
-          openArtist(name); // closes the player too — the profile is behind it
-        }}
+        onClose={closeArtistChoices}
+        onPick={pickArtistChoice}
       />
 
       {engine && (
         <PlayerScreen
           visible={playerOpen}
-          dragging={playerDragging}
           onClose={closePlayer}
           onAddToPlaylist={setAddTo}
           onOpenArtist={openArtistCredit}
@@ -925,7 +958,10 @@ function BodyFade() {
 }
 
 const styles = StyleSheet.create({
-  safe: {flex: 1, backgroundColor: C.bg},
+  // No background: the window paints the app's black once (styles.xml).
+  // Both roots use this style, so a fill here was two extra full-screen
+  // layers under everything, every frame.
+  safe: {flex: 1},
   body: {flex: 1, zIndex: 0},
   // zIndex AND elevation. Document order alone decides this on iOS; Android
   // resolves overlapping siblings by elevation first, and the mini player

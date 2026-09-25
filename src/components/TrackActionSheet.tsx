@@ -44,7 +44,7 @@ export type SheetContext = {
   playlistName?: string;
 } | null;
 
-export function TrackActionSheet({
+function TrackActionSheetView({
   track,
   from,
   onClose,
@@ -267,3 +267,7 @@ const styles = StyleSheet.create({
   },
   rowLabel: {fontSize: 15, color: C.text},
 });
+
+/** Memoised: App re-renders often, and each render of a sheet re-publishes
+ *  its whole tree into SheetHost. Every prop App passes is stable. */
+export const TrackActionSheet = React.memo(TrackActionSheetView);

@@ -22,12 +22,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  Check,
-  Heart,
-  Plus,
-  Search,
-} from 'lucide-react-native';
+import {Check, Heart, Plus, Search} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import type {Track} from '../backend';
 import {cleanText} from '../tracks';
@@ -76,7 +71,7 @@ export function useAddToPlaylistHost(open: (t: Track) => void): void {
 /** Above this many, finding one by eye is a scroll rather than a glance. */
 const FILTER_FROM = 6;
 
-export function AddToPlaylistSheet({
+function AddToPlaylistSheetView({
   track,
   onClose,
 }: {
@@ -268,7 +263,10 @@ export function AddToPlaylistSheet({
               style={styles.row}
               activeOpacity={0.7}
               onPress={() => toggleIn(item.id, item.name)}>
-              <CollectionArt collection={playlistToCollection(item)} size={46} />
+              <CollectionArt
+                collection={playlistToCollection(item)}
+                size={46}
+              />
               <View style={styles.rowText}>
                 <Text style={styles.rowTitle} numberOfLines={1}>
                   {item.name}
@@ -369,3 +367,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
 });
+
+/** Memoised: App re-renders often, and each render of a sheet re-publishes
+ *  its whole tree into SheetHost. Every prop App passes is stable. */
+export const AddToPlaylistSheet = React.memo(AddToPlaylistSheetView);

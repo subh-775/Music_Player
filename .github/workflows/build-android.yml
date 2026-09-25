@@ -40,7 +40,10 @@ jobs:
       - name: Refuse a commit that is already released
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          OTHER="$(git tag --points-at HEAD 'v*' | grep -vx "$GITHUB_REF_NAME" || true)"
+          # Pre-release tags (v1.2.15-rc1) do not count: they go to the
+          # tester's phone only, and the final release of the same commit is
+          # exactly what should follow them.
+          OTHER="$(git tag --points-at HEAD 'v*' | grep -vx "$GITHUB_REF_NAME" | grep -v -- '-' || true)"
           if [ -n "$OTHER" ]; then
             echo "::error::$GITHUB_REF_NAME is on $(git rev-parse --short HEAD), already released as: $OTHER. Delete the tag and re-tag the intended commit."
             exit 1
@@ -90,8 +93,12 @@ jobs:
       - name: Decide variant
         id: v
         run: |
-          # Tag push -> release; manual run -> the chosen input (default debug).
+          # Tag push -> release; a pre-release tag (vX.Y.Z-anything) -> the
+          # rc TEST variant, which installs as its own app (com.musicplayer.rc,
+          # "Relaxify RC") and can never replace or touch the real one; manual
+          # run -> the chosen input (default debug).
           case "$GITHUB_REF_NAME" in
+            v*-*) echo "variant=rc" >> "$GITHUB_OUTPUT" ;;
             v*) echo "variant=release" >> "$GITHUB_OUTPUT" ;;
             *)  echo "variant=${{ inputs.variant }}" >> "$GITHUB_OUTPUT" ;;
           esac
@@ -99,7 +106,26 @@ jobs:
       - name: Build APK
         working-directory: android
         run: |
-          if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
+          # Gradle through a tee, so a failure can be RAISED as annotations.
+          # Job logs need a signed-in GitHub session to read, but a check
+          # run's annotations are public — so the Kotlin compiler's `e:` lines
+          # and Gradle's "What went wrong" become readable from the API by
+          # anyone diagnosing a red tag, with no login. GitHub keeps ten error
+          # annotations per step, so the most specific lines go first.
+          gradle() {
+            set +e
+            ./gradlew "$@" --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+            local status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -ne 0 ]; then
+              { grep -E '^e: ' "$RUNNER_TEMP/gradle.log"
+                grep -E -A3 'What went wrong' "$RUNNER_TEMP/gradle.log"
+              } | head -10 | sed -e 's/%/%25/g' -e 's/^/::error::/'
+            fi
+            return "$status"
+          }
+          VARIANT="${{ steps.v.outputs.variant }}"
+          if [ "$VARIANT" = "release" ] || [ "$VARIANT" = "rc" ]; then
             # Derive versionName/versionCode from the tag (v1.2.3 -> 1.2.3), so
             # the installed app reports the release version and the in-app
             # updater compares correctly.
@@ -119,15 +145,22 @@ jobs:
                 echo "No tag — test build versioned $VER from last tag $LAST"
                 ;;
             esac
-            MA="$(echo "$VER" | cut -d. -f1)"; MA="${MA:-0}"
-            MI="$(echo "$VER" | cut -d. -f2)"; MI="${MI:-0}"
-            PA="$(echo "$VER" | cut -d. -f3)"; PA="${PA:-0}"
+            # A pre-release (1.2.15-rc1) is versioned by the release it
+            # precedes: the suffix stays in the NAME, the code is 1.2.15's.
+            BASE="${VER%%-*}"
+            MA="$(echo "$BASE" | cut -d. -f1)"; MA="${MA:-0}"
+            MI="$(echo "$BASE" | cut -d. -f2)"; MI="${MI:-0}"
+            PA="$(echo "$BASE" | cut -d. -f3)"; PA="${PA:-0}"
             export APP_VERSION_NAME="$VER"
             export APP_VERSION_CODE="$(( MA * 10000 + MI * 100 + PA ))"
-            echo "Building release $APP_VERSION_NAME (code $APP_VERSION_CODE)"
-            ./gradlew assembleRelease --no-daemon --stacktrace
+            echo "Building $VARIANT $APP_VERSION_NAME (code $APP_VERSION_CODE)"
+            if [ "$VARIANT" = "rc" ]; then
+              gradle assembleRc
+            else
+              gradle assembleRelease
+            fi
           else
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            gradle assembleDebug
           fi
 
       - name: Stage APK
@@ -136,6 +169,11 @@ jobs:
           if [ "${{ steps.v.outputs.variant }}" = "release" ]; then
             SRC=android/app/build/outputs/apk/release/app-release.apk
             DEST="Relaxify.apk"
+          elif [ "${{ steps.v.outputs.variant }}" = "rc" ]; then
+            # Never "Relaxify.apk": a test build must not be mistaken for the
+            # real one, by a person or by anything matching on the name.
+            SRC=android/app/build/outputs/apk/rc/app-rc.apk
+            DEST="Relaxify-RC.apk"
           else
             SRC=android/app/build/outputs/apk/debug/app-debug.apk
             DEST="Relaxify-debug.apk"
@@ -168,3 +206,8 @@ jobs:
           # GitHub writes it from the commits since the last tag, which is at
           # least true and specific; a hand-written body still overrides it.
           generate_release_notes: true
+          # vX.Y.Z-anything is a PRE-release: built and downloadable for
+          # on-device testing, but never "latest" — and /releases/latest, the
+          # only thing the in-app updater reads, skips pre-releases. So a test
+          # build reaches the tester's phone over adb and nobody else's.
+          prerelease: ${{ contains(github.ref_name, '-') }}

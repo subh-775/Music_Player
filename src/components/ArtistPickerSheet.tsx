@@ -21,7 +21,7 @@ import {C, S, T} from '../theme';
 import {searchArtists} from '../backend';
 import {Sheet} from './Sheet';
 
-export function ArtistPickerSheet({
+function ArtistPickerSheetView({
   names,
   onPick,
   onClose,
@@ -146,3 +146,7 @@ const styles = StyleSheet.create({
   initials: {color: C.sub, fontSize: 18, fontWeight: '700'},
   name: {...T.body, color: C.text, flex: 1, fontSize: 15},
 });
+
+/** Memoised: App re-renders often, and each render of a sheet re-publishes
+ *  its whole tree into SheetHost. Every prop App passes is stable. */
+export const ArtistPickerSheet = React.memo(ArtistPickerSheetView);

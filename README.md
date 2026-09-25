@@ -74,7 +74,6 @@ Contributions are welcome.
 | `android/` | The Android project, the Kotlin native modules, and the embedded Python engine under `android/app/src/main/python/`. |
 | `__tests__/` | Jest. Deliberately small: one suite per piece of logic where a mistake would be silent rather than loud. |
 | `docs/` | The documentation site (Vite + MDX) published to GitHub Pages from `main`. |
-| `notes/` | Development history — audits, round plans, the sprint log. Not part of the app. |
 
 ## Disclaimer
 

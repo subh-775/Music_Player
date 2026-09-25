@@ -52,6 +52,16 @@ import {splitArtists} from '../tracks';
 
 const ROW_H = 60;
 
+/** See animationConfig on the list. ζ ≈ 1.03: fastest settle without a bounce. */
+const DROP_SPRING = {
+  stiffness: 400,
+  mass: 0.4,
+  damping: 26,
+  overshootClamping: true,
+  restDisplacementThreshold: 0.5,
+  restSpeedThreshold: 2,
+};
+
 /**
  * The last queue we read, kept at module scope.
  *
@@ -65,20 +75,19 @@ let lastQueue: RNTPTrack[] = [];
 let lastActive: number | null = null;
 
 export function QueuePane({
-  onDragBegin,
-  onDragEnd: onRowDragEnd,
+  dragLock,
   scrollY,
 }: {
   /**
-   * A row has been lifted. Surfaced so the sheet this now lives in can stand
-   * its own drag-to-dismiss down: Sheet activates at 12px of vertical travel
-   * and DraggableFlatList activates at 12px too — a genuine tie, and the sheet
-   * winning it means the row you meant to drag closes the queue instead.
+   * True while a row is lifted, so the sheet this lives in stands its own
+   * drag-to-dismiss down — a row you are holding must not close the queue.
    *
-   * The state already existed internally as `dragging`; it just had no way out.
+   * A SHARED VALUE, read by the sheet's gesture on the UI thread. It used to
+   * be a callback that set React state in PlayerScreen, so lifting a row
+   * re-rendered the entire player (and re-published its sheets) at the exact
+   * moment the row was supposed to rise — part of the delay on hold.
    */
-  onDragBegin?: () => void;
-  onDragEnd?: () => void;
+  dragLock?: SharedValue<boolean>;
   /** The sheet's scroll-awareness. See <Sheet scrollY>. */
   scrollY?: SharedValue<number>;
 } = {}) {
@@ -90,6 +99,17 @@ export function QueuePane({
   // A drop writes the new order straight into state; the engine round-trip that
   // follows must not repaint the old order over it.
   const settleUntil = useRef(0);
+  /** An event that landed inside the settle window — deferred, not dropped. */
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The list's own drag state (activeIndexAnim & co), handed over by the
+   * library once at mount. See onDragEnd for why this reaches into it.
+   */
+  const anim = useRef<{
+    activeIndexAnim: SharedValue<number>;
+    spacerIndexAnim: SharedValue<number>;
+    touchTranslate: SharedValue<number>;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -109,8 +129,25 @@ export function QueuePane({
   useEffect(() => {
     refresh();
     const guarded = () => {
-      if (!dragging.current && Date.now() > settleUntil.current) {
+      if (dragging.current) {
+        return; // onDragEnd repaints from its own result
+      }
+      const wait = settleUntil.current - Date.now();
+      if (wait <= 0) {
         refresh();
+        return;
+      }
+      // Inside the post-drop window. Dropping this outright left a track
+      // change that happened during it unshown — the pinned "now playing" row
+      // stayed on the old song until some later event. Run it when the window
+      // closes instead.
+      if (!settleTimer.current) {
+        settleTimer.current = setTimeout(() => {
+          settleTimer.current = null;
+          if (!dragging.current) {
+            refresh();
+          }
+        }, wait);
       }
     };
     const sub = TrackPlayer.addEventListener(
@@ -125,6 +162,10 @@ export function QueuePane({
     return () => {
       sub.remove();
       off();
+      if (settleTimer.current) {
+        clearTimeout(settleTimer.current);
+        settleTimer.current = null;
+      }
     };
   }, [refresh]);
 
@@ -195,8 +236,26 @@ export function QueuePane({
   const onDragEnd = useCallback(
     async ({from, to, data}: {from: number; to: number; data: RNTPTrack[]}) => {
       dragging.current = false;
-      onRowDragEnd?.();
-      if (from === to || activeIdx < 0) {
+      if (dragLock) {
+        dragLock.value = false;
+      }
+      if (from === to) {
+        // The library only resets its drag state when the list's KEYS change,
+        // and a drop that reorders nothing changes none. activeIndexAnim then
+        // stays >= 0 for good, so the next drag never re-syncs its autoscroll
+        // target (autoscroll goes dead after any scroll) and can reuse a stale
+        // scroll origin (the lifted row jumps). Reset it here — and ONLY here:
+        // on a real reorder the library's own reset runs after the new order
+        // is committed, and zeroing mid-commit would snap the row back.
+        const a = anim.current;
+        if (a) {
+          a.activeIndexAnim.value = -1;
+          a.spacerIndexAnim.value = -1;
+          a.touchTranslate.value = 0;
+        }
+        return;
+      }
+      if (activeIdx < 0) {
         return;
       }
       settleUntil.current = Date.now() + 2000;
@@ -211,7 +270,7 @@ export function QueuePane({
         refresh(); // engine refused — show the truth rather than a lie
       }
     },
-    [activeIdx, refresh, onRowDragEnd],
+    [activeIdx, refresh, dragLock],
   );
 
   const renderItem = useCallback(
@@ -296,9 +355,25 @@ export function QueuePane({
         renderItem={renderItem}
         onDragBegin={() => {
           dragging.current = true;
-          onDragBegin?.();
+          if (dragLock) {
+            dragLock.value = true;
+          }
         }}
         onDragEnd={onDragEnd}
+        onAnimValInit={v => {
+          anim.current = v;
+        }}
+        // A lifted row stays exactly where the finger picked it up. Without
+        // this the library clamps it inside the viewport, so a row half
+        // hidden at the top or bottom edge snapped into view the moment it
+        // lifted — and a snap past half a row counted as passing its
+        // neighbour, so releasing without moving reordered the queue.
+        // Autoscroll is unaffected: the edge distance floors at 0.
+        dragItemOverflow
+        // Each autoscroll step waits for Android's ~250ms smooth scroll, so the
+        // default 100px/step topped out near 400px/s — slow enough to read as
+        // "it won't scroll".
+        autoscrollSpeed={220}
         // Uniform rows: lets the list place the drop target without measuring,
         // which is what keeps a long queue smooth.
         getItemLayout={(_d, i) => ({
@@ -339,6 +414,13 @@ export function QueuePane({
           }
         }}
         activationDistance={12}
+        // The drop. The library's default spring (stiffness 100, mass 0.2,
+        // damping 20) is heavily OVERdamped: it creeps into place and takes
+        // ~1.4s to come to rest — and the new order is only committed once it
+        // has. That was the delay after letting go. Critically damped and
+        // stiffer, it lands in ~0.3s with no overshoot; the rows making room
+        // use the same spring, so they move as briskly.
+        animationConfig={DROP_SPRING}
         autoscrollThreshold={72}
         containerStyle={styles.listBox}
         contentContainerStyle={styles.body}
@@ -389,12 +471,15 @@ function Row({
       </TouchableOpacity>
 
       {!!onDrag && (
-        // onLongPress, not onPressIn: the list needs to distinguish a scroll
-        // from a drag, and grabbing on first touch would swallow flings.
+        // Lifts on first touch. This is a dedicated handle at the row's edge —
+        // a scroll starts anywhere else on the row — so there is nothing to
+        // disambiguate, and the long-press timer (plus the JS round trip to
+        // notice it) was a visible pause between touching the grip and the
+        // row rising. The list still needs 12px of travel to MOVE the row, so
+        // a stray touch lifts and settles back without reordering anything.
         <TouchableOpacity
           style={styles.grip}
-          onLongPress={onDrag}
-          delayLongPress={120}
+          onPressIn={onDrag}
           activeOpacity={0.6}>
           <Menu size={19} color={C.faint} />
         </TouchableOpacity>
@@ -441,7 +526,13 @@ const styles = StyleSheet.create({
     // an opaque row painted a black slab around every song.
     backgroundColor: 'transparent',
   },
-  rowLifted: {backgroundColor: C.surfaceHi, elevation: 8},
+  // No elevation: the shadow switched off on the exact frame the row landed,
+  // which is most of the "settles twice" jitter on drop. The fill says
+  // "lifted" instead — and it has to be LIGHTER than the sheet. C.surfaceHi
+  // IS the sheet's own background, so a lifted row in it read as a black hole
+  // with its neighbours sliding underneath. Opaque, so rows passing beneath
+  // it do not show through.
+  rowLifted: {backgroundColor: '#2e2e2e'},
   rowMain: {
     flex: 1,
     flexDirection: 'row',

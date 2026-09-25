@@ -48,7 +48,7 @@ import {
   sleepTimerOnTrackChange,
 } from './sleepTimer';
 import {remember} from './recentlyPlayed';
-import {clearResume, readResume, saveResume} from './resume';
+import {clearResume, readResume, resumeIndex, saveResume} from './resume';
 
 let ready = false;
 let available: boolean | null = null;
@@ -188,6 +188,25 @@ export function onQueueChanged(l: () => void): () => void {
   return () => {
     queueListeners.delete(l);
   };
+}
+
+/**
+ * One queue mutation at a time.
+ *
+ * Every mutation below is a read-modify-write over several awaited bridge
+ * calls (read the queue, remove, add, refresh). Nothing ordered one against
+ * the next, so a second drop landing between another's remove and add read a
+ * queue one item short and moved the wrong track — and a radio top-up
+ * appending mid-move made its "is this the last slot" test use a stale length.
+ * Chained here, each one sees the queue the previous one left.
+ *
+ * Exported for the test.
+ */
+let queueOps: Promise<unknown> = Promise.resolve();
+export function serialQueueOp<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queueOps.then(fn);
+  queueOps = run.catch(() => {});
+  return run;
 }
 
 /** The full Track behind an engine queue item, or null if it isn't ours. */
@@ -423,14 +442,19 @@ export async function restoreSession(): Promise<boolean> {
     return false;
   }
   const items = s.queue
-    .map(t => ({t, q: toQueueItem(t, currentQuality())}))
+    .map((t, from) => ({t, from, q: toQueueItem(t, currentQuality())}))
     .filter(x => x.q !== null);
   if (!items.length) {
     return false;
   }
   try {
     queueSource = items.map(x => x.t);
-    const idx = Math.max(0, Math.min(items.length - 1, s.index));
+    // By the saved TRACK, not the bare index: dropping an unplayable entry
+    // above shifts every later index by one.
+    const idx = resumeIndex(
+      items.map(x => ({title: x.t.title, artist: x.t.artist, from: x.from})),
+      s,
+    );
 
     await TrackPlayer.reset();
     // Add the track you LEFT ON first (index 0) and seek it, so the mini player
@@ -704,6 +728,13 @@ export async function addToQueue(track: Track): Promise<void> {
   if (!item) {
     throw new Error('This track has no playable source.');
   }
+  return serialQueueOp(() => insertQueued(track, item));
+}
+
+async function insertQueued(
+  track: Track,
+  item: NonNullable<ReturnType<typeof toQueueItem>>,
+): Promise<void> {
   // "Add to queue" means "play this soon", not "after 40 songs you didn't
   // pick". Insert right after the current track (and after anything else queued
   // since it started), so it jumps ahead of the rest of the album/playlist —
@@ -746,13 +777,14 @@ export async function addToQueue(track: Track): Promise<void> {
  * the music mid-drag. The queue UI only offers the upcoming tracks for exactly
  * this reason; this guard is the backstop.
  */
-export async function moveQueueItem(
-  from: number,
-  to: number,
-): Promise<boolean> {
+export function moveQueueItem(from: number, to: number): Promise<boolean> {
   if (from === to) {
-    return true;
+    return Promise.resolve(true);
   }
+  return serialQueueOp(() => moveQueueItemNow(from, to));
+}
+
+async function moveQueueItemNow(from: number, to: number): Promise<boolean> {
   try {
     const activeIdx = await TrackPlayer.getActiveTrackIndex();
     if (activeIdx == null || from <= activeIdx || to <= activeIdx) {
@@ -1068,7 +1100,11 @@ export function shuffleUpcoming<T>(rest: T[]): T[] {
  * nothing ahead of it cannot shuffle, and the caller needs to know that rather
  * than lighting the icon for a shuffle that never happened.
  */
-export async function setShuffle(on: boolean): Promise<boolean> {
+export function setShuffle(on: boolean): Promise<boolean> {
+  return serialQueueOp(() => setShuffleNow(on));
+}
+
+async function setShuffleNow(on: boolean): Promise<boolean> {
   const queue = await TrackPlayer.getQueue();
   const index = await TrackPlayer.getActiveTrackIndex();
   if (index == null) {
@@ -1111,7 +1147,11 @@ export async function setShuffle(on: boolean): Promise<boolean> {
  * song playing right now is not taken out from under the listener even if
  * radio is what queued it.
  */
-export async function dropQueuedRadio(): Promise<void> {
+export function dropQueuedRadio(): Promise<void> {
+  return serialQueueOp(dropQueuedRadioNow);
+}
+
+async function dropQueuedRadioNow(): Promise<void> {
   try {
     const [queue, index] = await Promise.all([
       TrackPlayer.getQueue(),
@@ -1303,8 +1343,12 @@ export async function topUpFromRadio(): Promise<void> {
       .map(t => ({t, q: toQueueItem(t, currentQuality())}))
       .filter(x => x.q !== null);
     if (items.length) {
-      await TrackPlayer.add(items.map(x => x.q!));
-      queueSource = [...queueSource, ...items.map(x => x.t)];
+      // Only the append is serialised — the radio fetch above is a network
+      // call, and a drag's move must not queue up behind it.
+      await serialQueueOp(async () => {
+        await TrackPlayer.add(items.map(x => x.q!));
+        queueSource = [...queueSource, ...items.map(x => x.t)];
+      });
     }
   } catch {
     // Radio is a bonus — never let it surface as an error.
@@ -1322,14 +1366,9 @@ export async function topUpFromRadio(): Promise<void> {
  */
 let prefetchedFor = '';
 
-async function prefetchNext(): Promise<void> {
+async function prefetchNext(position: number, idx: number): Promise<void> {
   try {
-    const {position} = await TrackPlayer.getProgress();
     if (position < 3) {
-      return;
-    }
-    const idx = await TrackPlayer.getActiveTrackIndex();
-    if (idx == null) {
       return;
     }
     const key = `${idx}`;
@@ -1444,24 +1483,45 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     pushCrossfade(getSeconds());
 
     // Piggybacked on this tick: keep the queue topped up with similar songs.
-    topUpFromRadio().catch(() => {});
+    //
+    // Gated on the MIRROR first. topUpFromRadio's first act is getQueue(),
+    // which marshals every track across the bridge — once a second, for a
+    // 200-song playlist, only to find there was plenty left. The mirror is
+    // refreshed on every queue change and track settle, so it is a sound
+    // "definitely not yet"; when it says "maybe", the real check runs. The
+    // track-change event and the service backstop still call it ungated.
+    if (engineQueue.length - activeIndex <= 3) {
+      topUpFromRadio().catch(() => {});
+    }
+
+    // One progress/index read for the rest of the tick. It used to be two of
+    // each: prefetchNext read them, then the resume save read them again.
+    let position = 0;
+    let idx = 0;
+    try {
+      const [p, i] = await Promise.all([
+        TrackPlayer.getProgress(),
+        TrackPlayer.getActiveTrackIndex(),
+      ]);
+      position = p.position;
+      idx = i ?? 0;
+    } catch {
+      return;
+    }
 
     // …and warm the NEXT track's stream a few seconds in, so pressing skip (or
     // an auto-advance) plays instantly instead of resolving the source cold.
     // getStreamInfo caches exactly what proxy_stream reuses a beat later.
-    prefetchNext().catch(() => {});
+    prefetchNext(position, idx).catch(() => {});
 
     // …and remember the current position, throttled inside saveResume, so a
     // reopen resumes at the timestamp you left rather than the song's start.
     try {
-      const {position} = await TrackPlayer.getProgress();
-      const idx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
       const src = sourceTrackFor((await TrackPlayer.getActiveTrack()) ?? null);
       if (src) {
         saveResume({track: src, position, queue: queueSource, index: idx});
       }
     } catch {}
-
   }, 1000);
 }
 

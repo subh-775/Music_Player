@@ -27,6 +27,68 @@ export type ResumeState = {
 
 let lastWrite = 0;
 
+/** How many tracks of history to keep behind the current one, so Previous
+ *  still has somewhere to go after a restore. */
+const KEEP_BEHIND = 10;
+
+/**
+ * The slice of the queue worth saving, and where the current track sits in it.
+ *
+ * It used to be the FIRST 40 tracks paired with the engine's absolute index.
+ * Past track 40 — a long playlist, or any session autoplay had topped up a few
+ * times — the index pointed beyond the saved list, restore clamped it to the
+ * last item, and the app reopened on the wrong song at the right timestamp.
+ * A window AROUND the current track keeps the index inside what was saved.
+ *
+ * Exported for the test.
+ */
+export function resumeWindow<T>(
+  queue: T[],
+  index: number,
+): {queue: T[]; index: number} {
+  const at = Math.max(0, Math.min(queue.length - 1, index));
+  const start = Math.max(0, at - KEEP_BEHIND);
+  return {queue: queue.slice(start, start + QUEUE_MAX), index: at - start};
+}
+
+/**
+ * Where to resume, after restore has dropped any tracks that are no longer
+ * playable. Found by the saved track itself first — dropping an unplayable
+ * track shifts every later index by one — and by the index only when the track
+ * is not in the list at all.
+ *
+ * Exported for the test.
+ */
+export function resumeIndex(
+  /** The tracks that survived, each with its position in the SAVED list. */
+  kept: {title?: string; artist?: string; from: number}[],
+  saved: {index: number; track?: {title?: string; artist?: string} | null},
+): number {
+  const t = saved.track;
+  if (t) {
+    let best = -1;
+    kept.forEach((k, i) => {
+      // The same song can be queued twice; take the copy that was saved
+      // nearest the current position.
+      if (
+        k.title === t.title &&
+        k.artist === t.artist &&
+        (best < 0 ||
+          Math.abs(k.from - saved.index) <
+            Math.abs(kept[best].from - saved.index))
+      ) {
+        best = i;
+      }
+    });
+    if (best >= 0) {
+      return best;
+    }
+  }
+  // No title match: the first survivor at or after the saved position.
+  const next = kept.findIndex(k => k.from >= saved.index);
+  return next >= 0 ? next : Math.max(0, kept.length - 1);
+}
+
 /**
  * Persist the session. Throttled so the per-second playback tick doesn't hammer
  * disk; `force` (used on track change / pause) bypasses the throttle so those
@@ -44,11 +106,12 @@ export function saveResume(
     return;
   }
   lastWrite = now;
+  const win = resumeWindow(state.queue || [], Math.max(0, state.index || 0));
   const payload: ResumeState = {
     track: state.track,
     position: Math.max(0, Math.floor(state.position || 0)),
-    queue: (state.queue || []).slice(0, QUEUE_MAX),
-    index: Math.max(0, state.index || 0),
+    queue: win.queue,
+    index: win.index,
     savedAt: now,
   };
   AsyncStorage.setItem(KEY, JSON.stringify(payload)).catch(() => {

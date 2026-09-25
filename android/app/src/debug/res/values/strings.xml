@@ -1,0 +1,4 @@
+<resources>
+    <!-- Debug builds (com.musicplayer.debug): never shown as the real app. -->
+    <string name="app_name">Relaxify Debug</string>
+</resources>

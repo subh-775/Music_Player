@@ -1039,7 +1039,7 @@ export function SettingsScreen({
       <ConfirmModal
         visible={cacheOpen}
         title="Clear cache?"
-        message="Frees temporary files, saved lyrics and your search history. Downloads, playlists and liked songs are not touched."
+        message="Frees temporary files, saved lyrics and your search history."
         confirmLabel="Clear"
         onConfirm={doClearCache}
         onCancel={() => setCacheOpen(false)}

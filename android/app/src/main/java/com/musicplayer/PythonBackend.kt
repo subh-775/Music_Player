@@ -43,9 +43,24 @@ object PythonBackend {
         // use those routes, so an empty dir is enough to satisfy the arg.
         val webDir = File(app.filesDir, "web").apply { mkdirs() }.absolutePath
         val cacheDir = app.cacheDir.absolutePath
-        val publicDir = Environment
+        // The phone's shared Download folder — where the real app keeps its
+        // music (Download/Relaxify/music, or the older Fix_Spotify name).
+        //
+        // A TEST build gets its own folder under it instead. Every install of
+        // every variant resolves the same default, so a debug or RC build on
+        // the same phone would otherwise list the real app's downloaded songs
+        // as its own, write its downloads into the real library, and — worst —
+        // delete the REAL file when a download is removed from the test app.
+        // Its own application id does not help here: this folder is shared
+        // storage, outside any app's sandbox.
+        val downloads = Environment
             .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            ?.absolutePath ?: ""
+        val publicDir = when {
+            downloads == null -> ""
+            BuildConfig.IS_RC -> File(downloads, "Relaxify RC").absolutePath
+            BuildConfig.DEBUG -> File(downloads, "Relaxify Debug").absolutePath
+            else -> downloads.absolutePath
+        }
 
         thread(name = "python-backend", isDaemon = true) {
             try {
@@ -71,9 +86,13 @@ object PythonBackend {
                 Log.i(TAG, "Python backend stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Python backend crashed", e)
-                // Let a later call try again. The flag was set before the thread
-                // even started, so a crash in here used to latch the backend
-                // off for the whole process lifetime with nothing to retry it.
+            } finally {
+                // Let a later call try again — BackendModule.restart(), which JS
+                // calls when the server stops answering. In `finally` so a
+                // server that RETURNED (serve_forever ending) is restartable
+                // too, not only one that threw; the flag was set before the
+                // thread started, and left set it latched the backend off for
+                // the rest of the process.
                 started = false
             }
         }

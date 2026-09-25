@@ -115,6 +115,7 @@ android {
             // of any installed Fix-Spotify (8765/8766), so nothing collides.
             applicationIdSuffix ".debug"
             buildConfigField "int", "BACKEND_PORT", "8771"
+            buildConfigField "boolean", "IS_RC", "false"
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
@@ -135,6 +136,29 @@ android {
             // failure mode is "the EQ silently does nothing", which is worse.
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             buildConfigField "int", "BACKEND_PORT", "8770"
+            buildConfigField "boolean", "IS_RC", "false"
+        }
+        // A TEST build of a release: exactly release's code and optimisation
+        // (initWith), under a completely separate identity, so it can sit on
+        // the same phone as the real Relaxify without touching it.
+        //
+        //   - its own application id → its own app, its own storage. Installing
+        //     it can never replace Relaxify or read/overwrite its library,
+        //     downloads or activity. (A test build under the real id once
+        //     replaced the real app and took all of that with it.)
+        //   - its own backend port, so both can run at once.
+        //   - its own name and icon (src/rc/res): "Relaxify RC", amber tile.
+        //   - IS_RC: the in-app updater is off, so it can never pull the real
+        //     release down and install it.
+        //
+        // Built by CI for vX.Y.Z-suffix tags, as a GitHub pre-release.
+        rc {
+            initWith release
+            applicationIdSuffix ".rc"
+            // RN and the native libraries only publish debug/release variants.
+            matchingFallbacks = ["release"]
+            buildConfigField "int", "BACKEND_PORT", "8772"
+            buildConfigField "boolean", "IS_RC", "true"
         }
     }
 

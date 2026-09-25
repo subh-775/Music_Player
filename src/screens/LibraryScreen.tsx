@@ -11,7 +11,6 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   NativeModules,
   StyleSheet,
@@ -53,6 +52,9 @@ import {Sheet} from '../components/Sheet';
 import {ConfirmModal} from '../components/ConfirmModal';
 import {listWindowing} from '../components/TrackRow';
 import {BOTTOM_INSET} from '../layout';
+import Animated, {useAnimatedRef} from 'react-native-reanimated';
+import {FastScroll, useFastScroll} from '../components/FastScroll';
+import {MenuMark} from '../components/MenuMark';
 
 type Filter = 'all' | 'playlists' | 'albums' | 'artists';
 
@@ -85,9 +87,12 @@ function idOf(c: Collection): string {
  */
 export const LibraryScreen = React.memo(function LibraryScreen({
   onOpen,
+  onOpenMenu,
   visible = true,
 }: {
   onOpen: (c: Collection) => void;
+  /** The mark at the top-left opens the drawer, as it does on Home. */
+  onOpenMenu: () => void;
   /** The tab stays mounted now; this flags when it's actually on screen so
    *  downloads can re-scan quietly without a full-screen spinner. */
   visible?: boolean;
@@ -102,6 +107,10 @@ export const LibraryScreen = React.memo(function LibraryScreen({
   const [confirmDelete, setConfirmDelete] = useState<Collection | null>(null);
   const [renaming, setRenaming] = useState<Collection | null>(null);
   const [renameText, setRenameText] = useState('');
+  // The drag-to-scroll thumb. A long library is one thumb movement from end
+  // to end instead of a dozen flings.
+  const listRef = useAnimatedRef<Animated.FlatList<Collection>>();
+  const fast = useFastScroll();
 
   const likes = useLikes();
   const pins = usePins();
@@ -275,6 +284,7 @@ export const LibraryScreen = React.memo(function LibraryScreen({
   return (
     <View style={styles.wrap}>
       <View style={styles.bar}>
+        <MenuMark onPress={onOpenMenu} />
         <Text style={styles.title}>Your Library</Text>
         <TouchableOpacity
           onPress={() => setCreating(true)}
@@ -303,52 +313,63 @@ export const LibraryScreen = React.memo(function LibraryScreen({
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={C.accent} />
+          <ActivityIndicator size="large" color={C.accent} />
         </View>
       ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={c => c.id}
-          {...listWindowing}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <Text style={styles.empty}>Nothing here yet.</Text>
-          }
-          renderItem={({item}) => (
-            <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.7}
-              onPress={() => onOpen(item)}
-              onLongPress={() => onLongPress(item)}
-              delayLongPress={350}>
-              <CollectionArt collection={item} size={56} />
-              <View style={styles.rowText}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    isPlayingFrom(item) && styles.rowTitlePlaying,
-                  ]}
-                  numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <View style={styles.metaLine}>
-                  {/* Only rows that can actually be pinned. The fixtures sit
+        <View style={styles.listBox}>
+          <Animated.FlatList
+            ref={listRef}
+            data={rows}
+            keyExtractor={c => c.id}
+            {...listWindowing}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+            onScroll={fast.onScroll}
+            scrollEventThrottle={16}
+            ListEmptyComponent={
+              <Text style={styles.empty}>Nothing here yet.</Text>
+            }
+            renderItem={({item}) => (
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.7}
+                onPress={() => onOpen(item)}
+                onLongPress={() => onLongPress(item)}
+                delayLongPress={350}>
+                <CollectionArt collection={item} size={56} />
+                <View style={styles.rowText}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      isPlayingFrom(item) && styles.rowTitlePlaying,
+                    ]}
+                    numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <View style={styles.metaLine}>
+                    {/* Only rows that can actually be pinned. The fixtures sit
                       at the top by construction, and marking them with the
                       state of a control they do not have says nothing. */}
-                  {isPinned(idOf(item)) && (
-                    <View style={styles.pin}>
-                      <PinGlyph size={12} color={DOWNLOAD_TINT} />
-                    </View>
-                  )}
-                  <Text style={styles.rowSub} numberOfLines={1}>
-                    {collectionSubtitle(item)}
-                  </Text>
+                    {isPinned(idOf(item)) && (
+                      <View style={styles.pin}>
+                        <PinGlyph size={12} color={DOWNLOAD_TINT} />
+                      </View>
+                    )}
+                    <Text style={styles.rowSub} numberOfLines={1}>
+                      {collectionSubtitle(item)}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            </TouchableOpacity>
-          )}
-        />
+              </TouchableOpacity>
+            )}
+          />
+          {/* Over the list, stopping above the floating player + tab bar. */}
+          <FastScroll
+            listRef={listRef}
+            state={fast.state}
+            bottomInset={BOTTOM_INSET}
+          />
+        </View>
       )}
 
       {/* Long-press options: pin, and for your own playlists rename / cover /
@@ -528,7 +549,8 @@ export const LibraryScreen = React.memo(function LibraryScreen({
 });
 
 const styles = StyleSheet.create({
-  wrap: {flex: 1, backgroundColor: C.bg},
+  // Transparent: the window's black is the background (see styles.xml).
+  wrap: {flex: 1},
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -554,9 +576,15 @@ const styles = StyleSheet.create({
   chipOn: {backgroundColor: C.text},
   chipText: {...T.sub, color: C.text, fontSize: 13},
   chipTextOn: {color: C.bg, fontWeight: '700'},
-  center: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: BOTTOM_INSET,
+  },
   // The bars at the foot of the app float OVER the page now, so a list has to
   // end above them or its last row is permanently behind one. See src/layout.ts.
+  listBox: {flex: 1},
   list: {paddingBottom: BOTTOM_INSET},
   row: {
     flexDirection: 'row',
