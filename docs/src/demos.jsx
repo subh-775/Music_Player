@@ -34,11 +34,13 @@ export function AppMark() {
  * Read rather than written down, so the version here is whatever is actually
  * published and no number in this repository can fall behind the releases.
  *
- * Downloads is the total across EVERY release, which is what the README badge
- * shows and what a project's download count is normally taken to mean. It used
- * to be the latest release's count alone, and the two then disagreed in
- * public - 6 here against 54 on the repository page. Both were true, neither
- * said which it was counting, and that is worse than either number on its own.
+ * Downloads is the total across EVERY release, pre-releases included, which is
+ * exactly what the README badge (shields.io github/downloads/.../total) counts.
+ * Any narrower set makes the two disagree in public: it was once the latest
+ * release alone (6 here against 54 on the repository page), then the
+ * non-pre-release total (108 here against 125, the difference being the test
+ * builds). The badge service caches for a while, so right after a download the
+ * two can differ briefly; they never count different things.
  *
  * One list request rather than a call for the latest release and another for
  * the list: the newest published entry is the first that is neither a draft nor
@@ -60,16 +62,18 @@ export function ReleaseBadges() {
         if (!alive) {
           return;
         }
-        const published = Array.isArray(releases)
-          ? releases.filter(r => !r.draft && !r.prerelease)
+        // Drafts are never public; pre-releases are, and are counted.
+        const all = Array.isArray(releases)
+          ? releases.filter(r => !r.draft)
           : null;
         setData({
-          tag: published?.[0]?.tag_name ?? null,
+          // The version shown is the newest REAL release, never a test build.
+          tag: all?.find(r => !r.prerelease)?.tag_name ?? null,
           // null, not 0, when the request did not come back. A rate-limited
           // read that reports "0 downloads" is not a graceful fallback, it is a
           // wrong number stated confidently.
-          downloads: published
-            ? published.reduce(
+          downloads: all
+            ? all.reduce(
                 (n, r) =>
                   n +
                   (r.assets || []).reduce(
