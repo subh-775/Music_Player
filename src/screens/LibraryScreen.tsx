@@ -19,7 +19,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {ImagePlus, Pencil, Plus, Trash2} from 'lucide-react-native';
+import {
+  ImagePlus,
+  Pencil,
+  Plus,
+  Search as SearchIcon,
+  Trash2,
+  X,
+} from 'lucide-react-native';
 import {C, S, T} from '../theme';
 import {PinGlyph} from '../components/PinGlyph';
 import {getLocalLibrary, type Track} from '../backend';
@@ -85,6 +92,11 @@ function idOf(c: Collection): string {
  * not work being done, but work being redone. Every prop below is
  * useCallback-stable in App, so this actually holds.
  */
+/** Lower case, accents removed: what the library search compares. */
+function fold(text: string): string {
+  return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
 export const LibraryScreen = React.memo(function LibraryScreen({
   onOpen,
   onOpenMenu,
@@ -107,6 +119,13 @@ export const LibraryScreen = React.memo(function LibraryScreen({
   const [confirmDelete, setConfirmDelete] = useState<Collection | null>(null);
   const [renaming, setRenaming] = useState<Collection | null>(null);
   const [renameText, setRenameText] = useState('');
+  /** The library search: open, and what is typed in it. */
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState('');
+  const closeSearch = useCallback(() => {
+    setQuery('');
+    setSearching(false);
+  }, []);
   // The drag-to-scroll thumb. A long library is one thumb movement from end
   // to end instead of a dozen flings.
   const listRef = useAnimatedRef<Animated.FlatList<Collection>>();
@@ -205,13 +224,18 @@ export const LibraryScreen = React.memo(function LibraryScreen({
     // the unpinned group and stays in follow order among its own kind. That is
     // the right answer: an artist row never changes, so there is no "recent"
     // about it.
-    const list = withArtists.filter(matches);
+    // The search box, on top of the chip: name or subtitle, ignoring case
+    // and accents, so "beyonce" finds Beyoncé.
+    const q = fold(query.trim());
+    const found = (c: Collection) =>
+      !q || fold(`${c.name} ${collectionSubtitle(c)}`).includes(q);
+    const list = withArtists.filter(c => matches(c) && found(c));
     const fixed = list.filter(
       c => c.kind === 'liked' || c.kind === 'downloads',
     );
     const rest = list.filter(c => c.kind !== 'liked' && c.kind !== 'downloads');
     return [...fixed, ...sortPinned(rest, pins, idOf, c => c.updatedAt)];
-  }, [withArtists, pins, filter]);
+  }, [withArtists, pins, filter, query]);
 
   /** Only playlists pin — not artists, not albums, and not the fixtures. */
   const canPin = (c: Collection) =>
@@ -287,12 +311,42 @@ export const LibraryScreen = React.memo(function LibraryScreen({
         <MenuMark onPress={onOpenMenu} />
         <Text style={styles.title}>Your Library</Text>
         <TouchableOpacity
+          onPress={() => setSearching(true)}
+          hitSlop={12}
+          style={styles.barBtn}
+          accessibilityLabel="Search your library">
+          <SearchIcon size={24} color={C.text} strokeWidth={2.2} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => setCreating(true)}
           hitSlop={12}
-          style={styles.barBtn}>
+          style={styles.barBtn}
+          accessibilityLabel="New playlist">
           <Plus size={26} color={C.text} strokeWidth={2.2} />
         </TouchableOpacity>
       </View>
+
+      {searching && (
+        <View style={styles.find}>
+          <SearchIcon size={18} color={C.sub} strokeWidth={2.2} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search your library"
+            placeholderTextColor={C.faint}
+            style={styles.findInput}
+            autoFocus
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          <TouchableOpacity
+            onPress={closeSearch}
+            hitSlop={10}
+            accessibilityLabel="Close search">
+            <X size={18} color={C.sub} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.chips}>
         {FILTERS.map(f => {
@@ -327,7 +381,11 @@ export const LibraryScreen = React.memo(function LibraryScreen({
             onScroll={fast.onScroll}
             scrollEventThrottle={16}
             ListEmptyComponent={
-              <Text style={styles.empty}>Nothing here yet.</Text>
+              <Text style={styles.empty}>
+                {query.trim()
+                  ? `Nothing in your library matches "${query.trim()}".`
+                  : 'Nothing here yet.'}
+              </Text>
             }
             renderItem={({item}) => (
               <TouchableOpacity
@@ -561,6 +619,20 @@ const styles = StyleSheet.create({
   },
   title: {...T.screenTitle, color: C.text, flex: 1},
   barBtn: {padding: 2},
+  // The library's own search field: the app's dark surface, not the white
+  // field of the Search tab, which searches the catalogues instead.
+  find: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: S.gutter,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: C.surfaceHi,
+  },
+  findInput: {flex: 1, color: C.text, fontSize: 15, padding: 0},
   chips: {
     flexDirection: 'row',
     gap: 9,

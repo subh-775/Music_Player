@@ -1,6 +1,6 @@
 /**
- * A grab-and-drag scroll thumb for long lists — the white pill with up/down
- * chevrons at the right edge, the way Spotify's library does it.
+ * A grab-and-drag scroll thumb for long lists — a white half-disc with up/down
+ * chevrons, flat side flush against the right edge of the screen.
  *
  * Appears while the list is moving and fades after it stops. Drag it and the
  * list follows proportionally, so the far end of a long library is one thumb
@@ -172,15 +172,16 @@ const GLYPH = '#6b6b6b';
 
 const styles = StyleSheet.create({
   // Pinned top-right and moved with a transform, so the travel never costs a
-  // layout pass. Hangs a third off the edge, as the reference does — the part
-  // under the thumb is the part that matters.
+  // layout pass. An exact semicircle: half as wide as it is tall, rounded by
+  // that half-width on the left only, flat against the screen edge.
   thumb: {
     position: 'absolute',
     top: 0,
-    right: -14,
-    width: THUMB,
+    right: 0,
+    width: THUMB / 2,
     height: THUMB,
-    borderRadius: THUMB / 2,
+    borderTopLeftRadius: THUMB / 2,
+    borderBottomLeftRadius: THUMB / 2,
     backgroundColor: '#f4f4f4',
     alignItems: 'center',
     justifyContent: 'center',
@@ -190,6 +191,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: {width: 0, height: 2},
   },
-  // Nudged toward the visible side of the circle.
-  glyphs: {marginRight: 12, marginTop: -1},
+  // Nudged right, into the fuller part of the half-disc.
+  glyphs: {marginLeft: 4, marginTop: -1},
 });
