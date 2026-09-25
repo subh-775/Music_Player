@@ -1,0 +1,55 @@
+Relaxify
+Copyright (C) 2026 Subhansh Malviya (https://github.com/subh-775)
+Copyright (C) 2026 Ashirwad Rai (https://github.com/AshirwadRai)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License. The full text is in the LICENSE file.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+
+Origin
+------
+
+Relaxify is the React Native successor to Fix-Spotify
+(https://github.com/AshirwadRai/Fix-Spotify), an Android music player built on
+a WebView. The search, source-matching, streaming and download engine that
+Relaxify embeds under android/app/src/main/python/ is derived from Fix-Spotify's
+backend, which is also licensed under the GNU General Public License v3.0.
+Portions Copyright (C) Ashirwad Rai and the Fix-Spotify contributors.
+
+
+Third-party software
+--------------------
+
+The Android application bundles the components below. Each remains under its
+own licence; the licence texts are available from the project links.
+
+JavaScript (React Native)
+  React, React Native ................................ MIT
+  react-native-track-player .......................... Apache-2.0
+  react-native-reanimated ............................ MIT
+  react-native-gesture-handler ....................... MIT
+  react-native-draggable-flatlist .................... MIT
+    (modified; the changes are in patches/ and are applied at install time)
+  react-native-svg ................................... MIT
+  @react-native-async-storage/async-storage .......... MIT
+  lucide-react-native ................................ ISC
+
+Android
+  NewPipeExtractor (TeamNewPipe) ..................... GPL-3.0
+  Chaquopy (embedded Python runtime) ................. MIT
+  AndroidX Palette ................................... Apache-2.0
+
+Python (embedded)
+  Flask .............................................. BSD-3-Clause
+  requests ........................................... Apache-2.0
+  mutagen ............................................ GPL-2.0-or-later
+  yt-dlp ............................................. Unlicense
+
+Fonts
+  Plus Jakarta Sans .................................. SIL Open Font License 1.1
+    (licence text: android/app/PLUS_JAKARTA_SANS_OFL.txt)
