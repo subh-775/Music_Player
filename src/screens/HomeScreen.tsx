@@ -93,6 +93,10 @@ type Props = {
   onOpenQuick: (dest: QuickDest) => void;
   /** Home has something to show — the app lifts its splash on this. */
   onReady?: () => void;
+  /** Whether the Home tab is the one on screen. The tab stays mounted when
+   *  you leave it, so this is the only signal that you came back — the
+   *  greeting takes new colours then. */
+  visible: boolean;
 };
 
 /**
@@ -133,6 +137,7 @@ export const HomeScreen = React.memo(function HomeScreen({
   onEndDrag,
   onOpenQuick,
   onReady,
+  visible,
 }: Props) {
   const recent = useRecentlyPlayed();
   const playlists = usePlaylists();
@@ -281,26 +286,18 @@ export const HomeScreen = React.memo(function HomeScreen({
   }
 
   /**
-   * Everything above the content rows, as one header.
+   * Everything above the content rows that SCROLLS with them.
    *
    * An element rather than a component: React reconciles it by type, so it
    * re-renders in place instead of remounting — passing an inline arrow as
-   * ListHeaderComponent is what tears the greeting and the quick tiles down and
-   * rebuilds them on every parent render.
+   * ListHeaderComponent is what tears the quick tiles down and rebuilds them
+   * on every parent render.
+   *
+   * The mark and the greeting are not in here: they are pinned above the list
+   * (see the render below), as the title rows of Search and Your Library are.
    */
   const header = (
     <>
-      {/* Hamburger FIRST: the drawer slides in from the left, so its handle
-          belongs on the left — a right-hand button that opens a left-hand panel
-          reads backwards, and it's the far corner for a right thumb. */}
-      <View style={styles.header}>
-        {/* The mark IS the menu button — see MenuMark. */}
-        <MenuMark onPress={onOpenMenu} />
-        <View style={styles.headerText}>
-          <Greeting />
-        </View>
-      </View>
-
       {/* Quick access. The two things everyone opens most (Liked, Downloaded)
           plus the newest playlists, one tap from the top of Home instead of a
           trip through the Library tab. Two columns, so four fit above the fold
@@ -380,6 +377,16 @@ export const HomeScreen = React.memo(function HomeScreen({
         declared simultaneous with it: a scroll that has already begun is not
         cancelled if the pan activates a moment later.
       */}
+        {/* Pinned: the mark and the greeting stay put while the page scrolls
+            under them, as on Search and Your Library. Mark FIRST: the drawer
+            slides in from the left, so its handle belongs on the left. */}
+        <View style={styles.header}>
+          {/* The mark IS the menu button — see MenuMark. */}
+          <MenuMark onPress={onOpenMenu} />
+          <View style={styles.headerText}>
+            <Greeting visible={visible} />
+          </View>
+        </View>
         <GestureDetector gesture={listScroll}>
           <FlatList
             data={rows}
@@ -510,12 +517,13 @@ const styles = StyleSheet.create({
   // The bars at the foot of the app float OVER the page now, so a list has to
   // end above them or its last row is permanently behind one. See src/layout.ts.
   scroll: {paddingBottom: BOTTOM_INSET},
+  // The pinned row, spaced like the title bars of Search and Your Library.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: S.gutter,
-    paddingTop: 16,
-    paddingBottom: 6,
+    paddingTop: 14,
+    paddingBottom: 10,
     gap: 12,
   },
   headerText: {flex: 1, minWidth: 0},
@@ -531,7 +539,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     paddingHorizontal: S.gutter,
     gap: 8,
-    marginTop: 10,
+    marginTop: 6,
   },
   // Two per line, whatever the screen width — the gap is fixed, so the tile
   // takes half of what's left rather than a hardcoded width.

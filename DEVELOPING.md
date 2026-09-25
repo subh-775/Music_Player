@@ -68,9 +68,15 @@ chasing — boot always writes a line.
 
 ## Release build
 
-Still needed to verify anything R8 touches, and it is what ships:
+Still needed to verify anything R8 touches, since it is what ships.
 
-- Actions → Run workflow → variant `release` (a test build; its version is the
-  latest tag with the patch bumped, so it installs over what is on the phone).
-- Or push a `v*` tag, which builds the real release and attaches it to a GitHub
-  Release.
+- **To test one on a phone,** push a pre-release tag such as `v1.2.17-rc1`. It
+  builds **Relaxify RC** (`com.musicplayer.rc`): release code under a separate
+  identity, with its own name, icon, storage, download folder and port, so it
+  installs next to the real app and cannot replace it or read its data. It is
+  published as a GitHub pre-release, which the real app's updater ignores.
+- **Do not** use Actions → Run workflow → variant `release` for testing on a
+  phone that has Relaxify installed. That build carries the real application
+  id, so it installs over the real app.
+- To ship, push a `vX.Y.Z` tag, which builds the real release and attaches it
+  to a GitHub Release.
