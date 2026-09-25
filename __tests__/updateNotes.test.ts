@@ -9,7 +9,7 @@ import {formatSize, readableNotes} from '../src/updateNotes';
 test('a body that is only a compare link comes back empty', () => {
   expect(
     readableNotes(
-      'Full Changelog: https://github.com/subh-775/Music_Player/compare/v1.0.15...v1.0.16',
+      'Full Changelog: https://github.com/subh-775/Relaxify/compare/v1.0.15...v1.0.16',
     ),
   ).toBe('');
 });

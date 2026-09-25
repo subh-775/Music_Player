@@ -170,7 +170,7 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
                 setRequestProperty("Accept", "application/vnd.github+json")
                 // GitHub rate-limits unauthenticated calls per IP, and answers
                 // 403 when a client sends no User-Agent at all.
-                setRequestProperty("User-Agent", "Music_Player")
+                setRequestProperty("User-Agent", "Relaxify")
             }
             if (conn.responseCode != 200) {
                 lastCheckError = "GitHub returned HTTP ${conn.responseCode}"
@@ -393,10 +393,10 @@ class UpdateModule(private val ctx: ReactApplicationContext) :
     companion object {
         private const val TAG = "MusicPlayerUpd"
         private const val RELEASES_API =
-            "https://api.github.com/repos/subh-775/Music_Player/releases/latest"
+            "https://api.github.com/repos/subh-775/Relaxify/releases/latest"
         /** Test builds: the release list, newest first; see newestRcRelease. */
         private const val RC_RELEASES_API =
-            "https://api.github.com/repos/subh-775/Music_Player/releases?per_page=20"
+            "https://api.github.com/repos/subh-775/Relaxify/releases?per_page=20"
         /** The test build's asset name: CI's Stage APK step for the rc variant. */
         private const val RC_ASSET = "Relaxify-RC.apk"
     }

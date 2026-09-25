@@ -192,7 +192,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          # The repository is still Music_Player; the product is Relaxify.
+          # The repository and the product are both Relaxify.
           # This string is the release title on the releases page and the
           # filename people download onto the phone, so it follows the product.
           # Safe to rename: the in-app updater picks the first asset whose name
