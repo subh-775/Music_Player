@@ -673,6 +673,7 @@ function Shell() {
             onEndDrag={endDrawerDrag}
             onOpenQuick={openQuick}
             onReady={onHomeReady}
+            visible={tab === 'home'}
           />
         </View>
         <View style={tab === 'search' ? styles.tabShown : styles.tabHidden}>
