@@ -1405,6 +1405,51 @@ let wasPlaying = false;
 let pushedSpan = -1;
 
 /**
+ * A song that goes silent mid-play with the pause icon still showing: the
+ * stream stopped delivering (a mobile network dropping out, a CDN connection
+ * that hangs), so the engine sits in Buffering. No error is raised, so nothing
+ * recovered it and nothing reported it.
+ *
+ * After STALL_KICK_MS of continuous buffering the watcher seeks one second
+ * ahead. That lands outside the (empty) buffer, so ExoPlayer drops the stuck
+ * request and opens a fresh one, and the proxy re-resolves the stream if the
+ * old URL died. A seek to the same position would be served from the buffer
+ * and leave the stuck request in place. One kick per stall, logged as
+ * `playback_stall`, so the next one shows up in Analytics with its song.
+ *
+ * ponytail: runs on the watcher tick, which Android freezes with the screen
+ * off, so a stall during screen-off listening is only caught once the app is
+ * back in front. Move it native if those turn up in playback_stall.
+ */
+const STALL_KICK_MS = 10000;
+let stalledSince = 0;
+
+export function kickIfStalled(position: number, duration: number): void {
+  const now = Date.now();
+  if (!stalledSince) {
+    stalledSince = now;
+    return;
+  }
+  if (now - stalledSince < STALL_KICK_MS) {
+    return;
+  }
+  // Re-armed, not cleared: a stall that outlasts the kick gets another one
+  // STALL_KICK_MS later instead of sitting silent until the user notices.
+  stalledSince = now;
+  const target = duration > 2 ? Math.min(position + 1, duration - 1) : position + 1;
+  TrackPlayer.seekTo(target).catch(() => {});
+  TrackPlayer.getActiveTrack()
+    .then(t => {
+      const src = sourceTrackFor(t ?? null);
+      logEvent('playback_stall', {
+        ...(src ? songParams(src) : {}),
+        position: Math.round(position),
+      });
+    })
+    .catch(() => {});
+}
+
+/**
  * Tell the native scheduler how long to fade — zero while the sleep timer's
  * end-of-track stop is armed, because a crossfade starts the NEXT song
  * seconds before the boundary, mixing a song nobody asked for into the last
@@ -1454,14 +1499,18 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
     // One cheap state read replaces all of it. Paused, stopped or idle, the
     // tick now costs a single call and returns; playing, nothing changes.
     let playing = false;
+    let state: State | undefined;
     try {
-      const {state} = await TrackPlayer.getPlaybackState();
+      state = (await TrackPlayer.getPlaybackState()).state;
       playing =
         state === State.Playing ||
         state === State.Buffering ||
         state === State.Loading;
     } catch {
       return; // engine not up — there is nothing to do either way
+    }
+    if (state !== State.Buffering && state !== State.Loading) {
+      stalledSince = 0;
     }
     if (!playing) {
       // The falling edge is the one tick that still has work: a pause must
@@ -1516,6 +1565,9 @@ export function startCrossfadeWatcher(getSeconds: () => number): void {
       ]);
       position = p.position;
       idx = i ?? 0;
+      if (state === State.Buffering || state === State.Loading) {
+        kickIfStalled(position, p.duration);
+      }
     } catch {
       return;
     }
@@ -1562,6 +1614,27 @@ export function useIsPlaying(): boolean {
     // Buffering / Loading / Ready / Connecting: leave the icon as-is.
   }, [state]);
   return playing;
+}
+
+/**
+ * Is the engine waiting on the network — for long enough that it is a stall,
+ * not the flash every seek and track change passes through. useIsPlaying holds
+ * the pause icon through Buffering, which is right for a seek and hid a real
+ * stall completely: the song went silent with nothing on screen saying so.
+ */
+export function useIsBuffering(): boolean {
+  const {state} = usePlaybackState() as {state?: State};
+  const waiting = state === State.Buffering || state === State.Loading;
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!waiting) {
+      setShown(false);
+      return;
+    }
+    const t = setTimeout(() => setShown(true), 1500);
+    return () => clearTimeout(t);
+  }, [waiting]);
+  return shown;
 }
 
 export {TrackPlayer, State, Event, RepeatMode};

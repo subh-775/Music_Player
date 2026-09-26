@@ -80,6 +80,7 @@ import {
   sourceTrackFor,
   togglePlay,
   useActiveTrack,
+  useIsBuffering,
   useIsPlaying,
   useProgress,
 } from '../player';
@@ -223,6 +224,7 @@ export const PlayerScreen = React.memo(function PlayerScreen({
     };
   }, [active]);
   const playing = useIsPlaying();
+  const buffering = useIsBuffering();
   const output = useAudioOutput();
 
   /**
@@ -1179,7 +1181,9 @@ export const PlayerScreen = React.memo(function PlayerScreen({
               onPress={() => togglePlay()}
               activeOpacity={0.85}
               style={styles.playBtn}>
-              {playing ? (
+              {buffering ? (
+                <ActivityIndicator size="large" color={C.bg} />
+              ) : playing ? (
                 <Pause size={30} color={C.bg} fill={C.bg} />
               ) : (
                 <Play

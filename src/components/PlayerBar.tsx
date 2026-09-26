@@ -25,7 +25,14 @@
  *     three different KINDS of control rather than one row.
  */
 import React, {useCallback, useEffect, useMemo, useRef} from 'react';
-import {Image, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Animated, {
   SlideInDown,
@@ -45,6 +52,7 @@ import {
   sourceTrackFor,
   togglePlay,
   useActiveTrack,
+  useIsBuffering,
   useIsPlaying,
   useProgress,
 } from '../player';
@@ -112,6 +120,7 @@ export const PlayerBar = React.memo(function PlayerBar({
 }) {
   const active = useActiveTrack();
   const playing = useIsPlaying();
+  const buffering = useIsBuffering();
   const output = useAudioOutput();
 
   const track = useMemo(() => sourceTrackFor(active), [active]);
@@ -459,7 +468,9 @@ export const PlayerBar = React.memo(function PlayerBar({
               activeOpacity={0.85}
               hitSlop={8}
               style={styles.playBtn}>
-              {playing ? (
+              {buffering ? (
+                <ActivityIndicator color={C.text} />
+              ) : playing ? (
                 <Pause size={26} color={C.text} fill={C.text} />
               ) : (
                 <Play size={26} color={C.text} fill={C.text} />
