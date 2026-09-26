@@ -21,6 +21,7 @@ export const ANALYTICS_NOTE =
 
 type AnalyticsNative = {
   log?: (name: string, params: Record<string, string | number>) => void;
+  recordError?: (message: string, stack: string) => void;
 };
 
 const native = (NativeModules.Analytics ?? {}) as AnalyticsNative;
@@ -58,22 +59,40 @@ export function songParams(t: Track): Record<string, string> {
   };
 }
 
+/** One error: counted as an `app_error` event, and, when the app survives it,
+ *  sent to Crashlytics with its stack. A fatal one is left to Crashlytics'
+ *  native crash report, which React Native's crash produces anyway. */
+function report(e: unknown, fatal: boolean): void {
+  const message = String((e as Error)?.message ?? e);
+  logEvent('app_error', {message, fatal: fatal ? 1 : 0});
+  if (!fatal) {
+    try {
+      native.recordError?.(message, String((e as Error)?.stack ?? ''));
+    } catch {}
+  }
+}
+
 /**
- * JS errors that reach the top, as `app_error` events, then on to the
- * handler that was already there (the red box in debug, the crash in
- * release). Installed once at startup.
+ * JS errors that reach the top, reported (see `report`) and then passed on to
+ * the handler that was already there (the red box in debug, the crash in
+ * release). And, in release, promise rejections nothing handled: an async
+ * failure otherwise vanished without a trace. Installed once at startup.
  */
 export function reportErrors(): void {
   const eu = (global as any).ErrorUtils;
-  if (!eu?.getGlobalHandler) {
-    return;
-  }
-  const previous = eu.getGlobalHandler();
-  eu.setGlobalHandler((e: unknown, fatal?: boolean) => {
-    logEvent('app_error', {
-      message: String((e as Error)?.message ?? e),
-      fatal: fatal ? 1 : 0,
+  if (eu?.getGlobalHandler) {
+    const previous = eu.getGlobalHandler();
+    eu.setGlobalHandler((e: unknown, fatal?: boolean) => {
+      report(e, !!fatal);
+      previous?.(e, fatal);
     });
-    previous?.(e, fatal);
-  });
+  }
+  // Release only: in debug React Native installs its own tracker, which shows
+  // the warning a developer needs, and this would replace it.
+  if (!__DEV__) {
+    (global as any).HermesInternal?.enablePromiseRejectionTracker?.({
+      allRejections: true,
+      onUnhandled: (_id: number, e: unknown) => report(e, false),
+    });
+  }
 }

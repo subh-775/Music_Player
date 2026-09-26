@@ -10,10 +10,17 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReadableType
 import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import java.security.MessageDigest
 
 /**
- * Usage statistics, through Firebase (Google Analytics for apps).
+ * Usage statistics and crash reports, through Firebase (Google Analytics for
+ * apps, and Crashlytics).
+ *
+ * Crashlytics records native crashes and freezes (ANRs) on its own; JS errors
+ * that the app survives arrive through `recordError` below, as non-fatal
+ * issues with the JS stack. Fatal JS errors are not sent from here: React
+ * Native turns them into a native crash, which Crashlytics already records.
  *
  * Firebase itself collects the basics with no code here: installs, active
  * users, sessions, app version, country and city (derived by Google from the
@@ -46,7 +53,10 @@ class AnalyticsModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
         /** Attach the stable id. Called once, from MainApplication.onCreate. */
         fun identify(c: Context) {
             if (!configured(c)) return
-            runCatching { FirebaseAnalytics.getInstance(c).setUserId(stableId(c)) }
+            val id = stableId(c)
+            runCatching { FirebaseAnalytics.getInstance(c).setUserId(id) }
+            // The same id on crash reports, so a crash links to its user.
+            runCatching { FirebaseCrashlytics.getInstance().setUserId(id) }
         }
 
         @SuppressLint("HardwareIds")
@@ -79,4 +89,29 @@ class AnalyticsModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
         }
         runCatching { analytics.logEvent(name, bundle) }
     }
+
+    /**
+     * A JS error the app survived, as a Crashlytics non-fatal. The JS stack
+     * becomes the report's stack, one frame per line, so different errors are
+     * different issues instead of all sharing this method's native stack.
+     */
+    @ReactMethod
+    fun recordError(message: String, stack: String?) {
+        if (fa == null) return
+        val frames = stack.orEmpty().lines().mapNotNull { line ->
+            JS_FRAME.find(line)?.let { m ->
+                StackTraceElement("JS", m.groupValues[1], "bundle", m.groupValues[2].toIntOrNull() ?: -1)
+            }
+        }
+        val error = JsError(message.take(300)).apply {
+            if (frames.isNotEmpty()) stackTrace = frames.toTypedArray()
+        }
+        runCatching { FirebaseCrashlytics.getInstance().recordException(error) }
+    }
+
+    private class JsError(message: String) : Exception(message)
 }
+
+/** "at name (… :line:column)" in a Hermes stack; the column is what locates
+ *  code in a one-line release bundle. */
+private val JS_FRAME = Regex("""at (\S+) \(.*?:\d+:(\d+)\)""")

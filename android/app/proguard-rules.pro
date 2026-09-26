@@ -78,3 +78,9 @@
 -keep class com.swmansion.gesturehandler.** { *; }
 -keep class com.facebook.jni.** { *; }
 -dontwarn com.swmansion.**
+
+# Crashlytics: readable crash stacks. Line numbers and file names survive R8
+# (the mapping file the Crashlytics plugin uploads turns the obfuscated names
+# back), and custom exceptions keep their names in the report.
+-keepattributes SourceFile,LineNumberTable
+-keep public class * extends java.lang.Exception

@@ -25,6 +25,8 @@ buildscript {
         // Firebase config (google-services.json -> resources). Applied by the app
         // module only when that file exists; see app/build.gradle.
         classpath("com.google.gms:google-services:4.4.2")
+        // Crash reports (Crashlytics); applied under the same condition.
+        classpath("com.google.firebase:firebase-crashlytics-gradle:3.0.2")
     }
 }
 

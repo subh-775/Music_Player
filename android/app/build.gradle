@@ -238,14 +238,22 @@ dependencies {
     // music app) — the WebView build used a canvas, which RN doesn't have.
     implementation 'androidx.palette:palette:1.0.0'
 
-    // Usage statistics (AnalyticsModule.kt). Inert without google-services.json.
+    // Usage statistics and crash reports (AnalyticsModule.kt). Inert without
+    // google-services.json: no config means no FirebaseApp, and neither SDK
+    // starts.
     implementation platform('com.google.firebase:firebase-bom:33.1.2')
     implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-crashlytics'
 }
 
 // Firebase's config is not in the repo: CI writes android/app/google-services.json
 // from the GOOGLE_SERVICES_JSON secret. Without it (contributors, forks) the
 // plugin is skipped and analytics stays off, rather than the build failing.
+//
+// Crashlytics' plugin goes with it, never alone and never missing: with a
+// config present the SDK starts, and without the plugin's build id it would
+// crash the app at launch.
 if (file('google-services.json').exists()) {
     apply plugin: 'com.google.gms.google-services'
+    apply plugin: 'com.google.firebase.crashlytics'
 }
