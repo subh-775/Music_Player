@@ -9,6 +9,7 @@
 import {createStore, asArray, useStoreValue} from './storage';
 import {getTrackId, normalizeTrack} from './tracks';
 import type {Track} from './backend';
+import {logEvent, songParams} from './analytics';
 
 export type Playlist = {
   id: string;
@@ -49,10 +50,14 @@ export function createPlaylist(name: string): Playlist | null {
     updatedAt: Date.now(),
   };
   store.update(list => [playlist, ...list]);
+  logEvent('playlist_created', {list_name: clean});
   return playlist;
 }
 
 export function deletePlaylist(id: string): void {
+  logEvent('playlist_deleted', {
+    list_name: store.get().find(p => p.id === id)?.name ?? '',
+  });
   store.update(list => list.filter(p => p.id !== id));
 }
 
@@ -62,7 +67,9 @@ export function renamePlaylist(id: string, name: string): void {
     return;
   }
   store.update(list =>
-    list.map(p => (p.id === id ? {...p, name: clean, updatedAt: Date.now()} : p)),
+    list.map(p =>
+      p.id === id ? {...p, name: clean, updatedAt: Date.now()} : p,
+    ),
   );
 }
 
@@ -83,6 +90,10 @@ export function addTrackToPlaylist(id: string, track: Track): boolean {
   if (!t) {
     return false;
   }
+  logEvent('playlist_add', {
+    ...songParams(t),
+    list_name: store.get().find(p => p.id === id)?.name ?? '',
+  });
   const tid = getTrackId(t);
   let added = false;
   store.update(list =>

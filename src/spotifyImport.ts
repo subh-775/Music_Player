@@ -8,6 +8,7 @@
  */
 import {useSyncExternalStore} from 'react';
 import {importSpotify, type ImportSnapshot} from './backend';
+import {logEvent} from './analytics';
 
 export type ImportState = ImportSnapshot & {url: string | null};
 
@@ -57,6 +58,7 @@ export function startImport(url: string): void {
   stop();
   state = {...empty(), url};
   emit();
+  logEvent('spotify_import');
 
   const poll = async () => {
     try {

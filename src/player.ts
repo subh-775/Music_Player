@@ -381,7 +381,25 @@ export async function setupPlayer(): Promise<boolean> {
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
-        logEvent('song_played', songParams(src));
+        // The same queue ROW again is not a new play. Tapping a song part-way
+        // down a list starts it alone, then inserts the earlier songs in front
+        // of it; the shift fires this event a second time for the song that is
+        // already playing, and every tapped song was counted twice.
+        const sameRow =
+          !!e.lastTrack?._qid && e.lastTrack._qid === e.track?._qid;
+        if (!sameRow) {
+          logEvent('song_played', songParams(src));
+          // How far the song that just ended got: skips vs full listens.
+          const last = sourceTrackFor(e.lastTrack ?? null);
+          if (last) {
+            const dur = Number(e.lastTrack?.duration) || 0;
+            logEvent('song_listened', {
+              ...songParams(last),
+              seconds: Math.round(e.lastPosition || 0),
+              completed: dur > 0 && e.lastPosition >= dur - 5 ? 1 : 0,
+            });
+          }
+        }
       }
       // Re-read the mirror, warm the covers around the new track and save the
       // session — once the skipping stops. Everything above this line has
@@ -737,6 +755,7 @@ export async function addToQueue(track: Track): Promise<void> {
   if (!item) {
     throw new Error('This track has no playable source.');
   }
+  logEvent('queue_add', songParams(track));
   return serialQueueOp(() => insertQueued(track, item));
 }
 
@@ -1112,6 +1131,7 @@ export function shuffleUpcoming<T>(rest: T[]): T[] {
  * than lighting the icon for a shuffle that never happened.
  */
 export function setShuffle(on: boolean): Promise<boolean> {
+  logEvent('shuffle', {on: on ? 1 : 0});
   return serialQueueOp(() => setShuffleNow(on));
 }
 
@@ -1188,6 +1208,7 @@ async function dropQueuedRadioNow(): Promise<void> {
 }
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {
+  logEvent('repeat', {mode: RepeatMode[mode] ?? String(mode)});
   await TrackPlayer.setRepeatMode(mode);
 }
 
@@ -1436,7 +1457,8 @@ export function kickIfStalled(position: number, duration: number): void {
   // Re-armed, not cleared: a stall that outlasts the kick gets another one
   // STALL_KICK_MS later instead of sitting silent until the user notices.
   stalledSince = now;
-  const target = duration > 2 ? Math.min(position + 1, duration - 1) : position + 1;
+  const target =
+    duration > 2 ? Math.min(position + 1, duration - 1) : position + 1;
   TrackPlayer.seekTo(target).catch(() => {});
   TrackPlayer.getActiveTrack()
     .then(t => {

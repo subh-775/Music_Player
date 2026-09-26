@@ -26,6 +26,7 @@ import {useSyncExternalStore} from 'react';
 import {cancelCrossfade, fadeToPause} from './player';
 import {setPauseAtEndOfTrack} from './audioEffects';
 import {diag} from './diag';
+import {logEvent} from './analytics';
 
 type Mode = 'off' | 'clock' | 'endOfTrack';
 
@@ -112,6 +113,7 @@ export function startSleepTimer(minutes: number): void {
   };
   emit();
   diag('sleep', `timer set for ${minutes}m`);
+  logEvent('sleep_timer', {minutes});
   ticker = setInterval(() => {
     const left = Math.max(0, Math.round((state.endsAt - Date.now()) / 1000));
     state = {...state, remaining: left};
@@ -132,6 +134,7 @@ export function sleepAtEndOfTrack(): void {
   // song into the last seconds of the one you meant to fall asleep to.
   cancelCrossfade();
   diag('sleep', 'will stop at end of track');
+  logEvent('sleep_timer', {minutes: 0, end_of_track: 1});
 }
 
 export function cancelSleepTimer(): void {

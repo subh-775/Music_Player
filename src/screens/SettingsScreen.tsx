@@ -22,7 +22,7 @@ import {
   SlidersHorizontal,
   ChartColumn,
 } from '../icons';
-import {ANALYTICS_NOTE} from '../analytics';
+import {ANALYTICS_NOTE, logEvent} from '../analytics';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 // Aliased: this file already has react-native's own Animated, for the refresh
 // glyph's rotation loop. Two different `Animated`s in one file is a bug waiting
@@ -56,6 +56,7 @@ import {applyAudioEffects} from '../audioEffects';
 import {dropQueuedRadio} from '../player';
 import {EQ_PRESETS} from '../eq';
 import {toast} from '../toast';
+import {enforceCacheLimit} from '../cacheLimit';
 import {checkUpdate, startUpdateInstall, useUpdate} from '../update';
 import {
   cancelSleepTimer,
@@ -279,14 +280,15 @@ function fracAt(x: number, w: number): number {
   return Math.max(0, Math.min(1, x / (w || 1)));
 }
 
-/** Whole seconds for a track position — the value is only ever an integer. */
-function secsAt(f: number): number {
+/** The nearest step for a track position: the value only ever lands on one. */
+function stepAt(f: number, max: number, step: number): number {
   'worklet';
-  return Math.round(f * CROSSFADE_MAX);
+  return Math.round((f * max) / step) * step;
 }
 
 /**
- * The crossfade control: a horizontal bar you drag, 0–12s, 0 reads as Off.
+ * A horizontal bar you drag from Off up to `max` in whole steps: crossfade
+ * (0–12s) and the cache limit (Off, 10–100 MB). 0 always reads as Off.
  *
  * It was a ‹‹ 9s ›› stepper because an earlier draggable bar was fiddly to land
  * on an exact second. That bar was fiddly for a reason this one does not share:
@@ -303,14 +305,32 @@ function secsAt(f: number): number {
  * equalizer, where the band drags along the SAME axis as its scroller and needs
  * blocksExternalGesture to stop the touch being taken.
  */
-function CrossfadeSlider({
+function StepSlider({
+  label,
+  hint,
   value,
+  max,
+  step,
+  format,
   onChange,
 }: {
+  label: string;
+  hint: string;
   value: number;
-  onChange: (secs: number) => void;
+  max: number;
+  step: number;
+  /** The readout for a value above 0; 0 always reads as Off. */
+  format: (v: number) => string;
+  onChange: (v: number) => void;
 }) {
-  const t = useSharedValue(value / CROSSFADE_MAX);
+  const secsAt = useCallback(
+    (f: number) => {
+      'worklet';
+      return stepAt(f, max, step);
+    },
+    [max, step],
+  );
+  const t = useSharedValue(value / max);
   /** The track's real measured width, so the worklet never has to ask JS. */
   const w = useSharedValue(1);
   /** 0 at rest, 1 while held — the thumb grows under the finger. */
@@ -323,9 +343,9 @@ function CrossfadeSlider({
   // Follow the setting when it changes from OUTSIDE a drag (a reset, mostly).
   useEffect(() => {
     if (!dragging.current) {
-      t.value = value / CROSSFADE_MAX;
+      t.value = value / max;
     }
-  }, [value, t]);
+  }, [value, t, max]);
 
   // The readout, derived from the position rather than pushed by the gesture,
   // so it is right whoever moved the bar — and it reaches JS about twelve times
@@ -362,7 +382,7 @@ function CrossfadeSlider({
         // Snap the FILL to the second being committed, so what is on screen and
         // what was stored are the same thing.
         const secs = secsAt(t.value);
-        t.value = withTiming(secs / CROSSFADE_MAX, {duration: 90});
+        t.value = withTiming(secs / max, {duration: 90});
         runOnJS(commit)(secs);
       })
       .onFinalize(() => {
@@ -380,12 +400,12 @@ function CrossfadeSlider({
           return;
         }
         const secs = secsAt(fracAt(e.x, w.value));
-        t.value = withTiming(secs / CROSSFADE_MAX, {duration: 120});
+        t.value = withTiming(secs / max, {duration: 120});
         runOnJS(commit)(secs);
       });
 
     return Gesture.Race(scrub, jump);
-  }, [grow, t, w, setDragging, commit]);
+  }, [grow, t, w, setDragging, commit, secsAt, max]);
 
   const fillStyle = useAnimatedStyle(() => ({width: `${t.value * 100}%`}));
   const thumbStyle = useAnimatedStyle(() => ({
@@ -397,14 +417,11 @@ function CrossfadeSlider({
     <View style={styles.slider}>
       <View style={styles.sliderHead}>
         <View style={styles.rowText}>
-          <Text style={styles.rowLabel}>Crossfade</Text>
-          <Text style={styles.rowHint}>
-            Overlap the end of one song into the next. Skipped when the next
-            song can't buffer in time.
-          </Text>
+          <Text style={styles.rowLabel}>{label}</Text>
+          <Text style={styles.rowHint}>{hint}</Text>
         </View>
         <Text style={[styles.sliderValue, shown === 0 && styles.sliderOff]}>
-          {shown > 0 ? `${shown}s` : 'Off'}
+          {shown > 0 ? format(shown) : 'Off'}
         </Text>
       </View>
 
@@ -427,7 +444,7 @@ function CrossfadeSlider({
 
       <View style={styles.sliderEnds}>
         <Text style={styles.sliderEnd}>Off</Text>
-        <Text style={styles.sliderEnd}>{CROSSFADE_MAX}s</Text>
+        <Text style={styles.sliderEnd}>{format(max)}</Text>
       </View>
     </View>
   );
@@ -591,6 +608,10 @@ export function SettingsScreen({
     setClearing(true);
     try {
       const freed = await clearBackendCache();
+      logEvent('cache_cleared', {
+        auto: 0,
+        freed_mb: Math.round(freed / 1048576),
+      });
       clearSearchHistory();
       patchRemote({cacheBytes: 0});
       toast(freed > 0 ? `Cleared ${formatBytes(freed)}` : 'Cache cleared');
@@ -713,8 +734,13 @@ export function SettingsScreen({
           </Section>
 
           <Section title="Crossfade">
-            <CrossfadeSlider
+            <StepSlider
+              label="Crossfade"
+              hint="Overlap the end of one song into the next. Skipped when the next song can't buffer in time."
               value={settings.crossfadeDuration}
+              max={CROSSFADE_MAX}
+              step={1}
+              format={secs => `${secs}s`}
               onChange={secs => writeSetting('crossfadeDuration', secs)}
             />
           </Section>
@@ -941,6 +967,23 @@ export function SettingsScreen({
             </View>
             <ChevronRight size={17} color={C.faint} />
           </TouchableOpacity>
+
+          <StepSlider
+            label="Clear cache automatically"
+            hint="When cached data passes this size, it is cleared the next time you open the app. Downloaded songs and search history are kept."
+            value={settings.cacheLimitMb}
+            max={100}
+            step={10}
+            format={mb => `${mb} MB`}
+            onChange={mb => {
+              writeSetting('cacheLimitMb', mb);
+              enforceCacheLimit(true).then(() =>
+                getCacheSize()
+                  .then(r => patchRemote({cacheBytes: r.bytes}))
+                  .catch(() => {}),
+              );
+            }}
+          />
         </Section>
 
         <Section title="Appearance" Icon={Eye}>

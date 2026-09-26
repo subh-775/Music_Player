@@ -16,6 +16,7 @@ import {
 } from './storage';
 import {getTrackId} from './tracks';
 import type {Track} from './backend';
+import {logEvent, songParams} from './analytics';
 // Imported for side effect: creating a store registers it for hydration, so a
 // store no screen has rendered yet is still loaded at startup.
 import './playlists';
@@ -41,6 +42,8 @@ export type Settings = {
   eqEnabled: boolean;
   eqPreset: string;
   eqGains: number[] | null;
+  /** Clear the cache by itself once it passes this many MB; 0 = never. */
+  cacheLimitMb: number;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -57,6 +60,9 @@ export const DEFAULT_SETTINGS: Settings = {
   eqEnabled: false,
   eqPreset: 'flat',
   eqGains: null,
+  // On by default: a downloaded update alone is ~48 MB and stayed in the cache
+  // after installing, and a cache is re-fetchable by definition.
+  cacheLimitMb: 100,
 };
 
 const likesStore = createStore<Track[]>('mp.likes.v1', [], asArray);
@@ -79,6 +85,7 @@ export function toggleLike(t: Track): boolean {
   const list = likesStore.get();
   const had = list.some(x => getTrackId(x) === k);
   likesStore.set(had ? list.filter(x => getTrackId(x) !== k) : [t, ...list]);
+  logEvent(had ? 'song_unliked' : 'song_liked', songParams(t));
   return !had;
 }
 
@@ -89,10 +96,20 @@ export function writeSetting<K extends keyof Settings>(
   value: Settings[K],
 ): void {
   settingsStore.update(s => ({...s, [key]: value}));
+  logSetting(key, value);
 }
 
 export function writeSettings(patch: Partial<Settings>): void {
   settingsStore.update(s => ({...s, ...patch}));
+  for (const [key, value] of Object.entries(patch)) {
+    logSetting(key, value);
+  }
+}
+
+/** Every settings write is a person changing something: nothing else calls
+ *  writeSetting. `setting_value`, not `value`: GA reserves `value` for money. */
+function logSetting(key: string, value: unknown): void {
+  logEvent('setting_changed', {setting: key, setting_value: String(value)});
 }
 
 export function resetSettings(): void {

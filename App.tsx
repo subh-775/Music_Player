@@ -40,6 +40,7 @@ import {
   useUpdateAvailable,
   watchForegroundUpdates,
 } from './src/update';
+import {watchCacheLimit} from './src/cacheLimit';
 import {
   TrackActionSheet,
   type SheetContext,
@@ -202,6 +203,8 @@ function Shell() {
     // …and again on every return to the foreground, because a process kept
     // alive by the playback service may not launch again for days.
     watchForegroundUpdates();
+    // Clear the cache once it passes the size set in Settings.
+    const stopCacheLimit = watchCacheLimit();
     // Store writes are debounced (see storage.ts). Leaving the foreground is
     // the last moment we are reliably given before Android may reclaim the
     // process, so anything still pending goes out now.
@@ -214,6 +217,7 @@ function Shell() {
       clearTimeout(u);
       clearTimeout(bootCap);
       bg.remove();
+      stopCacheLimit();
     };
   }, [liftSplash]);
 

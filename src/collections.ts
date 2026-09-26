@@ -14,6 +14,7 @@ import {useMemo} from 'react';
 import {createStore, asArray, useStoreValue} from './storage';
 import {normalizeTracks} from './tracks';
 import type {Track} from './backend';
+import {logEvent} from './analytics';
 import {type Playlist, usePlaylists} from './playlists';
 
 export type CollectionKind =
@@ -84,10 +85,13 @@ export function isSaved(c: Collection): boolean {
 export function toggleSaved(c: Collection): boolean {
   const id = savedId(c);
   const list = saved.get();
+  const params = {kind: c.kind, list_name: c.name};
   if (list.some(x => savedId(x) === id)) {
     saved.set(list.filter(x => savedId(x) !== id));
+    logEvent('collection_unsaved', params);
     return false;
   }
+  logEvent('collection_saved', params);
   saved.set([
     ...list,
     {...c, id, tracks: normalizeTracks(c.tracks || []), updatedAt: Date.now()},

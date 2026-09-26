@@ -286,6 +286,7 @@ export async function enqueueDownload(track: Track): Promise<void> {
     toast(res.error || 'Could not start that download');
     return;
   }
+  logEvent('download_started', songParams(track));
   rememberArtwork(track);
   jobs = [
     ...jobs,

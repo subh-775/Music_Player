@@ -6,6 +6,7 @@
 import {expect, jest, test} from '@jest/globals';
 
 jest.mock('react-native', () => ({
+  AccessibilityInfo: {},
   Animated: {Value: class {}, View: 'View'},
   Easing: {},
   StyleSheet: {create: (s: unknown) => s},
@@ -42,15 +43,19 @@ test('every pair is two different colours', () => {
   }
 });
 
-test('the line fits its room: full size on wide phones, smaller on narrow ones', () => {
+test('both lines fit their room, at one shared size', () => {
   // Rooms Home's header leaves (screen width less gutters, the mark and its
   // balancing spacer) on 432, 392 and 360 dp phones.
-  expect(fitSize(300)).toBe(32);
-  expect(fitSize(260)).toBe(32);
-  const narrow = fitSize(228);
-  expect(narrow).toBeLessThan(32);
-  // It must actually fit: the line's width at that size, plus the two gaps.
-  expect(narrow * 7.381 + 16).toBeLessThanOrEqual(228);
+  for (const room of [300, 260, 228]) {
+    const size = fitSize(room);
+    expect(size).toBeGreaterThan(0);
+    expect(size).toBeLessThanOrEqual(28);
+    // Each line's width at that size (font-file measurements), plus its gaps.
+    expect(size * 7.381 + 2 * 8).toBeLessThanOrEqual(room);
+    expect(size * 10.977 + 4 * 8).toBeLessThanOrEqual(room);
+  }
+  // The longer line sets it: on a 432 dp phone that is 24, not the cap.
+  expect(fitSize(300)).toBe(24);
   // Before layout (width 0) it renders at the full size rather than 0.
-  expect(fitSize(0)).toBe(32);
+  expect(fitSize(0)).toBe(28);
 });
