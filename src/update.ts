@@ -13,6 +13,7 @@ import {AppState, NativeEventEmitter, NativeModules} from 'react-native';
 import {createStore} from './storage';
 import {readSettings} from './store';
 import {diag} from './diag';
+import {logEvent} from './analytics';
 
 /**
  * When the AUTOMATIC check last ran — whatever it found.
@@ -97,9 +98,20 @@ type UpdateState = {
   info: UpdateInfo | null;
   pct: number;
   error: string;
+  /** A download was started from this check. Only then is a failure worth a
+   *  popup: a failed AUTOMATIC check (offline, slow first launch, GitHub's
+   *  hourly limit) used to raise "Update failed" in front of people who had
+   *  never asked for anything — new users above all. Settings still shows it. */
+  attempted: boolean;
 };
 
-let state: UpdateState = {phase: 'idle', info: null, pct: 0, error: ''};
+let state: UpdateState = {
+  phase: 'idle',
+  info: null,
+  pct: 0,
+  error: '',
+  attempted: false,
+};
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -135,6 +147,9 @@ function ensureRegistered() {
     );
     // A version already dismissed does not re-raise the popup — but `info` is
     // still recorded, which is what keeps the dot lit and Settings offering it.
+    if (failed) {
+      logEvent('update_check_failed', {error: String(res.error)});
+    }
     const alreadySeen =
       !!res?.available && res.version === dismissedVersion.get();
     state = {
@@ -158,6 +173,7 @@ function ensureRegistered() {
     // people looking in entirely the wrong place.
     if (p === -2) {
       diag('update', 'install permission not granted');
+      logEvent('update_failed', {error: 'install permission'});
       state = {
         ...state,
         phase: 'failed',
@@ -168,6 +184,7 @@ function ensureRegistered() {
     }
     if (p < 0) {
       diag('update', 'download failed');
+      logEvent('update_failed', {error: 'download'});
       state = {...state, phase: 'failed', error: 'Download failed'};
       emit();
       return;
@@ -191,7 +208,7 @@ export function checkUpdate(): void {
   if (state.phase === 'checking' || state.phase === 'downloading') {
     return;
   }
-  state = {...state, phase: 'checking', error: ''};
+  state = {...state, phase: 'checking', error: '', attempted: false};
   emit();
   diag('update', 'checking…');
 
@@ -265,7 +282,8 @@ export function startUpdateInstall(): void {
   if (!updateSupported) {
     return;
   }
-  state = {...state, phase: 'downloading', pct: 0};
+  logEvent('update_install', {version: state.info?.version ?? ''});
+  state = {...state, phase: 'downloading', pct: 0, attempted: true};
   emit();
   native.install?.();
 }
@@ -278,7 +296,7 @@ export function dismissUpdate(): void {
   if (state.info?.version) {
     dismissedVersion.set(state.info.version);
   }
-  state = {...state, phase: 'idle'};
+  state = {...state, phase: 'idle', attempted: false};
   emit();
 }
 

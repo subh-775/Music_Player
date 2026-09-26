@@ -29,6 +29,7 @@ jest.mock('../src/resume', () => ({}));
 jest.mock('../src/sleepTimer', () => ({}));
 jest.mock('../src/duckState', () => ({}));
 jest.mock('../src/tracks', () => ({}));
+jest.mock('../src/analytics', () => ({}));
 
 // NB: below the mocks — jest hoists jest.mock().
 import {serialQueueOp} from '../src/player';

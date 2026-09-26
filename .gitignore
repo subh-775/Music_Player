@@ -78,3 +78,6 @@ __pycache__/
 # Vite writes these next to the config while it reloads it; they are transient.
 vite.config.js.timestamp-*
 vite.config.*.timestamp-*
+
+# Firebase config: CI writes it from the GOOGLE_SERVICES_JSON secret.
+android/app/google-services.json

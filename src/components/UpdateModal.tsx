@@ -1,156 +1,210 @@
 /**
- * The in-app update prompt. Appears when a newer release is found, shows the
- * download progress in place, and lets the user install or dismiss.
+ * The in-app update prompt: a card floating above the mini player. Appears when
+ * a newer release is found, shows the download progress in place, and lets
+ * the user install or put it off.
  *
- * A Sheet, not a centred Modal. Everything else in the app that asks a question
- * is a Sheet or a ConfirmModal; a card floating in the middle of a dimmed
- * screen read as something the OS had put in front of the app rather than part
- * of it. It also gets "Later" for free — drag it away.
+ * A card, not a sheet or a dialog: the page stays visible and usable around
+ * it, so a new version is news rather than an interruption.
+ *
+ * A failure shows here only when a DOWNLOAD failed (see `attempted` in
+ * update.ts). A failed automatic check stays quiet; Settings reports it.
+ *
+ * The same spot carries the one-time usage-statistics notice, after any update
+ * card, so the two never stack.
  */
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {AlertTriangle, ArrowRight, Download} from '../icons';
+import Animated, {FadeInDown, FadeOutDown} from 'react-native-reanimated';
+import {AlertTriangle, ChartColumn, RefreshCw, X} from '../icons';
 import {C, S} from '../theme';
-import {appVersion} from '../backend';
 import {dismissUpdate, startUpdateInstall, useUpdate} from '../update';
-import {Sheet} from './Sheet';
 import {formatSize, readableNotes} from '../updateNotes';
+import {BOTTOM_INSET} from '../layout';
+import {createStore, useStoreValue} from '../storage';
+import {ANALYTICS_NOTE} from '../analytics';
+
+const noticeSeen = createStore<boolean>(
+  'mp.analyticsNoticeSeen.v1',
+  false,
+  raw => raw === true,
+);
+
+const FALLBACK =
+  'This update contains several bug fixes and performance improvements.';
 
 export function UpdateModal() {
-  const {phase, info, pct} = useUpdate();
-  const visible =
-    phase === 'found' || phase === 'downloading' || phase === 'failed';
-  const failed = phase === 'failed';
-  const notes = readableNotes(info?.notes ?? '');
+  const {phase, info, pct, error, attempted} = useUpdate();
+  const seen = useStoreValue(noticeSeen);
+  const failed = phase === 'failed' && attempted;
+  if (phase !== 'found' && phase !== 'downloading' && !failed) {
+    return seen ? null : <Notice />;
+  }
+  const downloading = phase === 'downloading';
   const size = formatSize(info?.sizeBytes);
 
+  const title = failed
+    ? 'Update failed'
+    : downloading
+    ? `Downloading ${info?.version ?? 'update'}`
+    : `Version ${info?.version} is now available!`;
+  const message = failed
+    ? error && error !== 'Download failed'
+      ? error
+      : "Couldn't download the update. Check your connection and try again."
+    : readableNotes(info?.notes ?? '') || FALLBACK;
+
   return (
-    <Sheet open={visible} onClose={dismissUpdate} style={styles.sheet}>
-      <View style={styles.body}>
-        {/* An update is a FILE ARRIVING. The sparkle that used to be here is
-            the visual language of a promotional banner, and it was also the
-            sidebar's glyph for "Your activity" — one icon meaning two unrelated
-            things. AlertTriangle stays for the failure; that one was right. */}
+    <Animated.View
+      entering={FadeInDown.duration(260)}
+      exiting={FadeOutDown.duration(180)}
+      style={styles.card}
+      accessibilityLiveRegion="polite">
+      <View style={styles.row}>
         <View style={[styles.badge, failed && styles.badgeWarn]}>
           {failed ? (
-            <AlertTriangle size={22} color={C.danger} strokeWidth={2.2} />
+            <AlertTriangle size={18} color={C.danger} strokeWidth={2.2} />
           ) : (
-            <Download size={22} color={C.accent} strokeWidth={2.2} />
+            <RefreshCw size={18} color={C.accent} strokeWidth={2.2} />
           )}
         </View>
-
-        {phase === 'downloading' ? (
-          <>
-            <Text style={styles.title}>Downloading update</Text>
-            <Text style={styles.message}>
-              Relaxify {info?.version} — this only takes a moment.
-            </Text>
-            <View style={styles.barTrack}>
-              <View style={[styles.barFill, {width: `${Math.max(4, pct)}%`}]} />
-            </View>
-            <Text style={styles.pct}>{pct}%</Text>
-          </>
-        ) : failed ? (
-          <>
-            <Text style={styles.title}>Update failed</Text>
-            <Text style={styles.message}>
-              Couldn&apos;t download the update. Check your connection and try
-              again.
-            </Text>
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={[styles.btn, styles.cancel]}
-                onPress={dismissUpdate}>
-                <Text style={styles.cancelText}>Later</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btn, styles.confirm]}
-                onPress={startUpdateInstall}>
-                <Text style={styles.confirmText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={styles.title}>Update available</Text>
-            {/* from -> to, not a bare version number — that's what actually
-                answers "what changes for me". The size sits on the same line,
-                right-aligned: it is the one fact that decides whether someone
-                taps Update while on mobile data. */}
-            <View style={styles.versionRow}>
-              <Text style={styles.versionFrom}>{appVersion || '—'}</Text>
-              <ArrowRight size={13} color={C.faint} strokeWidth={2.4} />
-              <Text style={styles.versionTo}>{info?.version}</Text>
-              {!!size && <Text style={styles.size}>{size}</Text>}
-            </View>
-            {!!notes && (
-              <Text style={styles.message} numberOfLines={6}>
-                {notes}
+        <View style={styles.text}>
+          <Text style={styles.title}>{title}</Text>
+          {downloading ? (
+            <>
+              <View style={styles.barTrack}>
+                <View
+                  style={[styles.barFill, {width: `${Math.max(4, pct)}%`}]}
+                />
+              </View>
+              <Text style={styles.meta}>
+                {pct}%{size ? ` of ${size}` : ''}
               </Text>
-            )}
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={[styles.btn, styles.cancel]}
-                onPress={dismissUpdate}>
-                <Text style={styles.cancelText}>Later</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btn, styles.confirm]}
-                onPress={startUpdateInstall}>
-                <Text style={styles.confirmText}>Update</Text>
-              </TouchableOpacity>
-            </View>
-          </>
+            </>
+          ) : (
+            <>
+              <Text style={styles.message} numberOfLines={3}>
+                {message}
+              </Text>
+              <View style={styles.actions}>
+                <TouchableOpacity
+                  style={styles.install}
+                  onPress={startUpdateInstall}
+                  accessibilityRole="button">
+                  <Text style={styles.installText}>
+                    {failed ? 'Retry' : 'Install'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.later}
+                  onPress={dismissUpdate}
+                  accessibilityRole="button">
+                  <Text style={styles.laterText}>Later</Text>
+                </TouchableOpacity>
+                {!failed && !!size && <Text style={styles.size}>{size}</Text>}
+              </View>
+            </>
+          )}
+        </View>
+        {!downloading && (
+          <TouchableOpacity
+            onPress={dismissUpdate}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close">
+            <X size={18} color={C.sub} strokeWidth={2.2} />
+          </TouchableOpacity>
         )}
       </View>
-    </Sheet>
+    </Animated.View>
+  );
+}
+
+function Notice() {
+  const close = () => noticeSeen.set(true);
+  return (
+    <Animated.View
+      entering={FadeInDown.duration(260)}
+      exiting={FadeOutDown.duration(180)}
+      style={styles.card}>
+      <View style={styles.row}>
+        <View style={styles.badge}>
+          <ChartColumn size={18} color={C.accent} strokeWidth={2.2} />
+        </View>
+        <View style={styles.text}>
+          <Text style={styles.title}>Usage statistics</Text>
+          <Text style={styles.message}>{ANALYTICS_NOTE}</Text>
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={styles.install}
+              onPress={close}
+              accessibilityRole="button">
+              <Text style={styles.installText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  // Scrim, handle, rounded top and the slide all live in <Sheet>.
-  sheet: {},
-  body: {paddingHorizontal: S.gutter, paddingTop: 6, paddingBottom: 18},
+  card: {
+    position: 'absolute',
+    left: S.gutter,
+    right: S.gutter,
+    bottom: BOTTOM_INSET + 8,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: C.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    shadowOffset: {width: 0, height: 6},
+  },
+  row: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
   badge: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(29,185,84,0.14)',
-    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(29,185,84,0.35)',
+    backgroundColor: 'rgba(29,185,84,0.10)',
   },
-  badgeWarn: {backgroundColor: 'rgba(255,107,107,0.14)'},
-  title: {color: C.text, fontSize: 18, fontWeight: '800'},
-  versionRow: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 6},
-  versionFrom: {color: C.faint, fontSize: 13, fontWeight: '600'},
-  versionTo: {color: C.accent, fontSize: 14, fontWeight: '800'},
-  size: {color: C.faint, fontSize: 13, marginLeft: 'auto'},
-  message: {color: C.sub, fontSize: 13, lineHeight: 19, marginTop: 10},
+  badgeWarn: {
+    borderColor: 'rgba(255,107,107,0.35)',
+    backgroundColor: 'rgba(255,107,107,0.10)',
+  },
+  text: {flex: 1, minWidth: 0},
+  title: {color: C.text, fontSize: 15, fontWeight: '800'},
+  message: {color: C.sub, fontSize: 13, lineHeight: 19, marginTop: 4},
   actions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 22,
-  },
-  btn: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-    minWidth: 88,
     alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
   },
-  cancel: {backgroundColor: C.surface},
-  cancelText: {color: C.text, fontWeight: '700', fontSize: 14},
-  confirm: {backgroundColor: C.accent},
-  confirmText: {color: C.bg, fontWeight: '800', fontSize: 14},
+  install: {
+    backgroundColor: C.accent,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  installText: {color: C.bg, fontWeight: '800', fontSize: 14},
+  later: {paddingHorizontal: 14, paddingVertical: 9},
+  laterText: {color: C.text, fontWeight: '700', fontSize: 14},
+  size: {color: C.faint, fontSize: 12, marginLeft: 'auto'},
   barTrack: {
-    height: 6,
+    height: 5,
     borderRadius: 3,
     backgroundColor: 'rgba(255,255,255,0.14)',
-    marginTop: 16,
+    marginTop: 12,
     overflow: 'hidden',
   },
   barFill: {height: '100%', borderRadius: 3, backgroundColor: C.accent},
-  pct: {color: C.sub, fontSize: 12, marginTop: 8, textAlign: 'right'},
+  meta: {color: C.sub, fontSize: 12, marginTop: 6},
 });

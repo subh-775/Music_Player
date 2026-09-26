@@ -237,4 +237,15 @@ dependencies {
     // the platform's own answer to the problem (it ships in every Material
     // music app) — the WebView build used a canvas, which RN doesn't have.
     implementation 'androidx.palette:palette:1.0.0'
+
+    // Usage statistics (AnalyticsModule.kt). Inert without google-services.json.
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.firebase:firebase-analytics'
+}
+
+// Firebase's config is not in the repo: CI writes android/app/google-services.json
+// from the GOOGLE_SERVICES_JSON secret. Without it (contributors, forks) the
+// plugin is skipped and analytics stays off, rather than the build failing.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
 }

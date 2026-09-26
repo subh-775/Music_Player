@@ -20,7 +20,9 @@ import {
   Radio,
   RefreshCw,
   SlidersHorizontal,
+  ChartColumn,
 } from '../icons';
+import {ANALYTICS_NOTE} from '../analytics';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 // Aliased: this file already has react-native's own Animated, for the refresh
 // glyph's rotation loop. Two different `Animated`s in one file is a bug waiting
@@ -1012,6 +1014,10 @@ export function SettingsScreen({
             />
           </Section>
         </View>
+
+        <Section title="Usage statistics" Icon={ChartColumn}>
+          <Row label="What Relaxify collects" hint={ANALYTICS_NOTE} />
+        </Section>
 
         <TouchableOpacity
           style={styles.reset}

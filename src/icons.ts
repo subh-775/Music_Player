@@ -12,6 +12,7 @@ export {default as ArrowRight} from 'lucide-react-native/dist/esm/icons/arrow-ri
 export {default as ArrowUpRight} from 'lucide-react-native/dist/esm/icons/arrow-up-right';
 export {default as AudioLines} from 'lucide-react-native/dist/esm/icons/audio-lines';
 export {default as BookOpen} from 'lucide-react-native/dist/esm/icons/book-open';
+export {default as ChartColumn} from 'lucide-react-native/dist/esm/icons/chart-column';
 export {default as Check} from 'lucide-react-native/dist/esm/icons/check';
 export {default as CheckSquare} from 'lucide-react-native/dist/esm/icons/square-check-big';
 export {default as CheckSquare2} from 'lucide-react-native/dist/esm/icons/square-check';

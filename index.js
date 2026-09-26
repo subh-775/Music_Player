@@ -12,6 +12,9 @@ import {AppRegistry} from 'react-native';
 import TrackPlayer from 'react-native-track-player';
 import App from './App';
 import {name as appName} from './app.json';
+import {reportErrors} from './src/analytics';
+
+reportErrors();
 
 AppRegistry.registerComponent(appName, () => App);
 

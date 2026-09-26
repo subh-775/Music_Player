@@ -41,6 +41,7 @@ import {TrackRow, listWindowing} from '../components/TrackRow';
 import {forgetSearch, rememberSearch, useSearchHistory} from '../searchHistory';
 import {BOTTOM_INSET} from '../layout';
 import {MenuMark} from '../components/MenuMark';
+import {logEvent} from '../analytics';
 
 /** A public Spotify playlist/album link (or spotify: URI). */
 export function isSpotifyUrl(text: string): boolean {
@@ -123,6 +124,7 @@ export const SearchScreen = React.memo(function SearchScreen({
       return;
     }
     Keyboard.dismiss();
+    logEvent('search', {search_term: text});
     setBusy(true);
     setError('');
     setSuggestions([]);

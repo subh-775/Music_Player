@@ -80,6 +80,7 @@ import {applyAudioEffects} from './src/audioEffects';
 import {toggleFollow} from './src/artists';
 import {toast} from './src/toast';
 import {diag} from './src/diag';
+import {logEvent} from './src/analytics';
 
 /**
  * Where "Help" goes.
@@ -358,6 +359,7 @@ function Shell() {
   }, []);
 
   const switchTab = useCallback((next: Tab) => {
+    logEvent('screen_view', {screen_name: next});
     setTab(next);
     setCollection(null);
     setArtist(null);

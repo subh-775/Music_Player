@@ -22,6 +22,9 @@ buildscript {
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
         // Pinned to match the working Fix-Spotify build (Kotlin 1.9.24 / AGP 8.5).
         classpath("com.chaquo.python:gradle:15.0.1")
+        // Firebase config (google-services.json -> resources). Applied by the app
+        // module only when that file exists; see app/build.gradle.
+        classpath("com.google.gms:google-services:4.4.2")
     }
 }
 

@@ -15,6 +15,7 @@ import {apiUrl, getDownloadStatus, startDownload, type Track} from './backend';
 import {getBestArtworkUrl, getDownloadKey} from './tracks';
 import {createStore, asArray, useStoreSelector} from './storage';
 import {toast} from './toast';
+import {logEvent, songParams} from './analytics';
 
 /**
  * Artwork for downloaded songs, persisted.
@@ -200,9 +201,14 @@ function ensurePolling() {
             // the Downloaded collection and every ⋮ sheet outside Library were
             // stale until you happened to open the tab.
             onDownloadComplete.forEach(fn => fn());
+            logEvent('song_downloaded', songParams(job.track));
           } else if (t.status === 'failed' || t.status === 'error') {
             job.status = 'error';
             job.error = t.error;
+            logEvent('download_failed', {
+              ...songParams(job.track),
+              error: String(t.error ?? ''),
+            });
           } else {
             job.status = 'downloading';
           }

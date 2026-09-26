@@ -34,6 +34,7 @@ import {
   normalizeTrack,
 } from './tracks';
 import {getArtworkColor} from './artworkColor';
+import {logEvent, songParams} from './analytics';
 import {
   applyAudioEffects,
   endCrossfade,
@@ -344,6 +345,10 @@ export async function setupPlayer(): Promise<boolean> {
       } catch {}
     });
 
+    TrackPlayer.addEventListener(Event.PlaybackError, e => {
+      logEvent('playback_error', {message: e.message, code: e.code});
+    });
+
     TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async e => {
       // The "play this soon" window is relative to the current song — a new song
       // starts a fresh one, so anything queued now goes right after it again.
@@ -376,6 +381,7 @@ export async function setupPlayer(): Promise<boolean> {
       const src = sourceTrackFor(e.track ?? null);
       if (src) {
         remember(src);
+        logEvent('song_played', songParams(src));
       }
       // Re-read the mirror, warm the covers around the new track and save the
       // session — once the skipping stops. Everything above this line has
@@ -993,13 +999,15 @@ export async function skipNext(): Promise<void> {
 }
 
 /** Restart the track first; only jump back when already near the start — the
- *  behaviour every other player has, so one stray tap can't lose your place. */
-export async function skipPrevious(): Promise<void> {
+ *  behaviour every other player has, so one stray tap can't lose your place.
+ *  `always` skips the restart: a swipe has already shown the previous cover
+ *  gliding in, so it must land on that song. */
+export async function skipPrevious(always = false): Promise<void> {
   cancelCrossfade();
   markManualTrackChange();
   try {
     const pos = await TrackPlayer.getPosition();
-    if (pos > 3) {
+    if (!always && pos > 3) {
       await TrackPlayer.seekTo(0);
       return;
     }

@@ -33,8 +33,8 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
 import {Headphones, Pause, Play} from '../icons';
@@ -42,8 +42,6 @@ import {C, S} from '../theme';
 import {cleanText, getBestArtworkUrl, splitArtists} from '../tracks';
 import {Marquee} from './Marquee';
 import {
-  skipNext,
-  skipPrevious,
   sourceTrackFor,
   togglePlay,
   useActiveTrack,
@@ -65,8 +63,7 @@ import {
 import type {Track} from '../backend';
 import {AddButton} from './AddButton';
 import {surfaceTint, useArtworkColor} from '../artworkColor';
-
-const SWIPE_COMMIT = 56;
+import {useSongSwipe, type Neighbour} from '../songSwipe';
 
 /** Concentric corners: PAD + ART_R = BAR_R, so the two curves are parallel.
  *  ART_R comes from playerSheet because the full player's cover has to round
@@ -134,62 +131,13 @@ export const PlayerBar = React.memo(function PlayerBar({
    *  expansion that follows — without it the bar feels like a static strip. */
   const press = useSharedValue(0);
 
-  const commit = useCallback(
-    (dir: 1 | -1) => {
-      // Fire the skip NOW — the engine advances while this animates.
-      (dir === 1 ? skipNext() : skipPrevious()).catch(() => {});
-      // Jump to the far side with no animation, then travel back in, so the
-      // incoming song enters from the direction the finger was heading rather
-      // than springing back from where it was released.
-      dragX.value = dir * 90;
-      dragX.value = withTiming(0, {duration: 220});
-    },
-    [dragX],
-  );
-
-  /** Let go without committing: back to rest, carrying the finger's speed. */
-  const release = useCallback(() => {
-    dragX.value = withSpring(0, {
-      damping: 20,
-      stiffness: 220,
-      overshootClamping: true,
-    });
-  }, [dragX]);
-
-  /**
-   * Recognised natively.
-   *
-   * This used `onMoveShouldSetPanResponderCapture` — a CAPTURE handler, which
-   * intercepts touches on the way down and can take one from a child Touchable
-   * that was about to handle it. It was there because the plain variant could
-   * never win against the bar's own buttons. activeOffsetX needs neither trick:
-   * a stationary press goes to whichever button is under it, and a horizontal
-   * drag is claimed the moment it is unambiguously horizontal.
-   */
-  const swipe = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetX([-14, 14])
-        .failOffsetY([-18, 18])
-        .onUpdate(e => {
-          // Damped at 0.6, the same feel as the full player's artwork: the row
-          // tracks the thumb without travelling the whole width of the screen,
-          // so a small swipe still reads as a small swipe.
-          dragX.value = e.translationX * 0.6;
-        })
-        .onEnd((e, success) => {
-          if (success && e.translationX <= -SWIPE_COMMIT) {
-            runOnJS(commit)(1);
-            return;
-          }
-          if (success && e.translationX >= SWIPE_COMMIT) {
-            runOnJS(commit)(-1);
-            return;
-          }
-          runOnJS(release)();
-        }),
-    [commit, release, dragX],
-  );
+  /** Sideways to change song — shared with the full player; see songSwipe. */
+  const {
+    gesture: swipe,
+    neighbour,
+    span: swipeSpan,
+    onCoverLoad,
+  } = useSongSwipe({slide: dragX, active, failY: 18});
 
   /**
    * Pull UP to open the full player, under the finger.
@@ -397,23 +345,28 @@ export const PlayerBar = React.memo(function PlayerBar({
             </Svg>
           )}
 
-          {/* Artwork and text travel together under the finger. */}
-          <Animated.View style={[styles.slider, slideStyle]}>
-            <TouchableOpacity
-              style={styles.main}
-              activeOpacity={1}
-              onPressIn={() => {
-                // Every open starts with a touch here, tap or pull, and the
-                // bar is at rest at this instant — the one moment its
-                // measurement is guaranteed to be the real one.
-                measureMiniArt();
-                press.value = withTiming(1, {duration: 90});
-              }}
-              onPressOut={() => {
-                press.value = withTiming(0, {duration: 160});
-              }}
-              onPress={onExpand}>
-              {/* The wrapper is what the morph aims at — one rect whether
+          {/* Artwork and text travel together under the finger, inside a
+              window that clips at the controls, with the neighbouring song
+              drawn one window-width to the side (see songSwipe). */}
+          <View
+            style={styles.window}
+            onLayout={e => (swipeSpan.value = e.nativeEvent.layout.width)}>
+            <Animated.View style={[styles.slider, slideStyle]}>
+              <TouchableOpacity
+                style={styles.main}
+                activeOpacity={1}
+                onPressIn={() => {
+                  // Every open starts with a touch here, tap or pull, and the
+                  // bar is at rest at this instant — the one moment its
+                  // measurement is guaranteed to be the real one.
+                  measureMiniArt();
+                  press.value = withTiming(1, {duration: 90});
+                }}
+                onPressOut={() => {
+                  press.value = withTiming(0, {duration: 160});
+                }}
+                onPress={onExpand}>
+                {/* The wrapper is what the morph aims at — one rect whether
                   there is a cover or a placeholder, and a plain View so
                   measureInWindow has something stable to report.
 
@@ -423,47 +376,52 @@ export const PlayerBar = React.memo(function PlayerBar({
                   decoded bitmap instead of starting a fetch at the exact
                   moment the panel opens — so this is load-bearing, not an
                   oversight to tidy up later. */}
-              <View
-                ref={artRef}
-                onLayout={measureMiniArt}
-                style={styles.art}
-                collapsable={false}>
-                {artwork ? (
-                  <Image
-                    key={artwork}
-                    source={{uri: artwork}}
-                    style={styles.artFill}
-                    fadeDuration={0}
-                  />
-                ) : (
-                  <View style={[styles.artFill, styles.artFallback]} />
-                )}
-              </View>
+                <View
+                  ref={artRef}
+                  onLayout={measureMiniArt}
+                  style={styles.art}
+                  collapsable={false}>
+                  {artwork ? (
+                    <Image
+                      key={artwork}
+                      source={{uri: artwork}}
+                      style={styles.artFill}
+                      fadeDuration={0}
+                      onLoad={() => onCoverLoad(artwork)}
+                    />
+                  ) : (
+                    <View style={[styles.artFill, styles.artFallback]} />
+                  )}
+                </View>
 
-              <View style={styles.text}>
-                <Marquee
-                  text={cleanText(String(active.title ?? ''))}
-                  style={styles.title}
-                />
-                {output ? (
-                  // The name only. The 10px glyph that used to sit beside it
-                  // has moved into the controls at control size, which is where
-                  // it is actually legible.
-                  <Text style={styles.output} numberOfLines={1}>
-                    {output}
-                  </Text>
-                ) : (
+                <View style={styles.text}>
                   <Marquee
-                    text={cleanText(String(active.artist ?? ''))}
-                    style={styles.artist}
-                    ticker={
-                      splitArtists(String(active.artist ?? '')).length > 1
-                    }
+                    text={cleanText(String(active.title ?? ''))}
+                    style={styles.title}
                   />
-                )}
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
+                  {output ? (
+                    // The name only. The 10px glyph that used to sit beside it
+                    // has moved into the controls at control size, which is where
+                    // it is actually legible.
+                    <Text style={styles.output} numberOfLines={1}>
+                      {output}
+                    </Text>
+                  ) : (
+                    <Marquee
+                      text={cleanText(String(active.artist ?? ''))}
+                      style={styles.artist}
+                      ticker={
+                        splitArtists(String(active.artist ?? '')).length > 1
+                      }
+                    />
+                  )}
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
+            {!!neighbour && (
+              <NeighbourSlide n={neighbour} slide={dragX} span={swipeSpan} />
+            )}
+          </View>
 
           {/* Output, like, play — three identical 38x38 slots, so the row reads
             as one rhythm instead of three different shapes. The headphones are
@@ -534,7 +492,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.1)',
   },
+  window: {flex: 1, minWidth: 0, flexDirection: 'row', overflow: 'hidden'},
   slider: {flex: 1, minWidth: 0, flexDirection: 'row'},
+  neighbour: {position: 'absolute', top: 0, bottom: 0, left: 0, right: 0},
   main: {
     flex: 1,
     flexDirection: 'row',
@@ -610,3 +570,47 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.85)',
   },
 });
+
+/** The next or previous song, drawn beside the current one while a swipe is
+ *  under way. The same layout as the bar's own row, without the controls. */
+function NeighbourSlide({
+  n,
+  slide,
+  span,
+}: {
+  n: Neighbour;
+  slide: SharedValue<number>;
+  span: SharedValue<number>;
+}) {
+  const style = useAnimatedStyle(() => ({
+    // One window-width to the side of the current song.
+    transform: [{translateX: slide.value + n.dir * span.value}],
+  }));
+  return (
+    <Animated.View
+      style={[styles.slider, styles.neighbour, style]}
+      pointerEvents="none">
+      <View style={styles.main}>
+        <View style={styles.art}>
+          {n.art ? (
+            <Image
+              source={{uri: n.art}}
+              style={styles.artFill}
+              fadeDuration={0}
+            />
+          ) : (
+            <View style={[styles.artFill, styles.artFallback]} />
+          )}
+        </View>
+        <View style={styles.text}>
+          <Text style={styles.title} numberOfLines={1}>
+            {cleanText(String(n.track.title ?? ''))}
+          </Text>
+          <Text style={styles.artist} numberOfLines={1}>
+            {cleanText(String(n.track.artist ?? ''))}
+          </Text>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}

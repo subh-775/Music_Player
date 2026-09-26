@@ -103,6 +103,20 @@ jobs:
             *)  echo "variant=${{ inputs.variant }}" >> "$GITHUB_OUTPUT" ;;
           esac
 
+      - name: Firebase config
+        # Analytics (AnalyticsModule.kt) only exists in builds made here: the
+        # config is a secret, not a file in the repo, so forks and local builds
+        # compile without it and send nothing.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "Firebase config written"
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON is not set; this build has no analytics"
+          fi
+
       - name: Build APK
         working-directory: android
         run: |
