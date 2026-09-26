@@ -9,8 +9,12 @@
  * two animations with a cut between them.
  *
  * Now it is a carousel of three:
- *   - the neighbour (next or previous song, whichever way you are dragging)
- *     sits one `span` to the side, already drawn, and moves with the finger;
+ *   - both neighbours (previous and next song) sit one `span` to either side,
+ *     drawn in advance whenever the song changes, and move with the finger.
+ *     A drag itself does no React work at all, only UI-thread transforms: the
+ *     first version built the neighbour when the drag began, and that rebuild
+ *     showed up on the phone as slow UI-thread frames right as the finger
+ *     started moving;
  *   - a release glides on with the finger's velocity until the neighbour is
  *     exactly where the cover was;
  *   - then the swap. The neighbour stays parked in the middle until the real
@@ -47,6 +51,21 @@ const FLICK = 700;
 const LAND_TIMEOUT_MS = 700;
 
 export type Neighbour = {dir: 1 | -1; track: RNTPTrack; art: string};
+export type Sides = {prev: Neighbour | null; next: Neighbour | null};
+
+const NONE: Sides = {prev: null, next: null};
+
+function side(dir: 1 | -1): Neighbour | null {
+  const t = peekAdjacentTrack(dir);
+  return t ? {dir, track: t, art: coverUrl(t)} : null;
+}
+
+function same(a: Neighbour | null, b: Neighbour | null): boolean {
+  return (
+    a === b ||
+    (!!a && !!b && a.art === b.art && trackKey(a.track) === trackKey(b.track))
+  );
+}
 
 /** The cover URL a player shows for this track — the same rule both use. */
 export function coverUrl(t: RNTPTrack | null | undefined): string {
@@ -75,10 +94,9 @@ export function useSongSwipe({
   const span = useSharedValue(0);
   /** Set from a commit until the swap: a second swipe waits for it. */
   const busy = useSharedValue(false);
-  const dir = useSharedValue(0);
-  const [neighbour, setNeighbour] = useState<Neighbour | null>(null);
-  const neighbourRef = useRef(neighbour);
-  neighbourRef.current = neighbour;
+  const [sides, setSides] = useState<Sides>(NONE);
+  const sidesRef = useRef(sides);
+  sidesRef.current = sides;
 
   const landing = useRef<{
     key: string;
@@ -91,12 +109,21 @@ export function useSongSwipe({
   const activeKeyRef = useRef(activeKey);
   activeKeyRef.current = activeKey;
 
-  const pin = useCallback((d: number) => {
-    const t = d === 1 || d === -1 ? peekAdjacentTrack(d) : null;
-    setNeighbour(t ? {dir: d as 1 | -1, track: t, art: coverUrl(t)} : null);
+  /** Re-read both neighbours from the queue. Not while landing: the one being
+   *  landed on must stay exactly as it is until the swap. A no-op render when
+   *  nothing changed. */
+  const refresh = useCallback(() => {
+    if (landing.current) {
+      return;
+    }
+    const prev = side(-1);
+    const next = side(1);
+    setSides(cur =>
+      same(cur.prev, prev) && same(cur.next, next) ? cur : {prev, next},
+    );
   }, []);
 
-  const clear = useCallback(() => setNeighbour(null), []);
+  useEffect(refresh, [activeKey, refresh]);
 
   const settle = useCallback(() => {
     const l = landing.current;
@@ -105,16 +132,15 @@ export function useSongSwipe({
     }
     clearTimeout(l.timer);
     landing.current = null;
-    // The offset and the flags in one UI-thread step; the neighbour is
-    // removed only after, so there is never a frame with neither in place.
+    // The offset in one UI-thread step; the neighbours are re-read only
+    // after, once they are both back off screen.
     runOnUI(() => {
       'worklet';
       slide.value = 0;
-      dir.value = 0;
       busy.value = false;
-      runOnJS(clear)();
+      runOnJS(refresh)();
     })();
-  }, [slide, dir, busy, clear]);
+  }, [slide, busy, refresh]);
 
   const tryLand = useCallback(() => {
     const l = landing.current;
@@ -152,13 +178,11 @@ export function useSongSwipe({
     (d: 1 | -1, velocity: number) => {
       // Skip NOW, so the engine and the title move while the cover glides.
       (d === 1 ? skipNext() : skipPrevious(true)).catch(() => {});
-      const n = neighbourRef.current;
-      if (!n || n.dir !== d) {
+      const n = d === 1 ? sidesRef.current.next : sidesRef.current.prev;
+      if (!n) {
         // Nothing drawn to glide to (the end of the queue): back to rest,
         // and the new song replaces this one in place.
         busy.value = false;
-        dir.value = 0;
-        setNeighbour(null);
         slide.value = withSpring(0, {damping: 20, stiffness: 220});
         return;
       }
@@ -173,7 +197,7 @@ export function useSongSwipe({
         },
       );
     },
-    [slide, span, dir, busy, onGlided],
+    [slide, span, busy, onGlided],
   );
 
   const gesture = useMemo(
@@ -181,16 +205,14 @@ export function useSongSwipe({
       Gesture.Pan()
         .activeOffsetX([-14, 14])
         .failOffsetY([-failY, failY])
+        .onStart(() => {
+          // Catches a queue edited since the song began (play next, a
+          // shuffle). Renders nothing unless a neighbour actually changed.
+          runOnJS(refresh)();
+        })
         .onUpdate(e => {
-          if (busy.value) {
-            return;
-          }
-          slide.value = e.translationX;
-          // JS hears only when the direction flips, not every frame.
-          const d = e.translationX < 0 ? 1 : e.translationX > 0 ? -1 : 0;
-          if (d !== dir.value) {
-            dir.value = d;
-            runOnJS(pin)(d);
+          if (!busy.value) {
+            slide.value = e.translationX;
           }
         })
         .onEnd((e, success) => {
@@ -206,26 +228,15 @@ export function useSongSwipe({
             runOnJS(commit)(next ? 1 : -1, vx);
             return;
           }
-          // Back to rest. The neighbour stays drawn until it is fully back
-          // off screen; dropping it at release made it vanish mid-view.
-          slide.value = withSpring(
-            0,
-            {
-              damping: 20,
-              stiffness: 220,
-              overshootClamping: true,
-              velocity: vx,
-            },
-            finished => {
-              if (finished) {
-                dir.value = 0;
-                runOnJS(pin)(0);
-              }
-            },
-          );
+          slide.value = withSpring(0, {
+            damping: 20,
+            stiffness: 220,
+            overshootClamping: true,
+            velocity: vx,
+          });
         }),
-    [failY, slide, dir, busy, pin, commit],
+    [failY, slide, busy, refresh, commit],
   );
 
-  return {gesture, neighbour, span, onCoverLoad};
+  return {gesture, sides, span, onCoverLoad};
 }

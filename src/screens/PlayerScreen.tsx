@@ -61,6 +61,7 @@ import Animated, {
   useSharedValue,
   withSpring,
   interpolateColor,
+  type SharedValue,
 } from 'react-native-reanimated';
 import {C} from '../theme';
 import {getLyrics, type Lyrics, type Track} from '../backend';
@@ -82,7 +83,7 @@ import {
   useIsPlaying,
   useProgress,
 } from '../player';
-import {useSongSwipe} from '../songSwipe';
+import {useSongSwipe, type Neighbour} from '../songSwipe';
 import {useAudioOutput} from '../audioOutput';
 import {useSettings} from '../store';
 import {
@@ -619,28 +620,19 @@ export const PlayerScreen = React.memo(function PlayerScreen({
 
   /**
    * Swipe LEFT/RIGHT on the artwork to change song — the carousel the mini
-   * player uses too; see songSwipe. The neighbouring song's cover and title
-   * are drawn one `span` to the side and travel with the finger.
+   * player uses too; see songSwipe. Both neighbouring songs' covers and
+   * titles are drawn one `span` to either side and travel with the finger.
    *
    * activeOffsetX + failOffsetY decide the axis natively, and Gesture.Race
    * below guarantees only this or the dismiss can ever claim the touch.
    */
   const {
     gesture: skip,
-    neighbour,
+    sides,
     span: swipeSpan,
     onCoverLoad,
   } = useSongSwipe({slide, active, failY: 20});
-  const nDir = neighbour?.dir ?? 1;
-  const previewTitle = neighbour
-    ? cleanText(String(neighbour.track.title ?? ''))
-    : '';
-  const previewArtists = neighbour
-    ? splitArtists(String(neighbour.track.artist ?? '')).join(', ')
-    : '';
-  const neighbourArtStyle = useAnimatedStyle(() => ({
-    transform: [{translateX: slide.value + nDir * swipeSpan.value}],
-  }));
+  const neighbours = [sides.prev, sides.next];
 
   // Whichever recognises first wins outright; they can never both claim, and
   // neither can hand over halfway through.
@@ -847,11 +839,6 @@ export const PlayerScreen = React.memo(function PlayerScreen({
   const metaStyle = useAnimatedStyle(() => ({
     transform: [{translateX: slide.value}],
   }));
-  // The INCOMING title, one span to the side of the current one — the same
-  // offset as the incoming cover, so the two land together.
-  const metaPreviewStyle = useAnimatedStyle(() => ({
-    transform: [{translateX: slide.value + nDir * swipeSpan.value}],
-  }));
 
   /**
    * Repeat is a two-state switch: off, or repeat THIS song.
@@ -1032,26 +1019,18 @@ export const PlayerScreen = React.memo(function PlayerScreen({
                   </Animated.View>
                 </Animated.View>
 
-                {/* The neighbouring cover, laid out exactly like the one
-                    above, one span to the side. Only while a swipe is on. */}
-                {!!neighbour && (
-                  <View
-                    style={[StyleSheet.absoluteFill, styles.artArea]}
-                    pointerEvents="none">
-                    <Animated.View style={[styles.artFrame, neighbourArtStyle]}>
-                      <View style={styles.artHolder}>
-                        {neighbour.art ? (
-                          <Image
-                            source={{uri: neighbour.art}}
-                            style={styles.art}
-                            fadeDuration={0}
-                          />
-                        ) : (
-                          <View style={[styles.art, styles.artFallback]} />
-                        )}
-                      </View>
-                    </Animated.View>
-                  </View>
+                {/* The neighbouring covers, laid out exactly like the one
+                    above, one span to either side (off screen at rest). */}
+                {neighbours.map(
+                  n =>
+                    n && (
+                      <NeighbourCover
+                        key={n.dir}
+                        n={n}
+                        slide={slide}
+                        span={swipeSpan}
+                      />
+                    ),
                 )}
 
                 {/* Double-tap zones over the artwork edges. They claim a TAP
@@ -1106,21 +1085,18 @@ export const PlayerScreen = React.memo(function PlayerScreen({
                 </View>
               </Animated.View>
 
-              {/* The incoming title, entering from the side you're dragging
-                  toward — the same span offset the artwork uses, so the two
-                  land in sync. Rendered only mid-gesture; the real swap
-                  happens in `active` once commit() fires. */}
-              {!!neighbour && (
-                <Animated.View
-                  pointerEvents="none"
-                  style={[styles.meta, styles.metaPreview, metaPreviewStyle]}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {previewTitle}
-                  </Text>
-                  <Text style={styles.artist} numberOfLines={1}>
-                    {previewArtists}
-                  </Text>
-                </Animated.View>
+              {/* The neighbouring titles, one span to either side — the
+                  same offset as their covers, so each lands with its own. */}
+              {neighbours.map(
+                n =>
+                  n && (
+                    <NeighbourMeta
+                      key={n.dir}
+                      n={n}
+                      slide={slide}
+                      span={swipeSpan}
+                    />
+                  ),
               )}
             </View>
 
@@ -1706,6 +1682,53 @@ const LyricsPane = React.memo(function LyricsPane({
     </ScrollView>
   );
 });
+
+type NeighbourProps = {
+  n: Neighbour;
+  slide: SharedValue<number>;
+  span: SharedValue<number>;
+};
+
+/** A neighbouring song's cover, one span to its side of the real one. */
+function NeighbourCover({n, slide, span}: NeighbourProps) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{translateX: slide.value + n.dir * span.value}],
+  }));
+  return (
+    <View
+      style={[StyleSheet.absoluteFill, styles.artArea]}
+      pointerEvents="none">
+      <Animated.View style={[styles.artFrame, style]}>
+        <View style={styles.artHolder}>
+          {n.art ? (
+            <Image source={{uri: n.art}} style={styles.art} fadeDuration={0} />
+          ) : (
+            <View style={[styles.art, styles.artFallback]} />
+          )}
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+/** A neighbouring song's title and artists, beside the real ones. */
+function NeighbourMeta({n, slide, span}: NeighbourProps) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{translateX: slide.value + n.dir * span.value}],
+  }));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.meta, styles.metaPreview, style]}>
+      <Text style={styles.title} numberOfLines={1}>
+        {cleanText(String(n.track.title ?? ''))}
+      </Text>
+      <Text style={styles.artist} numberOfLines={1}>
+        {splitArtists(String(n.track.artist ?? '')).join(', ')}
+      </Text>
+    </Animated.View>
+  );
+}
 
 const styles = StyleSheet.create({
   // Below the bottom sheets (40) so a sheet raised from the ⊕ in here sits on

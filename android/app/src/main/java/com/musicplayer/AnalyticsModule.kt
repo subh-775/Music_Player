@@ -1,6 +1,7 @@
 package com.musicplayer
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.os.Bundle
 import android.provider.Settings
 import com.facebook.react.bridge.ReactApplicationContext
@@ -22,7 +23,9 @@ import java.security.MessageDigest
  * The id is a hash of Android's per-app device id, so one phone stays one
  * user through reinstalls and "clear data", where Firebase's own id would
  * start over and count the same person twice. The raw device id never leaves
- * the phone.
+ * the phone. It is set in MainApplication.onCreate (`identify`), before any
+ * screen opens: set here, when React loads, it arrived after Firebase's own
+ * first events, and one phone showed up as two users.
  *
  * Off unless the build has a Firebase config: google-services.json is not in
  * the repo (CI writes it from a secret), so a contributor's or a fork's build
@@ -32,26 +35,29 @@ class AnalyticsModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule
 
     override fun getName() = "Analytics"
 
-    private val fa: FirebaseAnalytics? = runCatching {
-        val configured =
-            ctx.resources.getIdentifier("google_app_id", "string", ctx.packageName) != 0
-        if (configured) {
-            FirebaseAnalytics.getInstance(ctx).also { it.setUserId(stableId()) }
-        } else {
-            null
-        }
-    }.getOrNull()
+    private val fa: FirebaseAnalytics? =
+        runCatching { if (configured(ctx)) FirebaseAnalytics.getInstance(ctx) else null }
+            .getOrNull()
 
-    @SuppressLint("HardwareIds")
-    private fun stableId(): String {
-        val raw = Settings.Secure.getString(
-            reactApplicationContext.contentResolver,
-            Settings.Secure.ANDROID_ID,
-        ) ?: return ""
-        return MessageDigest.getInstance("SHA-256")
-            .digest(raw.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-            .take(32)
+    companion object {
+        private fun configured(c: Context) =
+            c.resources.getIdentifier("google_app_id", "string", c.packageName) != 0
+
+        /** Attach the stable id. Called once, from MainApplication.onCreate. */
+        fun identify(c: Context) {
+            if (!configured(c)) return
+            runCatching { FirebaseAnalytics.getInstance(c).setUserId(stableId(c)) }
+        }
+
+        @SuppressLint("HardwareIds")
+        private fun stableId(c: Context): String {
+            val raw = Settings.Secure.getString(c.contentResolver, Settings.Secure.ANDROID_ID)
+                ?: return ""
+            return MessageDigest.getInstance("SHA-256")
+                .digest(raw.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+                .take(32)
+        }
     }
 
     /** Strings and numbers only; Analytics caps a string value at 100 chars. */

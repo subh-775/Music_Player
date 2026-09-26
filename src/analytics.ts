@@ -25,10 +25,25 @@ type AnalyticsNative = {
 
 const native = (NativeModules.Analytics ?? {}) as AnalyticsNative;
 
+/**
+ * The same event twice within this window is one action, not two. Measured on
+ * a phone: starting a song fires the player's track-changed twice (0.3-0.8s
+ * apart), and a re-tapped tab or a double-submitted search did the same, so
+ * plays, searches and screens were all counted double.
+ */
+const REPEAT_MS = 2000;
+let last = {key: '', at: 0};
+
 export function logEvent(
   name: string,
   params: Record<string, string | number> = {},
 ): void {
+  const key = name + JSON.stringify(params);
+  const now = Date.now();
+  if (key === last.key && now - last.at < REPEAT_MS) {
+    return;
+  }
+  last = {key, at: now};
   try {
     native.log?.(name, params);
   } catch {}

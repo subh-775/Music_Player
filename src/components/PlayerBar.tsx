@@ -134,7 +134,7 @@ export const PlayerBar = React.memo(function PlayerBar({
   /** Sideways to change song — shared with the full player; see songSwipe. */
   const {
     gesture: swipe,
-    neighbour,
+    sides,
     span: swipeSpan,
     onCoverLoad,
   } = useSongSwipe({slide: dragX, active, failY: 18});
@@ -346,8 +346,8 @@ export const PlayerBar = React.memo(function PlayerBar({
           )}
 
           {/* Artwork and text travel together under the finger, inside a
-              window that clips at the controls, with the neighbouring song
-              drawn one window-width to the side (see songSwipe). */}
+              window that clips at the controls, with the previous and next
+              songs drawn one window-width to either side (see songSwipe). */}
           <View
             style={styles.window}
             onLayout={e => (swipeSpan.value = e.nativeEvent.layout.width)}>
@@ -418,8 +418,16 @@ export const PlayerBar = React.memo(function PlayerBar({
                 </View>
               </TouchableOpacity>
             </Animated.View>
-            {!!neighbour && (
-              <NeighbourSlide n={neighbour} slide={dragX} span={swipeSpan} />
+            {[sides.prev, sides.next].map(
+              n =>
+                n && (
+                  <NeighbourSlide
+                    key={n.dir}
+                    n={n}
+                    slide={dragX}
+                    span={swipeSpan}
+                  />
+                ),
             )}
           </View>
 

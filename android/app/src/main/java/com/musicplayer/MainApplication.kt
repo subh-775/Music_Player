@@ -35,6 +35,8 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Before anything else logs: see AnalyticsModule.identify.
+    AnalyticsModule.identify(this)
     SoLoader.init(this, false)
     // One typeface on every phone. Without a family name React Native falls
     // back to the device's system font, which is Roboto on one phone, a
